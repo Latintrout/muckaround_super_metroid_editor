@@ -3,6 +3,7 @@ package com.supermetroid.editor.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuDataProvider
 import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.ContextMenuRepresentation
@@ -75,6 +76,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,6 +89,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.IntOffset
@@ -168,8 +171,10 @@ import com.supermetroid.editor.asm.AsmRomPreviewView
 import com.supermetroid.editor.asm.AsmSemanticBridge
 import com.supermetroid.editor.asm.AsmSemanticIndex
 import com.supermetroid.editor.asm.AsmSourceFile
+import com.supermetroid.editor.asm.AsmSourcePaneState
 import com.supermetroid.editor.asm.AsmSourceReplacementPreview
 import com.supermetroid.editor.asm.AsmSourceText
+import com.supermetroid.editor.asm.AsmSourceTextChange
 import com.supermetroid.editor.asm.AsmSourceLinter
 import com.supermetroid.editor.asm.AsmSourceUsage
 import com.supermetroid.editor.asm.AsmWorkspaceState
@@ -1376,17 +1381,26 @@ private fun AsmSourceTree(
     AsmSidebarScrollPane(modifier) {
         if (query.isNotEmpty()) {
             items(results, key = { "${it.fileId}:${it.assetPath}:${it.lineIndex}:${it.columnIndex}:${it.title}" }) { result ->
-                Column(
-                    Modifier.fillMaxWidth().clickable {
-                        result.assetPath?.let(state::openAsset)
-                            ?: result.fileId?.let {
-                                state.openSource(it, result.lineIndex, columnIndex = result.columnIndex)
-                            }
-                    }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                val splitFileId = result.fileId?.takeIf {
+                    state.workspaceKind == AsmWorkspaceKind.PROJECT && !state.isProjectModule(it)
+                }
+                AsmSourceOpenContextMenu(
+                    onOpenInSplit = splitFileId?.let { fileId ->
+                        { state.openSourceInSplit(fileId, result.lineIndex, result.columnIndex) }
+                    },
                 ) {
-                    Text(result.title, fontSize = fs.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(result.detail, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Column(
+                        Modifier.fillMaxWidth().clickable {
+                            result.assetPath?.let(state::openAsset)
+                                ?: result.fileId?.let {
+                                    state.openSource(it, result.lineIndex, columnIndex = result.columnIndex)
+                                }
+                        }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    ) {
+                        Text(result.title, fontSize = fs.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(result.detail, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
                 }
             }
             if (results.isEmpty()) item { Text("No source or address matches", fontSize = fs.detail, modifier = Modifier.padding(8.dp)) }
@@ -1462,21 +1476,30 @@ private fun AsmSourceTree(
                         expandable = true,
                         expanded = expanded,
                         onClick = { state.toggleSourceChapter(source.id) },
+                        onOpenInSplit = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
+                            { state.openSourceInSplit(source.id) }
+                        } else null,
                     )
                 }
                 if (expanded) {
                     source.sections.forEach { section ->
                         item(key = "${source.id}:${section.lineIndex}") {
-                            Row(
-                                Modifier.fillMaxWidth().clickable { state.openSource(source.id, section.lineIndex) }
-                                    .padding(start = 22.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            AsmSourceOpenContextMenu(
+                                onOpenInSplit = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
+                                    { state.openSourceInSplit(source.id, section.lineIndex) }
+                                } else null,
                             ) {
-                                section.address?.let {
-                                    Text(it, fontSize = fs.detail, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.secondary)
-                                    Spacer(Modifier.width(6.dp))
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { state.openSource(source.id, section.lineIndex) }
+                                        .padding(start = 22.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    section.address?.let {
+                                        Text(it, fontSize = fs.detail, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.secondary)
+                                        Spacer(Modifier.width(6.dp))
+                                    }
+                                    Text(section.title, fontSize = fs.detail, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text(section.title, fontSize = fs.detail, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -1485,7 +1508,14 @@ private fun AsmSourceTree(
             item { TreeHeading("Build & symbols") }
             references.forEach { source ->
                 item(key = source.id) {
-                    SourceFileRow(state = state, source = source, onClick = { state.openSource(source.id) })
+                    SourceFileRow(
+                        state = state,
+                        source = source,
+                        onClick = { state.openSource(source.id) },
+                        onOpenInSplit = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
+                            { state.openSourceInSplit(source.id) }
+                        } else null,
+                    )
                 }
             }
         }
@@ -1515,53 +1545,75 @@ private fun SourceFileRow(
     expandable: Boolean = false,
     expanded: Boolean = false,
     onClick: () -> Unit,
+    onOpenInSplit: (() -> Unit)? = null,
     trailingContent: @Composable RowScope.() -> Unit = {},
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val selected = state.selectedFileId == source.id && state.selectedAssetPath == null
-    Row(
-        Modifier.fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        if (expandable) {
-            Text(
-                if (expanded) "▾" else "▸",
-                fontSize = fs.body,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(18.dp),
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    AsmSourceOpenContextMenu(onOpenInSplit) {
+        Row(
+            Modifier.fillMaxWidth()
+                .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            if (expandable) {
                 Text(
-                    source.displayName,
+                    if (expanded) "▾" else "▸",
                     fontSize = fs.body,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(18.dp),
                 )
-                when {
-                    state.hasUnsavedSourceChanges(source.id) -> Text(
-                        "*",
+            }
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        source.displayName,
                         fontSize = fs.body,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.weight(1f),
                     )
-                    !state.isProjectModule(source.id) && source.id in state.projectModifiedFileIds -> Text(
-                        "EDITED",
-                        fontSize = fs.statusBar,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
+                    when {
+                        state.hasUnsavedSourceChanges(source.id) -> Text(
+                            "*",
+                            fontSize = fs.body,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        !state.isProjectModule(source.id) && source.id in state.projectModifiedFileIds -> Text(
+                            "EDITED",
+                            fontSize = fs.statusBar,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+                if (source.description.isNotBlank()) {
+                    Text(source.description, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (source.description.isNotBlank()) {
-                Text(source.description, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+            trailingContent()
         }
-        trailingContent()
+    }
+}
+
+@Composable
+private fun AsmSourceOpenContextMenu(
+    onOpenInSplit: (() -> Unit)?,
+    content: @Composable () -> Unit,
+) {
+    if (onOpenInSplit == null) {
+        content()
+        return
+    }
+    CompositionLocalProvider(LocalContextMenuRepresentation provides ASM_CONTEXT_MENU_REPRESENTATION) {
+        ContextMenuArea(
+            items = {
+                listOf(ContextMenuItem("Open in Split Right") { onOpenInSplit() })
+            },
+            content = content,
+        )
     }
 }
 
@@ -1667,7 +1719,7 @@ internal fun AsmWorkspaceCanvas(
     romParser: RomParser? = null,
     onOpenInEditor: (AsmEditorTarget) -> Unit = {},
     onSaveProject: () -> Boolean = { true },
-    buildProjectRom: (() -> AsmRomPreview?)? = null,
+    onBuildProject: (() -> Unit)? = null,
     onRunInEmulator: (() -> Unit)? = null,
     problemsPaneHeightDp: Float = DEFAULT_ASM_PROBLEMS_HEIGHT_DP,
     onProblemsPaneHeightChange: (Float) -> Unit = {},
@@ -1687,25 +1739,68 @@ internal fun AsmWorkspaceCanvas(
         AsmWelcomeCanvas(state, modifier)
         return
     }
+    var sourceSplitRatio by remember(state) { mutableStateOf(0.5f) }
     val asset = workspace.index.asset(state.selectedAssetPath)
     if (asset != null) {
         AsmAssetCanvas(state, asset, workspace.metadata.romName, semanticIndex, onOpenInEditor, modifier)
     } else {
-        val source = workspace.index.file(state.selectedFileId)
-        if (source == null) AsmWelcomeCanvas(state, modifier)
-        else AsmSourceCanvas(
-            state = state,
-            index = workspace.index,
-            source = source,
-            semanticIndex = semanticIndex,
-            onOpenInEditor = onOpenInEditor,
-            onSaveProject = onSaveProject,
-            buildProjectRom = buildProjectRom,
-            onRunInEmulator = onRunInEmulator,
-            problemsPaneHeightDp = problemsPaneHeightDp,
-            onProblemsPaneHeightChange = onProblemsPaneHeightChange,
-            modifier = modifier,
-        )
+        val panes = state.sourcePanes.mapNotNull { pane ->
+            workspace.index.file(pane.fileId)?.let { pane to it }
+        }
+        if (panes.isEmpty()) {
+            AsmWelcomeCanvas(state, modifier)
+        } else {
+            Column(modifier.fillMaxSize()) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    val splitWidthPx = with(LocalDensity.current) { maxWidth.toPx() }.coerceAtLeast(1f)
+                    Row(Modifier.fillMaxSize()) {
+                        panes.forEachIndexed { paneIndex, (pane, source) ->
+                            key(pane.id) {
+                                if (paneIndex > 0) {
+                                    DraggableDividerVertical(
+                                        width = 5.dp,
+                                        onDelta = { deltaPx ->
+                                            sourceSplitRatio = (sourceSplitRatio + deltaPx / splitWidthPx)
+                                                .coerceIn(0.25f, 0.75f)
+                                        },
+                                    )
+                                }
+                                val paneWeight = when {
+                                    panes.size == 1 -> 1f
+                                    paneIndex == 0 -> sourceSplitRatio
+                                    else -> 1f - sourceSplitRatio
+                                }
+                                AsmSourceCanvas(
+                                    state = state,
+                                    pane = pane,
+                                    isActivePane = pane.id == state.activeSourcePaneId,
+                                    index = workspace.index,
+                                    source = source,
+                                    semanticIndex = semanticIndex,
+                                    onOpenInEditor = onOpenInEditor,
+                                    onSaveProject = onSaveProject,
+                                    onBuildProject = onBuildProject,
+                                    onRunInEmulator = onRunInEmulator,
+                                    modifier = Modifier.weight(paneWeight).fillMaxHeight(),
+                                )
+                            }
+                        }
+                    }
+                }
+                if (
+                    state.workspaceKind == AsmWorkspaceKind.PROJECT &&
+                    (state.buildReport != null || state.displayedDiagnostics.isNotEmpty())
+                ) {
+                    AsmBuildProblemsStrip(
+                        state = state,
+                        report = state.buildReport,
+                        diagnostics = state.displayedDiagnostics,
+                        requestedHeightDp = problemsPaneHeightDp,
+                        onHeightChange = onProblemsPaneHeightChange,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2221,17 +2316,18 @@ private fun AsmWelcomeCanvas(state: AsmWorkspaceState, modifier: Modifier) {
 }
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun AsmSourceCanvas(
     state: AsmWorkspaceState,
+    pane: AsmSourcePaneState,
+    isActivePane: Boolean,
     index: AsmReferenceIndex,
     source: AsmSourceFile,
     semanticIndex: AsmSemanticIndex?,
     onOpenInEditor: (AsmEditorTarget) -> Unit,
     onSaveProject: () -> Boolean,
-    buildProjectRom: (() -> AsmRomPreview?)?,
+    onBuildProject: (() -> Unit)?,
     onRunInEmulator: (() -> Unit)?,
-    problemsPaneHeightDp: Float,
-    onProblemsPaneHeightChange: (Float) -> Unit,
     modifier: Modifier,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
@@ -2253,28 +2349,28 @@ private fun AsmSourceCanvas(
         (ASM_LINE_NUMBER_WIDTH.value + ASM_ADDRESS_GUTTER_WIDTH.value + 24f +
             longestLine * fs.body.value * MONOSPACE_CHARACTER_WIDTH).dp
     }
-    LaunchedEffect(state.navigationSerial, source.id) {
-        if (source.lines.isNotEmpty()) listState.scrollToItem(state.selectedLineIndex.coerceIn(source.lines.indices))
+    LaunchedEffect(pane.navigationSerial, source.id) {
+        if (source.lines.isNotEmpty()) listState.scrollToItem(pane.lineIndex.coerceIn(source.lines.indices))
     }
-    val indexedExactAddress = addressAnchorsByLine[state.selectedLineIndex]
-    val compiledExactAddress = compiledAddressesByLine[state.selectedLineIndex]
+    val indexedExactAddress = addressAnchorsByLine[pane.lineIndex]
+    val compiledExactAddress = compiledAddressesByLine[pane.lineIndex]
     val exactSnesAddress = compiledExactAddress ?: indexedExactAddress?.snesAddress
     val editorLinks = remember(semanticIndex, exactSnesAddress) {
         val address = exactSnesAddress
         if (semanticIndex == null || address == null) emptyList()
         else semanticIndex.linksFor(address)
     }
-    val referenceLabel = remember(index, source.id, state.selectedLineIndex, state.activeReferenceSymbol) {
-        index.label(state.activeReferenceSymbol)
-            ?: index.labelsAt(source.id, state.selectedLineIndex)
+    val referenceLabel = remember(index, source.id, pane.lineIndex, pane.referenceSymbol) {
+        index.label(pane.referenceSymbol)
+            ?: index.labelsAt(source.id, pane.lineIndex)
                 .maxByOrNull { index.usagesFor(it).size }
     }
     val labelUsages = remember(index, referenceLabel) {
         referenceLabel?.let(index::usagesFor).orEmpty()
     }
-    val referenceMacro = remember(index, source.id, state.selectedLineIndex, state.activeReferenceMacro) {
-        index.macro(state.activeReferenceMacro)
-            ?: index.macrosAt(source.id, state.selectedLineIndex).firstOrNull()
+    val referenceMacro = remember(index, source.id, pane.lineIndex, pane.referenceMacro) {
+        index.macro(pane.referenceMacro)
+            ?: index.macrosAt(source.id, pane.lineIndex).firstOrNull()
     }
     val macroUsages = remember(index, referenceMacro) {
         referenceMacro?.let(index::usagesFor).orEmpty()
@@ -2282,6 +2378,7 @@ private fun AsmSourceCanvas(
     val isProjectModule = state.isProjectModule(source.id)
     var confirmRestoreOrDelete by remember(source.id) { mutableStateOf(false) }
     var showModuleSettings by remember(source.id) { mutableStateOf(false) }
+    var showBankSettings by remember(source.id) { mutableStateOf(false) }
     if (showModuleSettings) {
         AsmModuleSettingsDialog(
             title = "Module settings",
@@ -2299,6 +2396,46 @@ private fun AsmSourceCanvas(
             onDestructive = {
                 showModuleSettings = false
                 confirmRestoreOrDelete = true
+            },
+        )
+    }
+    if (showBankSettings) {
+        AlertDialog(
+            onDismissRequest = { showBankSettings = false },
+            title = { Text(if (source.isBank) "Bank settings" else "Source settings", fontSize = fs.heading) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(source.displayName, fontSize = fs.body, fontWeight = FontWeight.SemiBold)
+                    OutlinedButton(
+                        onClick = {
+                            state.discardSourceBuffer(source.id)
+                            showBankSettings = false
+                        },
+                        enabled = state.hasUnsavedSourceChanges(source.id) && !state.busy,
+                        shape = ASM_CONTROL_SHAPE,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Discard unsaved changes", fontSize = fs.body)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            showBankSettings = false
+                            confirmRestoreOrDelete = true
+                        },
+                        enabled = (source.id in state.projectModifiedFileIds ||
+                            state.hasUnsavedSourceChanges(source.id)) && !state.busy,
+                        shape = ASM_CONTROL_SHAPE,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (source.isBank) "Restore original bank ASM…" else "Restore original source ASM…",
+                            fontSize = fs.body,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBankSettings = false }) { Text("Done", fontSize = fs.body) }
             },
         )
     }
@@ -2343,37 +2480,31 @@ private fun AsmSourceCanvas(
             if (state.saveSource(source.id)) onSaveProject()
         }
     }
-    val buildSource: (() -> Unit)? = buildProjectRom?.let { build ->
-        {
-            scope.launch {
-                if (state.saveAllSources() && onSaveProject()) {
-                    state.validateProjectBuild(build)
-                }
-            }
-        }
-    }
-    val runSource: (() -> Unit)? = onRunInEmulator?.let { run ->
-        {
-            scope.launch {
-                if (state.saveAllSources() && onSaveProject()) run()
-            }
-        }
-    }
-    Column(modifier.fillMaxSize()) {
+    Column(
+        modifier.fillMaxSize()
+            .background(
+                if (isActivePane) MaterialTheme.colorScheme.primary.copy(alpha = 0.035f)
+                else Color.Transparent,
+            )
+            .onPointerEvent(PointerEventType.Press, PointerEventPass.Initial) {
+                state.activateSourcePane(pane.id)
+            },
+    ) {
         AsmNavigationHeader(
             state,
             source.displayName,
             source.description,
             trailing = "",
+            active = isActivePane,
             actions = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
                 {
                     AsmSourceToolbarActions(
                         state = state,
                         source = source,
                         onSave = saveSource,
-                        onBuild = buildSource,
                         onEditModuleSettings = if (isProjectModule) ({ showModuleSettings = true }) else null,
-                        onRestoreOriginal = if (isProjectModule) null else ({ confirmRestoreOrDelete = true }),
+                        onOpenBankSettings = if (isProjectModule) null else ({ showBankSettings = true }),
+                        onClosePane = if (state.hasSourceSplit) ({ state.closeSourcePane(pane.id) }) else null,
                     )
                 }
             } else null,
@@ -2386,20 +2517,12 @@ private fun AsmSourceCanvas(
             }
             AsmEditableSourcePane(
                 state = state,
+                pane = pane,
                 source = source,
-                onBuild = buildSource,
-                onRun = runSource,
+                onBuild = onBuildProject,
+                onRun = onRunInEmulator,
                 modifier = Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
             )
-            if (state.buildReport != null || state.displayedDiagnostics.isNotEmpty()) {
-                AsmBuildProblemsStrip(
-                    state = state,
-                    report = state.buildReport,
-                    diagnostics = state.displayedDiagnostics,
-                    requestedHeightDp = problemsPaneHeightDp,
-                    onHeightChange = onProblemsPaneHeightChange,
-                )
-            }
         } else {
             if (state.hasProjectWorkspace) {
                 AsmReadOnlySourceNotice(onOpenProjectSource = state::showProjectWorkspace)
@@ -2420,7 +2543,7 @@ private fun AsmSourceCanvas(
                 modifier = Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
             ) {
                 items(source.lines.size, key = { it }) { lineIndex ->
-                    val selected = lineIndex == state.selectedLineIndex
+                    val selected = lineIndex == pane.lineIndex
                     Row(
                         Modifier.fillMaxWidth()
                             .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.11f) else Color.Transparent)
@@ -2651,61 +2774,40 @@ private fun AsmSourceToolbarActions(
     state: AsmWorkspaceState,
     source: AsmSourceFile,
     onSave: () -> Unit,
-    onBuild: (() -> Unit)?,
     onEditModuleSettings: (() -> Unit)?,
-    onRestoreOriginal: (() -> Unit)?,
+    onOpenBankSettings: (() -> Unit)?,
+    onClosePane: (() -> Unit)?,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val unsaved = state.hasUnsavedSourceChanges(source.id)
-    val modified = source.id in state.projectModifiedFileIds
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        OutlinedButton(
-            onClick = { state.discardSourceBuffer(source.id) },
-            enabled = unsaved && !state.busy,
-            shape = ASM_CONTROL_SHAPE,
-        ) {
-            Text("Revert", fontSize = fs.detail)
-        }
         Button(onClick = onSave, enabled = unsaved && !state.busy, shape = ASM_CONTROL_SHAPE) {
             Text(if (unsaved) "Save *" else "Save", fontSize = fs.detail)
         }
-        OutlinedButton(
-            onClick = { onBuild?.invoke() },
-            enabled = onBuild != null && !state.busy && !state.previewBusy,
-            shape = ASM_CONTROL_SHAPE,
-        ) {
-            Text(
-                when {
-                    state.previewBusy -> "Building…"
-                    state.sourceBuildRequired -> "Build*"
-                    else -> "Build"
-                },
-                fontSize = fs.detail,
-            )
-        }
-        if (onEditModuleSettings != null) {
+        val openSettings = onEditModuleSettings ?: onOpenBankSettings
+        if (openSettings != null) {
             IconButton(
-                onClick = onEditModuleSettings,
-                enabled = !unsaved && !state.busy,
+                onClick = openSettings,
+                enabled = (onOpenBankSettings != null || !unsaved) && !state.busy,
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
                     Icons.Default.Settings,
-                    contentDescription = "Module settings",
+                    contentDescription = if (onEditModuleSettings != null) "Module settings" else "Bank settings",
                     modifier = Modifier.size(18.dp),
                 )
             }
         }
-        if (onRestoreOriginal != null) {
-            OutlinedButton(
-                onClick = onRestoreOriginal,
-                enabled = (modified || unsaved) && !state.busy,
-                shape = ASM_CONTROL_SHAPE,
-            ) {
-                Text("Restore original", fontSize = fs.detail)
+        if (onClosePane != null) {
+            IconButton(onClick = onClosePane, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close split view",
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
     }
@@ -2715,6 +2817,7 @@ private fun AsmSourceToolbarActions(
 @OptIn(ExperimentalComposeUiApi::class)
 private fun AsmEditableSourcePane(
     state: AsmWorkspaceState,
+    pane: AsmSourcePaneState,
     source: AsmSourceFile,
     onBuild: (() -> Unit)?,
     onRun: (() -> Unit)?,
@@ -2723,27 +2826,27 @@ private fun AsmEditableSourcePane(
     val fs = LocalEditorTheme.current.fontSize.value
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    var pageStartLine by remember(source.id, state.editSessionSerial) {
-        mutableStateOf((state.selectedLineIndex / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES)
+    var pageStartLine by remember(pane.id, source.id, state.editSessionSerial) {
+        mutableStateOf((pane.lineIndex / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES)
     }
-    LaunchedEffect(source.id, state.selectedLineIndex) {
-        val targetPage = (state.selectedLineIndex / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES
-        if (state.selectedLineIndex !in pageStartLine until (pageStartLine + ASM_EDIT_PAGE_LINES)) {
+    LaunchedEffect(pane.id, source.id, pane.lineIndex) {
+        val targetPage = (pane.lineIndex / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES
+        if (pane.lineIndex !in pageStartLine until (pageStartLine + ASM_EDIT_PAGE_LINES)) {
             pageStartLine = targetPage
         }
     }
-    val pageKey = AsmEditPageKey(source.id, state.editSessionSerial, state.navigationSerial, pageStartLine)
+    val pageKey = AsmEditPageKey(pane.id, source.id, state.editSessionSerial, pane.navigationSerial, pageStartLine)
     val page = remember(pageKey) {
         asmSourceEditPage(state.sourceEditText(source.id), pageStartLine, ASM_EDIT_PAGE_LINES)
     }
-    val initialCursorLine = state.selectedLineIndex
+    val initialCursorLine = pane.lineIndex
         .takeIf { it in page.startLine until (page.startLine + page.lineCount) }
         ?.minus(page.startLine)
         ?: 0
     var fieldValue by remember(pageKey) {
         val lineStart = asmLineStartOffset(page.text, initialCursorLine)
         val lineEnd = page.text.indexOf('\n', lineStart).let { if (it < 0) page.text.length else it }
-        val cursor = lineStart + state.selectedColumnIndex.coerceIn(0, lineEnd - lineStart)
+        val cursor = lineStart + pane.columnIndex.coerceIn(0, lineEnd - lineStart)
         mutableStateOf(TextFieldValue(page.text, selection = TextRange(cursor)))
     }
     // Navigation within the same page changes pageKey so the caret can move to
@@ -2760,6 +2863,19 @@ private fun AsmEditableSourcePane(
     var completionFromTyping by remember(pageKey) { mutableStateOf(false) }
     var selectedCompletionIndex by remember(pageKey) { mutableStateOf(0) }
     var dismissedCompletionSignature by remember(pageKey) { mutableStateOf<String?>(null) }
+    LaunchedEffect(source.id, page.startLine, state.sourceBufferRevision) {
+        val latest = asmSourceEditPage(state.sourceEditText(source.id), page.startLine, ASM_EDIT_PAGE_LINES)
+        if (latest.text != fieldValue.text) {
+            val selection = fieldValue.selection
+            fieldValue = fieldValue.copy(
+                text = latest.text,
+                selection = TextRange(
+                    selection.start.coerceIn(0, latest.text.length),
+                    selection.end.coerceIn(0, latest.text.length),
+                ),
+            )
+        }
+    }
     val liveDiagnosticRevision = state.sourceBufferRevision
     val inactiveModuleFileIds = state.disabledProjectModuleFileIds - source.id
     val indexedMacros = state.workspace?.index?.macros.orEmpty()
@@ -2820,13 +2936,24 @@ private fun AsmEditableSourcePane(
         selectedCompletionIndex = 0
     }
     fun applyEditorValue(adjusted: TextFieldValue) {
+        val previousPageText = fieldValue.text
         val textChanged = adjusted.text != fieldValue.text
         fieldValue = adjusted
         // A caret move or selection is local editor state, not workspace
         // navigation. Publishing it used to clear Find Usages and could cause
         // the paged source view to reposition after an ordinary click.
         if (!textChanged) return
-        state.updateSourceEditText(source.id, page.merge(adjusted.text))
+        state.activateSourcePane(pane.id)
+        val currentPage = asmSourceEditPage(state.sourceEditText(source.id), page.startLine, ASM_EDIT_PAGE_LINES)
+        val pageChange = if (currentPage.text == previousPageText) {
+            AsmSourceTextChange.between(previousPageText, adjusted.text)
+                ?.let { it.copy(offset = currentPage.prefix.length + it.offset) }
+        } else null
+        state.updateSourceEditText(
+            source.id,
+            currentPage.merge(adjusted.text),
+            undoChange = pageChange,
+        )
         val activeOffset = adjusted.selection.end.coerceIn(0, adjusted.text.length)
         state.selectSourcePosition(
             page.startLine + asmLineIndexAtOffset(adjusted.text, activeOffset),
@@ -2866,7 +2993,7 @@ private fun AsmEditableSourcePane(
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val lineCount = fieldValue.text.count { it == '\n' } + 1
-    val totalLineCount = page.totalLineCount + lineCount - page.lineCount
+    val totalLineCount = state.sourceEditText(source.id).count { it == '\n' } + 1
     val displayedEndLine = (page.startLine + lineCount).coerceAtMost(totalLineCount)
     val longestLine = fieldValue.text.lineSequence().maxOfOrNull(String::length)
         ?.coerceAtMost(MAX_MEASURED_CODE_COLUMNS) ?: 0
@@ -3061,7 +3188,16 @@ private fun AsmEditableSourcePane(
                 CompositionLocalProvider(LocalContextMenuRepresentation provides ASM_CONTEXT_MENU_REPRESENTATION) {
                     ContextMenuDataProvider(
                         items = {
-                            listOf(
+                            buildList {
+                                add(ContextMenuItem("Undo\t$ASM_MODIFIER_LABEL+Z") {
+                                    state.activateSourcePane(pane.id)
+                                    state.undoSourceEdit(source.id)
+                                })
+                                add(ContextMenuItem("Redo\t$ASM_MODIFIER_LABEL+Shift+Z") {
+                                    state.activateSourcePane(pane.id)
+                                    state.redoSourceEdit(source.id)
+                                })
+                                add(
                                 ContextMenuItem("Go to Definition\t$ASM_MODIFIER_LABEL+D") {
                                     asmOpenEditableReference(
                                         state = state,
@@ -3072,6 +3208,8 @@ private fun AsmEditableSourcePane(
                                         pageStartLine = page.startLine,
                                     )
                                 },
+                                )
+                                add(
                                 ContextMenuItem("Find Usages\t$ASM_MODIFIER_LABEL+U") {
                                     asmShowEditableUsages(
                                         state = state,
@@ -3082,6 +3220,8 @@ private fun AsmEditableSourcePane(
                                         pageStartLine = page.startLine,
                                     )
                                 },
+                                )
+                                add(
                                 ContextMenuItem("Show Completions\t$ASM_MODIFIER_LABEL+Tab") {
                                     val offset = (contextMenuOffset ?: fieldValue.selection.end)
                                         .coerceIn(0, fieldValue.text.length)
@@ -3090,7 +3230,18 @@ private fun AsmEditableSourcePane(
                                     completionFromTyping = false
                                     dismissedCompletionSignature = null
                                 },
-                            )
+                                )
+                                if (!state.isProjectModule(source.id)) {
+                                    if (state.hasSourceSplit) {
+                                        add(ContextMenuItem("Close View") { state.closeSourcePane(pane.id) })
+                                    } else {
+                                        add(ContextMenuItem("Split View") {
+                                            state.activateSourcePane(pane.id)
+                                            state.splitActiveSource()
+                                        })
+                                    }
+                                }
+                            }
                         },
                     ) {
                         BasicTextField(
@@ -3102,6 +3253,9 @@ private fun AsmEditableSourcePane(
                         },
                         modifier = Modifier.weight(1f)
                         .focusRequester(editorFocusRequester)
+                        .onFocusChanged { focus ->
+                            if (focus.isFocused) state.activateSourcePane(pane.id)
+                        }
                         .pointerHoverIcon(
                             if (hoveredEditableLink) ASM_LINK_CURSOR else ASM_TEXT_CURSOR,
                             overrideDescendants = true,
@@ -3110,6 +3264,17 @@ private fun AsmEditableSourcePane(
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             val commandDown = if (ASM_IS_MAC) event.isMetaPressed else event.isCtrlPressed
                             when {
+                                commandDown && event.key == Key.Z -> {
+                                    state.activateSourcePane(pane.id)
+                                    if (event.isShiftPressed) state.redoSourceEdit(source.id)
+                                    else state.undoSourceEdit(source.id)
+                                    true
+                                }
+                                !ASM_IS_MAC && commandDown && event.key == Key.Y -> {
+                                    state.activateSourcePane(pane.id)
+                                    state.redoSourceEdit(source.id)
+                                    true
+                                }
                                 commandDown && event.key == Key.Tab -> {
                                     completionExplicit = true
                                     completionFromTyping = false
@@ -3399,6 +3564,7 @@ private fun AsmEditableSourcePane(
 }
 
 private data class AsmEditPageKey(
+    val paneId: Long,
     val fileId: String,
     val editSessionSerial: Long,
     val navigationSerial: Long,
@@ -4170,9 +4336,14 @@ private fun AsmNavigationHeader(
     detail: String,
     trailing: String,
     actions: (@Composable () -> Unit)? = null,
+    active: Boolean = false,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
-    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        color = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
+        else MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = state::goBack, enabled = state.canGoBack, modifier = Modifier.size(30.dp)) {
                 Icon(Icons.Default.ArrowBack, "Back", modifier = Modifier.size(18.dp))

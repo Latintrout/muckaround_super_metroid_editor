@@ -67,7 +67,10 @@ never be silently omitted from an export.
     **Project (editable)** at any time; the original view also provides an explicit
     shortcut back to editable source. Project source offers syntax-aware
     editing, a compact `Save *` dirty indicator, `Cmd/Ctrl+S`, buffer
-    revert, and a confirmed **Restore original** action. Enter inherits the
+    Undo/Redo, and confirmed recovery actions under the source settings cog.
+    **Discard unsaved changes** returns to the last save, while **Restore
+    original bank ASM** removes the project override and returns to the pinned
+    source snapshot. Enter inherits the
     current instruction indentation and opens an instruction column after a
     label. **Tab** advances a caret to the next four-column stop or indents the
     selected rows; **Shift+Tab** removes up to one indentation level. Paste and
@@ -155,9 +158,20 @@ ASM's own compact history remains available for fine-grained
 source/asset/Library browsing.
 
 When **Project** source is selected, the source pane is immediately editable;
-there is no second per-file edit mode. Its single gray source header combines
-Back/Forward, file or module identity, **Revert**, **Save**, **Build**, and the
-module settings cog; it does not spend another row listing keyboard shortcuts.
+there is no second per-file edit mode. Its compact gray source header combines
+Back/Forward, file or module identity, **Save**, and the source or module
+settings cog; it does not spend another row listing keyboard shortcuts. Build
+is project-wide, so its single **Build** button lives in the application toolbar
+beside **Run** and **EMU** whenever Project ASM is enabled.
+Right-click a bank, bank section, search result, or non-module source entry and
+choose **Open in Split Right** to inspect both locations side by side. Each
+column retains its bank/section, caret, scroll position, and navigation history,
+while both views edit one shared document buffer. Opening the same bank in both
+columns is therefore safe and changes appear in each view. The editor menu also
+provides **Split View** and **Close View**; source headers expose a close-view
+button while split. Project modules remain single-view inputs. **Cmd/Ctrl+Z**
+and **Cmd/Ctrl+Shift+Z** provide bounded, delta-backed Undo/Redo without retaining
+whole copies of large banks.
 The current address, PC offset, line count, and compact build state live in the
 application's existing bottom-right status bar. **Restore original** provides
 the recovery boundary for a modified pinned source file. Large
@@ -173,7 +187,8 @@ persistence boundary: it atomically writes the source override, reparses its
 index, saves the `.smedit` project, and performs fast source-literal validation.
 It does not wait for Asar. The button becomes `Build*` whenever unsaved or
 newly saved source has not produced a successful build; an explicit **Build**,
-EMU launch, preview, or export performs the complete validated build. This keeps
+**Run**, preview, or export performs the complete validated build. **EMU** only
+opens or closes the emulator window; Run builds if needed and starts play. This keeps
 ordinary source-saving responsive without allowing execution to use stale
 bytes. Unsafe source fails before Asar is launched. Asar still
 assembles its include tree as one program rather than incrementally compiling an

@@ -15,6 +15,19 @@ class AsmProjectWorkspaceTest {
     lateinit var tempDirectory: File
 
     @Test
+    fun `source text changes round trip insert delete and replacement deltas`() {
+        listOf(
+            "abcde" to "abXYcde",
+            "abcde" to "abde",
+            "abcde" to "abXYde",
+        ).forEach { (before, after) ->
+            val change = requireNotNull(AsmSourceTextChange.between(before, after))
+            assertEquals(after, change.redo(before))
+            assertEquals(before, change.undo(after))
+        }
+    }
+
+    @Test
     fun `project workspace is isolated persistent and restorable from its offline snapshot`() {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
@@ -232,6 +245,46 @@ class AsmProjectWorkspaceTest {
         assertEquals(original, state.sourceEditText("bank_80.asm"))
         assertEquals(emptySet<String>(), state.projectModifiedFileIds)
         assertFalse(state.hasProjectSourceChanges)
+    }
+
+    @Test
+    fun `project source undo and redo operate on the shared document buffer`() = runBlocking {
+        val reference = fakeReference(emptyList())
+        val projectRepository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val projectFile = File(tempDirectory, "Undo.smedit").apply { writeText("{}") }
+        projectRepository.initialize(projectFile.absolutePath, reference)
+        val state = AsmWorkspaceState(
+            repository = AsmReferenceRepository(
+                referenceRoot = File(tempDirectory, "unused-undo-cache"),
+                fetchBytes = { error("network should not be used") },
+                assetRanges = emptyList(),
+            ),
+            projectRepository = projectRepository,
+        )
+        state.bindProject(projectFile.absolutePath, enabled = true)
+        state.openSource("bank_80.asm")
+        val primaryPane = state.activeSourcePaneId
+        state.openSourceInSplit("bank_80.asm", lineIndex = 2)
+        val original = state.sourceEditText("bank_80.asm")
+
+        state.updateSourceEditText("bank_80.asm", "$original; first\n")
+        state.activateSourcePane(primaryPane)
+        assertEquals(
+            "$original; first\n",
+            state.sourceEditText(requireNotNull(state.sourcePane(primaryPane)?.fileId)),
+            "both panes must address the same source document",
+        )
+        state.updateSourceEditText("bank_80.asm", "$original; first\n; second\n")
+        assertTrue(state.canUndoSource("bank_80.asm"))
+        assertTrue(state.undoSourceEdit("bank_80.asm"))
+        assertEquals("$original; first\n", state.sourceEditText("bank_80.asm"))
+        assertTrue(state.undoSourceEdit("bank_80.asm"))
+        assertEquals(original, state.sourceEditText("bank_80.asm"))
+        assertFalse(state.hasUnsavedSourceChanges("bank_80.asm"))
+
+        assertTrue(state.redoSourceEdit("bank_80.asm"))
+        assertEquals("$original; first\n", state.sourceEditText("bank_80.asm"))
+        assertTrue(state.hasUnsavedSourceChanges("bank_80.asm"))
     }
 
     @Test

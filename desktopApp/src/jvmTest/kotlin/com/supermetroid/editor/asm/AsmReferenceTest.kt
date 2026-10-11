@@ -314,6 +314,40 @@ class AsmReferenceTest {
     }
 
     @Test
+    fun `source splits keep independent locations and navigation history`() = runBlocking {
+        val repository = AsmReferenceRepository(
+            referenceRoot = File(tempDirectory, "asm-split"),
+            fetchBytes = { fakeSourceArchive() },
+            assetRanges = emptyList(),
+        )
+        repository.installOrRefresh(ByteArray(0x300000), "fixture.sfc")
+        val state = AsmWorkspaceState(repository)
+        state.loadInstalled()
+
+        state.openSource("bank_80.asm", lineIndex = 3, columnIndex = 4)
+        val primary = state.activeSourcePaneId
+        state.openSourceInSplit("bank_80.asm", lineIndex = 5, columnIndex = 2)
+        val secondary = state.activeSourcePaneId
+
+        assertTrue(state.hasSourceSplit)
+        assertEquals(2, state.sourcePanes.size)
+        assertEquals(5, state.sourcePane(secondary)?.lineIndex)
+        assertEquals(2, state.sourcePane(secondary)?.columnIndex)
+
+        state.goBack()
+        assertEquals(5, state.selectedLineIndex, "a new split starts with its own empty history")
+        state.activateSourcePane(primary)
+        assertEquals(3, state.selectedLineIndex)
+        assertEquals(4, state.selectedColumnIndex)
+        state.goBack()
+        assertEquals(0, state.selectedLineIndex, "the primary pane retains its earlier navigation")
+
+        state.closeSourcePane(secondary)
+        assertFalse(state.hasSourceSplit)
+        assertEquals(primary, state.activeSourcePaneId)
+    }
+
+    @Test
     fun `source status summary follows source selection and stays out of other browser modes`() = runBlocking {
         val repository = AsmReferenceRepository(
             referenceRoot = File(tempDirectory, "asm-status"),

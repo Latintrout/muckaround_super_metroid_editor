@@ -522,6 +522,32 @@ fun main() = application {
                 }
             }
 
+            suspend fun saveAsmForExecution(): Boolean {
+                if (!editorState.project.asmWorkspace.enabled) return true
+                editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
+                if (!asmWorkspaceState.saveAllSources()) return false
+                return romParser?.let(editorState::saveProject) == true
+            }
+
+            fun buildAsmProject() {
+                val parser = romParser ?: return
+                scope.launch {
+                    if (saveAsmForExecution()) {
+                        asmWorkspaceState.validateProjectBuild {
+                            editorState.buildRomPreview(parser)
+                        }
+                    }
+                }
+            }
+
+            fun runProjectInEmulator() {
+                scope.launch {
+                    if (!saveAsmForExecution()) return@launch
+                    emulatorWorkspaceState.requestRun()
+                    emulatorEnabled = true
+                }
+            }
+
             // Auto-switch to Palette when sampling a color from the tiles canvas.
             val sampledRow = editorState.sampledPaletteRow
             if (sampledRow >= 0 && leftTab == TAB_TILES) tilesetSubTab = 2
@@ -602,7 +628,7 @@ fun main() = application {
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    // Right side: EMU toggle + Save + Export
+                    // Right side: project execution + Save + Export
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -640,6 +666,45 @@ fun main() = application {
                                 )
                             }
                         }
+                        if (editorState.project.asmWorkspace.enabled) {
+                            OutlinedButton(
+                                onClick = ::buildAsmProject,
+                                enabled = romEditable && !asmWorkspaceState.busy &&
+                                    !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress,
+                                shape = RoundedCornerShape(6.dp),
+                            ) {
+                                if (asmWorkspaceState.previewBusy) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    when {
+                                        asmWorkspaceState.previewBusy -> "BUILDING…"
+                                        asmWorkspaceState.sourceBuildRequired -> "BUILD*"
+                                        else -> "BUILD"
+                                    },
+                                    fontSize = fs.detail,
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = ::runProjectInEmulator,
+                            enabled = romEditable && !asmWorkspaceState.busy &&
+                                !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress,
+                            shape = RoundedCornerShape(6.dp),
+                        ) {
+                            if (editorState.romBuildInProgress) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                            }
+                            Text(if (editorState.romBuildInProgress) "RUNNING…" else "RUN", fontSize = fs.detail)
+                        }
                         OutlinedButton(
                             onClick = {
                                 if (emulatorEnabled) {
@@ -651,26 +716,20 @@ fun main() = application {
                                     emulatorEnabled = true
                                 }
                             },
+                            enabled = !editorState.romBuildInProgress,
                             shape = RoundedCornerShape(6.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = if (emulatorEnabled) MaterialTheme.colorScheme.primaryContainer
                                     else MaterialTheme.colorScheme.surface,
                             ),
                         ) {
-                            if (editorState.romBuildInProgress) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Gamepad,
-                                    contentDescription = "Toggle emulator",
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
+                            Icon(
+                                Icons.Default.Gamepad,
+                                contentDescription = "Toggle emulator window",
+                                modifier = Modifier.size(16.dp),
+                            )
                             Spacer(Modifier.width(4.dp))
-                            Text(if (editorState.romBuildInProgress) "BUILDING" else "EMU", fontSize = fs.detail)
+                            Text("EMU", fontSize = fs.detail)
                         }
                         Box {
                             Button(
@@ -1247,13 +1306,8 @@ fun main() = application {
                                             editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
                                             romParser?.let(editorState::saveProject) ?: false
                                         },
-                                        buildProjectRom = romParser?.let { parser ->
-                                            { editorState.buildRomPreview(parser) }
-                                        },
-                                        onRunInEmulator = {
-                                            emulatorWorkspaceState.requestRun()
-                                            emulatorEnabled = true
-                                        },
+                                        onBuildProject = ::buildAsmProject,
+                                        onRunInEmulator = ::runProjectInEmulator,
                                         problemsPaneHeightDp = asmProblemsPaneHeightDp,
                                         onProblemsPaneHeightChange = { asmProblemsPaneHeightDp = it },
                                         modifier = Modifier.fillMaxSize(),

@@ -293,11 +293,11 @@ fun FloatingEmulatorWindow(
         }
     }
 
-    // Closing the floating window disconnects its session, so opening it builds
-    // the latest project ROM and boots a fresh game when globally enabled.
+    // EMU only opens the window. The explicit global Run command queues a
+    // validated build and starts a fresh game; the window's own Play control
+    // remains available for manual startup.
     LaunchedEffect(Unit) {
-        val runRequested = workspaceState.consumeRunRequest()
-        if (workspaceState.autoPlayOnOpen || runRequested) ensureEmulatorRunning(forceBuild = runRequested)
+        if (workspaceState.consumeRunRequest()) ensureEmulatorRunning(forceBuild = true)
     }
     LaunchedEffect(workspaceState.runRequestSerial) {
         if (workspaceState.consumeRunRequest()) ensureEmulatorRunning(forceBuild = true)

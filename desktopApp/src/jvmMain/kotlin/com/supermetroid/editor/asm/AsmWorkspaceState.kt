@@ -32,6 +32,55 @@ internal sealed interface AsmReferenceExpansionTarget {
     data class Macro(val id: AsmMacroId) : AsmReferenceExpansionTarget
 }
 
+/** A source editor view owns navigation/caret state, while the underlying text
+ * remains shared by file. Keeping those responsibilities separate lets the
+ * same bank appear in both columns without creating competing edit buffers. */
+internal data class AsmSourcePaneState(
+    val id: Long,
+    val fileId: String? = null,
+    val lineIndex: Int = 0,
+    val columnIndex: Int = 0,
+    val navigationSerial: Long = 0L,
+    val referenceSymbol: AsmSymbolId? = null,
+    val referenceMacro: AsmMacroId? = null,
+)
+
+internal data class AsmSourceTextChange(
+    val offset: Int,
+    val removed: String,
+    val inserted: String,
+) {
+    fun undo(text: String): String? = replaceExpected(text, inserted, removed)
+    fun redo(text: String): String? = replaceExpected(text, removed, inserted)
+
+    private fun replaceExpected(text: String, expected: String, replacement: String): String? {
+        val end = offset + expected.length
+        if (offset !in 0..text.length || end > text.length || text.substring(offset, end) != expected) return null
+        return text.replaceRange(offset, end, replacement)
+    }
+
+    companion object {
+        fun between(before: String, after: String): AsmSourceTextChange? {
+            if (before == after) return null
+            var prefix = 0
+            val sharedLength = minOf(before.length, after.length)
+            while (prefix < sharedLength && before[prefix] == after[prefix]) prefix++
+            var suffix = 0
+            val remainingBefore = before.length - prefix
+            val remainingAfter = after.length - prefix
+            while (
+                suffix < remainingBefore && suffix < remainingAfter &&
+                before[before.lastIndex - suffix] == after[after.lastIndex - suffix]
+            ) suffix++
+            return AsmSourceTextChange(
+                offset = prefix,
+                removed = before.substring(prefix, before.length - suffix),
+                inserted = after.substring(prefix, after.length - suffix),
+            )
+        }
+    }
+}
+
 internal class AsmWorkspaceState(
     private val repository: AsmReferenceRepository = AsmReferenceRepository(),
     private val projectRepository: AsmProjectWorkspaceRepository = AsmProjectWorkspaceRepository(),
@@ -54,18 +103,43 @@ internal class AsmWorkspaceState(
     var browserMode by mutableStateOf(AsmBrowserMode.SOURCE)
         private set
     var query by mutableStateOf("")
-    var selectedFileId by mutableStateOf<String?>(null)
-        private set
+    private var selectedFileIdValue by mutableStateOf<String?>(null)
+    var selectedFileId: String?
+        get() = selectedFileIdValue
+        private set(value) {
+            selectedFileIdValue = value
+            updateActiveSourcePane { it.copy(fileId = value) }
+        }
     var expandedSourceFileId by mutableStateOf<String?>(null)
         private set
-    var selectedLineIndex by mutableStateOf(0)
-        private set
-    var selectedColumnIndex by mutableStateOf(0)
-        private set
-    var activeReferenceSymbol by mutableStateOf<AsmSymbolId?>(null)
-        private set
-    var activeReferenceMacro by mutableStateOf<AsmMacroId?>(null)
-        private set
+    private var selectedLineIndexValue by mutableStateOf(0)
+    var selectedLineIndex: Int
+        get() = selectedLineIndexValue
+        private set(value) {
+            selectedLineIndexValue = value
+            updateActiveSourcePane { it.copy(lineIndex = value) }
+        }
+    private var selectedColumnIndexValue by mutableStateOf(0)
+    var selectedColumnIndex: Int
+        get() = selectedColumnIndexValue
+        private set(value) {
+            selectedColumnIndexValue = value
+            updateActiveSourcePane { it.copy(columnIndex = value) }
+        }
+    private var activeReferenceSymbolValue by mutableStateOf<AsmSymbolId?>(null)
+    var activeReferenceSymbol: AsmSymbolId?
+        get() = activeReferenceSymbolValue
+        private set(value) {
+            activeReferenceSymbolValue = value
+            updateActiveSourcePane { it.copy(referenceSymbol = value) }
+        }
+    private var activeReferenceMacroValue by mutableStateOf<AsmMacroId?>(null)
+    var activeReferenceMacro: AsmMacroId?
+        get() = activeReferenceMacroValue
+        private set(value) {
+            activeReferenceMacroValue = value
+            updateActiveSourcePane { it.copy(referenceMacro = value) }
+        }
     var referenceExpansionTarget by mutableStateOf<AsmReferenceExpansionTarget?>(null)
         private set
     var referenceExpansionSerial by mutableStateOf(0L)
@@ -79,8 +153,13 @@ internal class AsmWorkspaceState(
         private set
     var selectedLibraryPageId by mutableStateOf(AsmLibrary.guides.first().id)
         private set
-    var navigationSerial by mutableStateOf(0L)
-        private set
+    private var navigationSerialValue by mutableStateOf(0L)
+    var navigationSerial: Long
+        get() = navigationSerialValue
+        private set(value) {
+            navigationSerialValue = value
+            updateActiveSourcePane { it.copy(navigationSerial = value) }
+        }
     var searchFocusSerial by mutableStateOf(0L)
         private set
     var romPreview by mutableStateOf<AsmRomPreview?>(null)
@@ -110,8 +189,16 @@ internal class AsmWorkspaceState(
             return (built + liveDiagnostics).distinct()
         }
 
-    private val backStack = mutableListOf<AsmWorkspaceLocation>()
-    private val forwardStack = mutableListOf<AsmWorkspaceLocation>()
+    var sourcePanes by mutableStateOf(listOf(AsmSourcePaneState(PRIMARY_SOURCE_PANE_ID)))
+        private set
+    var activeSourcePaneId by mutableStateOf(PRIMARY_SOURCE_PANE_ID)
+        private set
+    private val backStacks = mutableMapOf<Long, MutableList<AsmWorkspaceLocation>>()
+    private val forwardStacks = mutableMapOf<Long, MutableList<AsmWorkspaceLocation>>()
+    private val backStack: MutableList<AsmWorkspaceLocation>
+        get() = backStacks.getOrPut(activeSourcePaneId, ::mutableListOf)
+    private val forwardStack: MutableList<AsmWorkspaceLocation>
+        get() = forwardStacks.getOrPut(activeSourcePaneId, ::mutableListOf)
     private var pendingSnesAddress: Int? = null
     private var referenceWorkspace: AsmReferenceWorkspace? = null
     private var boundProjectFilePath: String = ""
@@ -119,6 +206,8 @@ internal class AsmWorkspaceState(
     private val sourceBuffers = mutableStateMapOf<String, String>()
     private val savedSourceTexts = mutableMapOf<String, String>()
     private val dirtySourceFileIds = mutableStateMapOf<String, Unit>()
+    private val sourceUndoStacks = mutableMapOf<String, MutableList<AsmSourceTextChange>>()
+    private val sourceRedoStacks = mutableMapOf<String, MutableList<AsmSourceTextChange>>()
 
     val canGoBack: Boolean get() = backStack.isNotEmpty()
     val canGoForward: Boolean get() = forwardStack.isNotEmpty()
@@ -189,6 +278,69 @@ internal class AsmWorkspaceState(
                 }
             }.filter(String::isNotBlank).joinToString(" · ")
         }
+
+    val hasSourceSplit: Boolean get() = sourcePanes.size > 1
+
+    fun sourcePane(id: Long): AsmSourcePaneState? = sourcePanes.firstOrNull { it.id == id }
+
+    fun activateSourcePane(id: Long) {
+        val pane = sourcePane(id) ?: return
+        if (activeSourcePaneId == id) return
+        activeSourcePaneId = id
+        selectedFileIdValue = pane.fileId
+        selectedLineIndexValue = pane.lineIndex
+        selectedColumnIndexValue = pane.columnIndex
+        navigationSerialValue = pane.navigationSerial
+        activeReferenceSymbolValue = pane.referenceSymbol
+        activeReferenceMacroValue = pane.referenceMacro
+        browserMode = AsmBrowserMode.SOURCE
+        selectedAssetPath = null
+    }
+
+    /** Opens a source location in the other column. V1 deliberately supports
+     * two columns rather than an unbounded split tree. */
+    fun openSourceInSplit(fileId: String, lineIndex: Int = 0, columnIndex: Int = 0) {
+        if (isProjectModule(fileId) || workspace?.index?.file(fileId) == null) return
+        val current = sourcePane(activeSourcePaneId) ?: AsmSourcePaneState(PRIMARY_SOURCE_PANE_ID)
+        val target = if (sourcePanes.size < MAX_SOURCE_PANES) {
+            current.copy(id = nextSourcePaneId()).also { created ->
+                sourcePanes = sourcePanes + created
+            }
+        } else {
+            sourcePanes.last()
+        }
+        activateSourcePane(target.id)
+        openSource(fileId, lineIndex, addToHistory = false, columnIndex = columnIndex)
+        backStack.clear()
+        forwardStack.clear()
+    }
+
+    fun splitActiveSource() {
+        val fileId = selectedFileId ?: return
+        if (isProjectModule(fileId)) return
+        openSourceInSplit(fileId, selectedLineIndex, selectedColumnIndex)
+    }
+
+    fun closeSourcePane(id: Long = activeSourcePaneId) {
+        if (!hasSourceSplit || sourcePane(id) == null) return
+        sourcePanes = sourcePanes.filterNot { it.id == id }
+        backStacks.remove(id)
+        forwardStacks.remove(id)
+        if (activeSourcePaneId == id || sourcePane(activeSourcePaneId) == null) {
+            activateSourcePane(sourcePanes.first().id)
+        }
+    }
+
+    private fun nextSourcePaneId(): Long =
+        (sourcePanes.maxOfOrNull(AsmSourcePaneState::id) ?: PRIMARY_SOURCE_PANE_ID) + 1L
+
+    private fun updateActiveSourcePane(transform: (AsmSourcePaneState) -> AsmSourcePaneState) {
+        val index = sourcePanes.indexOfFirst { it.id == activeSourcePaneId }
+        if (index < 0) return
+        val updated = transform(sourcePanes[index])
+        if (updated == sourcePanes[index]) return
+        sourcePanes = sourcePanes.toMutableList().also { it[index] = updated }
+    }
 
     fun isProjectModule(fileId: String?): Boolean = fileId != null && fileId in projectModuleFileIds
 
@@ -462,12 +614,19 @@ internal class AsmWorkspaceState(
     fun sourceEditText(fileId: String): String = sourceBuffers[fileId]
         ?: workspace?.index?.file(fileId)?.file?.readText().orEmpty()
 
-    fun updateSourceEditText(fileId: String, text: String) {
-        if (workspaceKind != AsmWorkspaceKind.PROJECT || selectedFileId != fileId) return
+    fun updateSourceEditText(fileId: String, text: String, undoChange: AsmSourceTextChange? = null) {
+        if (workspaceKind != AsmWorkspaceKind.PROJECT || workspace?.index?.file(fileId) == null) return
+        val previous = sourceEditText(fileId)
+        if (previous == text) return
         if (sourceBuffers[fileId] == null) {
             val diskText = workspace?.index?.file(fileId)?.file?.readText() ?: return
             savedSourceTexts[fileId] = diskText
         }
+        recordSourceUndo(fileId, previous, text, undoChange)
+        applySourceEditText(fileId, text)
+    }
+
+    private fun applySourceEditText(fileId: String, text: String) {
         // A successful report still describes the saved source while this edit
         // is only in memory; sourceBuildRequired adds the star via dirty buffers.
         // Failed diagnostics, however, may point at text the user just fixed.
@@ -483,6 +642,49 @@ internal class AsmWorkspaceState(
         if (saved != null && text != saved) dirtySourceFileIds[fileId] = Unit
         else dirtySourceFileIds.remove(fileId)
         sourceBufferRevision++
+    }
+
+    private fun recordSourceUndo(
+        fileId: String,
+        previous: String,
+        updated: String,
+        preferredChange: AsmSourceTextChange? = null,
+    ) {
+        val change = preferredChange ?: AsmSourceTextChange.between(previous, updated) ?: return
+        val undo = sourceUndoStacks.getOrPut(fileId, ::mutableListOf)
+        undo += change
+        if (undo.size > MAX_SOURCE_UNDO_STEPS) undo.removeAt(0)
+        sourceRedoStacks.remove(fileId)
+    }
+
+    fun canUndoSource(fileId: String): Boolean = sourceUndoStacks[fileId]?.isNotEmpty() == true
+
+    fun canRedoSource(fileId: String): Boolean = sourceRedoStacks[fileId]?.isNotEmpty() == true
+
+    fun undoSourceEdit(fileId: String? = selectedFileId): Boolean {
+        val selectedId = fileId ?: return false
+        val undo = sourceUndoStacks[selectedId] ?: return false
+        val change = undo.lastOrNull() ?: return false
+        val current = sourceEditText(selectedId)
+        val restored = change.undo(current) ?: return false
+        undo.removeAt(undo.lastIndex)
+        sourceRedoStacks.getOrPut(selectedId, ::mutableListOf).add(change)
+        applySourceEditText(selectedId, restored)
+        editSessionSerial++
+        return true
+    }
+
+    fun redoSourceEdit(fileId: String? = selectedFileId): Boolean {
+        val selectedId = fileId ?: return false
+        val redo = sourceRedoStacks[selectedId] ?: return false
+        val change = redo.lastOrNull() ?: return false
+        val current = sourceEditText(selectedId)
+        val restored = change.redo(current) ?: return false
+        redo.removeAt(redo.lastIndex)
+        sourceUndoStacks.getOrPut(selectedId, ::mutableListOf).add(change)
+        applySourceEditText(selectedId, restored)
+        editSessionSerial++
+        return true
     }
 
     fun publishLiveDiagnostics(
@@ -535,6 +737,7 @@ internal class AsmWorkspaceState(
             )
             if (count > 0) {
                 savedSourceTexts.putIfAbsent(fileId, source.file.readText())
+                recordSourceUndo(fileId, current, updated)
                 sourceBuffers[fileId] = updated
                 if (updated != savedSourceTexts[fileId]) dirtySourceFileIds[fileId] = Unit
                 else dirtySourceFileIds.remove(fileId)
@@ -556,6 +759,8 @@ internal class AsmWorkspaceState(
         val selectedId = fileId ?: return
         val source = workspace?.index?.file(selectedId) ?: return
         val diskText = source.file.readText()
+        val current = sourceEditText(selectedId)
+        if (current != diskText) recordSourceUndo(selectedId, current, diskText)
         sourceBuffers[selectedId] = diskText
         savedSourceTexts[selectedId] = diskText
         dirtySourceFileIds.remove(selectedId)
@@ -645,6 +850,8 @@ internal class AsmWorkspaceState(
             sourceBuffers[selectedId] = restored
             savedSourceTexts[selectedId] = restored
             dirtySourceFileIds.remove(selectedId)
+            sourceUndoStacks.remove(selectedId)
+            sourceRedoStacks.remove(selectedId)
             activeReferenceSymbol = null
             activeReferenceMacro = null
             editSessionSerial++
@@ -1068,6 +1275,8 @@ internal class AsmWorkspaceState(
         sourceBuffers.clear()
         savedSourceTexts.clear()
         dirtySourceFileIds.clear()
+        sourceUndoStacks.clear()
+        sourceRedoStacks.clear()
         liveDiagnosticFileId = null
         liveDiagnostics = emptyList()
         editSessionSerial++
@@ -1076,6 +1285,20 @@ internal class AsmWorkspaceState(
 
     private fun ensureSelection() {
         val index = workspace?.index ?: return
+        val validPanes = sourcePanes.mapNotNull { pane ->
+            pane.fileId?.takeIf { index.file(it) != null }?.let { pane }
+        }
+        if (validPanes.isNotEmpty() && validPanes.size != sourcePanes.size) {
+            sourcePanes = validPanes.take(MAX_SOURCE_PANES)
+            if (sourcePane(activeSourcePaneId) == null) activeSourcePaneId = sourcePanes.first().id
+            val active = sourcePane(activeSourcePaneId) ?: sourcePanes.first()
+            selectedFileIdValue = active.fileId
+            selectedLineIndexValue = active.lineIndex
+            selectedColumnIndexValue = active.columnIndex
+            navigationSerialValue = active.navigationSerial
+            activeReferenceSymbolValue = active.referenceSymbol
+            activeReferenceMacroValue = active.referenceMacro
+        }
         if (index.file(selectedFileId) == null) {
             selectedFileId = index.files.firstOrNull { it.id == "bank_80.asm" }?.id
                 ?: index.files.firstOrNull()?.id
@@ -1154,5 +1377,8 @@ internal class AsmWorkspaceState(
 
     companion object {
         private const val MAX_HISTORY = 100
+        private const val MAX_SOURCE_PANES = 2
+        private const val MAX_SOURCE_UNDO_STEPS = 250
+        private const val PRIMARY_SOURCE_PANE_ID = 0L
     }
 }

@@ -48,7 +48,6 @@ data class AppSettings(
     val fontSize: String = "MEDIUM",
     val emulatorAudioVolume: Float = 1.0f,
     val emulatorAudioMuted: Boolean = false,
-    val emulatorAutoPlayOnOpen: Boolean = true,
     val emulatorWindowWidth: Float = 512f,
     val emulatorWindowX: Float = 40f,
     val emulatorWindowY: Float = 40f,

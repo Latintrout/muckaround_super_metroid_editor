@@ -1,3 +1,5 @@
+; Project module: Objectives Pause Screen
+; SMEDIT description: 
 ;;; Objectives Pause Screen (SMEDIT reference module)
 ;;;
 ;;; Adds a third pause page without replacing either vanilla page:

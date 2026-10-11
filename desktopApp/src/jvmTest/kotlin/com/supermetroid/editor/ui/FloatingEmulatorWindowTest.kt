@@ -1,7 +1,6 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.ui.unit.IntSize
-import com.supermetroid.editor.data.AppSettings
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -53,10 +52,5 @@ class FloatingEmulatorWindowTest {
         assertEquals(0f, fitted.yPx, 0.001f)
         assertTrue(fitted.widthDp <= 320f)
         assertTrue(totalHeight <= 220.001f)
-    }
-
-    @Test
-    fun `auto play is enabled by default`() {
-        assertTrue(AppSettings().emulatorAutoPlayOnOpen)
     }
 }
