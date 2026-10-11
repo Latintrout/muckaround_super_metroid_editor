@@ -589,7 +589,7 @@ fun FloatingEmulatorWindow(
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.FillBounds,
                             )
-                        } else {
+                        } else if (!editorState.romBuildInProgress) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
@@ -619,10 +619,10 @@ fun FloatingEmulatorWindow(
                             Surface(
                                 color = Color.Black.copy(alpha = 0.82f),
                                 shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.align(Alignment.TopCenter).padding(10.dp),
+                                modifier = Modifier.align(Alignment.Center).padding(16.dp),
                             ) {
                                 Row(
-                                    Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {

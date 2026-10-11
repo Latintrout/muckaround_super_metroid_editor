@@ -229,11 +229,14 @@ between source and Library pages. `Cmd/Ctrl+F` moves focus to the current
 Source/Assets/Library search field.
 
 The Library is bundled and remains available before the external disassembly is
-downloaded. Its nine SMEDIT-authored lessons are intentionally a field guide,
+downloaded. Its ten SMEDIT-authored lessons are intentionally a field guide,
 not a general computer-science course. Their selectable, syntax-highlighted
 examples progress from literal formats, strings, tables, and bit masks through
 width state, pointers, comparisons, calls, and SNES runtime patterns; mnemonics
-inside the examples open their instruction pages. A capstone walkthrough traces
+inside the examples open their instruction pages. A selectable Quick-reference
+page adds native tables for equivalent decimal/Asar-hex/Asar-binary values,
+data widths, NVMXDIZC flags, matching call/return forms, and Super Metroid's
+source-verified native/emulation interrupt vectors. A capstone walkthrough traces
 Samus's jump from `Make_Samus_Jump` to its paired fixed-point physics tables,
 makes a reversible project-owned source edit, and defines the exact compilation
 and ROM-diff checks that will eventually prove it safe. The complete 92-mnemonic index

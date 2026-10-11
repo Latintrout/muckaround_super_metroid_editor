@@ -21,7 +21,7 @@ class AsmLibraryTest {
 
     @Test
     fun `guide and instruction page ids round trip`() {
-        assertEquals(9, AsmLibrary.guides.size)
+        assertEquals(10, AsmLibrary.guides.size)
         assertEquals(AsmLibrary.guides.size, AsmLibrary.guides.map { it.id }.toSet().size)
         AsmLibrary.guides.forEach { guide ->
             assertNotNull(AsmLibrary.guide(guide.id))
@@ -43,6 +43,19 @@ class AsmLibraryTest {
         assertTrue("\$90:9EB9" in jumpText)
         assertTrue("\$90:9EBF" in jumpText)
         assertTrue("cannot silently omit" in jumpText)
+        val quickReference = AsmLibrary.guide("quick-reference-tables")!!
+        val tables = quickReference.sections.mapNotNull { it.table }
+        assertEquals(5, tables.size)
+        tables.forEach { table ->
+            assertTrue(table.headers.isNotEmpty())
+            assertEquals(table.headers.size, table.columnWeights.size)
+            table.rows.forEach { row -> assertEquals(table.headers.size, row.size) }
+        }
+        val numberRows = tables.first().rows
+        assertTrue(listOf("16", "\$10", "%00010000", "bit 4") in numberRows)
+        val vectorRows = tables.last().rows
+        assertTrue(listOf("Native", "\$80:FFEA", "NMI", "NMI") in vectorRows)
+        assertTrue(listOf("Emulation", "\$80:FFFC", "RESET", "Boot") in vectorRows)
         EXPECTED_MNEMONICS.forEach { mnemonic ->
             val pageId = AsmLibrary.instructionPageId(mnemonic)
             assertEquals(mnemonic, AsmLibrary.mnemonicFromPageId(pageId))

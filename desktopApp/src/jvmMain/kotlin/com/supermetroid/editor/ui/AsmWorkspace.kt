@@ -2142,7 +2142,64 @@ private fun AsmGuideSection(
         section.paragraphs.forEach { paragraph ->
             Text(paragraph, fontSize = fs.body, color = MaterialTheme.colorScheme.onSurface)
         }
+        section.table?.let { AsmLibraryTable(it) }
         section.example?.let { AsmLibraryExample(it, onInstructionClick) }
+    }
+}
+
+@Composable
+private fun AsmLibraryTable(table: com.supermetroid.editor.asm.AsmLibraryTable) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(7.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            AsmLibraryTableRow(
+                cells = table.headers,
+                weights = table.columnWeights,
+                monospaceColumns = table.monospaceColumns,
+                header = true,
+            )
+            table.rows.forEach { row ->
+                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
+                AsmLibraryTableRow(
+                    cells = row,
+                    weights = table.columnWeights,
+                    monospaceColumns = table.monospaceColumns,
+                    header = false,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AsmLibraryTableRow(
+    cells: List<String>,
+    weights: List<Float>,
+    monospaceColumns: Set<Int>,
+    header: Boolean,
+) {
+    val fs = LocalEditorTheme.current.fontSize.value
+    Row(
+        Modifier.fillMaxWidth().background(
+            if (header) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+        ),
+        verticalAlignment = Alignment.Top,
+    ) {
+        cells.forEachIndexed { index, cell ->
+            Text(
+                text = cell,
+                fontSize = if (header) fs.detail else fs.body,
+                fontFamily = if (index in monospaceColumns) FontFamily.Monospace else FontFamily.Default,
+                fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
+                color = if (header) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(weights.getOrElse(index) { 1f }.coerceAtLeast(0.1f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+            )
+        }
     }
 }
 

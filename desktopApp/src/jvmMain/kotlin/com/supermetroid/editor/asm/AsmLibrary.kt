@@ -21,6 +21,14 @@ internal data class AsmLibrarySection(
     val title: String,
     val paragraphs: List<String>,
     val example: AsmCodeExample? = null,
+    val table: AsmLibraryTable? = null,
+)
+
+internal data class AsmLibraryTable(
+    val headers: List<String>,
+    val rows: List<List<String>>,
+    val monospaceColumns: Set<Int> = headers.indices.toSet(),
+    val columnWeights: List<Float> = List(headers.size) { 1f },
 )
 
 internal data class AsmLibraryGuide(
@@ -49,6 +57,13 @@ internal data class AsmInstructionInfo(
  */
 internal object AsmLibrary {
     private fun code(vararg lines: String) = lines.joinToString("\n")
+
+    private fun numberBaseRow(value: Int, meaning: String = "") = listOf(
+        value.toString(),
+        "\$${value.toString(16).uppercase().padStart(2, '0')}",
+        "%${value.toString(2).padStart(8, '0')}",
+        meaning,
+    )
 
     val guides: List<AsmLibraryGuide> = listOf(
         AsmLibraryGuide(
@@ -312,6 +327,135 @@ internal object AsmLibrary {
                             "LDA.W DamageTable,X    ; A = 40",
                         ),
                         "The third entry begins four bytes after the table label.",
+                    ),
+                ),
+            ),
+        ),
+        AsmLibraryGuide(
+            id = "quick-reference-tables",
+            title = "Quick-reference tables",
+            summary = "Common values, widths, flags, control flow, and Super Metroid's interrupt vectors at a glance.",
+            keywords = setOf(
+                "table", "decimal", "hex", "binary", "bits", "flags", "status", "vector",
+                "interrupt", "nmi", "irq", "reset", "brk", "cop", "jsr", "jsl", "rts", "rtl", "rti",
+            ),
+            sections = listOf(
+                AsmLibrarySection(
+                    title = "Decimal, Asar hex, and Asar binary",
+                    paragraphs = listOf(
+                        "Every row is the same integer written three ways. Super Metroid source normally uses Asar's \$ prefix for hexadecimal and % prefix for binary; unprefixed digits are decimal. Eight binary digits make the individual bits of one byte easy to count.",
+                    ),
+                    table = AsmLibraryTable(
+                        headers = listOf("Decimal", "Hex", "Binary", "Common use"),
+                        rows = listOf(
+                            numberBaseRow(0, "zero / false"),
+                            numberBaseRow(1, "bit 0 / true"),
+                            numberBaseRow(2, "bit 1"),
+                            numberBaseRow(3),
+                            numberBaseRow(4, "bit 2"),
+                            numberBaseRow(5),
+                            numberBaseRow(6),
+                            numberBaseRow(7),
+                            numberBaseRow(8, "bit 3"),
+                            numberBaseRow(9),
+                            numberBaseRow(10),
+                            numberBaseRow(11),
+                            numberBaseRow(12),
+                            numberBaseRow(13),
+                            numberBaseRow(14),
+                            numberBaseRow(15, "low nibble mask"),
+                            numberBaseRow(16, "bit 4"),
+                            numberBaseRow(31, "low 5-bit mask"),
+                            numberBaseRow(32, "bit 5 / M flag mask"),
+                            numberBaseRow(63, "low 6-bit mask"),
+                            numberBaseRow(64, "bit 6"),
+                            numberBaseRow(127, "low 7-bit mask"),
+                            numberBaseRow(128, "bit 7 / sign bit"),
+                            numberBaseRow(255, "full byte mask"),
+                        ),
+                        monospaceColumns = setOf(0, 1, 2),
+                        columnWeights = listOf(0.7f, 0.7f, 1.25f, 1.6f),
+                    ),
+                ),
+                AsmLibrarySection(
+                    title = "Storage widths and emitted data",
+                    paragraphs = listOf(
+                        "These are storage and address widths, not a promise about the CPU's current A/X/Y width. db, dw, and dl emit little-endian bytes; instruction suffixes select an encoding and must still agree with runtime M/X state.",
+                    ),
+                    table = AsmLibraryTable(
+                        headers = listOf("Width", "Bits", "Unsigned range", "Asar data", "Typical role"),
+                        rows = listOf(
+                            listOf("Byte", "8", "0..255 / \$00..\$FF", "db", "flags, indexes, hardware values"),
+                            listOf("Word", "16", "0..65,535 / \$0000..\$FFFF", "dw", "A/X/Y values, offsets, near pointers"),
+                            listOf("Long", "24", "0..16,777,215 / \$000000..\$FFFFFF", "dl", "full SNES addresses / long pointers"),
+                        ),
+                        monospaceColumns = setOf(1, 2, 3),
+                        columnWeights = listOf(0.7f, 0.5f, 1.55f, 0.7f, 1.8f),
+                    ),
+                ),
+                AsmLibrarySection(
+                    title = "Processor status flags",
+                    paragraphs = listOf(
+                        "P is usually written as NVMXDIZC from bit 7 to bit 0. REP clears selected bits and SEP sets them. The separate E flag selects emulation mode and is exchanged with carry by XCE; it is not one of these eight stored P bits.",
+                    ),
+                    table = AsmLibraryTable(
+                        headers = listOf("Bit", "Mask", "Flag", "Meaning when set"),
+                        rows = listOf(
+                            listOf("7", "\$80", "N", "negative / result top bit is 1"),
+                            listOf("6", "\$40", "V", "signed overflow"),
+                            listOf("5", "\$20", "M", "8-bit accumulator and memory operations"),
+                            listOf("4", "\$10", "X", "8-bit X and Y indexes"),
+                            listOf("3", "\$08", "D", "BCD decimal arithmetic enabled"),
+                            listOf("2", "\$04", "I", "maskable IRQ disabled"),
+                            listOf("1", "\$02", "Z", "result was zero"),
+                            listOf("0", "\$01", "C", "carry set / no borrow / XCE input"),
+                        ),
+                        monospaceColumns = setOf(0, 1, 2),
+                        columnWeights = listOf(0.5f, 0.65f, 0.5f, 2.4f),
+                    ),
+                ),
+                AsmLibrarySection(
+                    title = "Calls, jumps, and matching returns",
+                    paragraphs = listOf(
+                        "A return instruction must match the kind of return address already on the stack. JMP and JML are transfers, not calls, so they do not push a new return address.",
+                    ),
+                    table = AsmLibraryTable(
+                        headers = listOf("Entry", "Reach", "Pushes return", "Matching exit"),
+                        rows = listOf(
+                            listOf("JSR", "same program bank", "16-bit PC", "RTS"),
+                            listOf("JSL", "any bank", "24-bit PBR:PC", "RTL"),
+                            listOf("Interrupt", "hardware vector", "P and return address", "RTI"),
+                            listOf("JMP", "same program bank", "nothing", "destination owns flow"),
+                            listOf("JML", "any bank", "nothing", "destination owns flow"),
+                        ),
+                        monospaceColumns = setOf(0, 3),
+                        columnWeights = listOf(0.7f, 1.25f, 1.35f, 1.35f),
+                    ),
+                ),
+                AsmLibrarySection(
+                    title = "Super Metroid interrupt vectors",
+                    paragraphs = listOf(
+                        "The ROM header and vectors are authored at the FastROM mirror \$80:FFC0; the CPU vector window is mirrored at \$00:FFE0..FFFF. Each vector stores only a 16-bit handler offset. RESET begins in emulation mode, while Super Metroid switches to native mode during Boot and uses the native NMI and IRQ entries during normal play.",
+                        "Reserved slots are named in the disassembly for a complete header layout, but the CPU does not dispatch a distinct event through them.",
+                    ),
+                    table = AsmLibraryTable(
+                        headers = listOf("Mode", "Vector", "CPU event", "Vanilla target"),
+                        rows = listOf(
+                            listOf("Native", "\$80:FFE4", "COP", "Crash_Handler"),
+                            listOf("Native", "\$80:FFE6", "BRK", "Crash_Handler"),
+                            listOf("Native", "\$80:FFE8", "ABORT", "Crash_Handler"),
+                            listOf("Native", "\$80:FFEA", "NMI", "NMI"),
+                            listOf("Native", "\$80:FFEC", "Reserved", "Crash_Handler"),
+                            listOf("Native", "\$80:FFEE", "IRQ", "IRQ"),
+                            listOf("Emulation", "\$80:FFF4", "COP", "Crash_Handler"),
+                            listOf("Emulation", "\$80:FFF6", "Reserved", "Crash_Handler"),
+                            listOf("Emulation", "\$80:FFF8", "ABORT", "Crash_Handler"),
+                            listOf("Emulation", "\$80:FFFA", "NMI", "Crash_Handler"),
+                            listOf("Emulation", "\$80:FFFC", "RESET", "Boot"),
+                            listOf("Emulation", "\$80:FFFE", "IRQ / BRK", "Crash_Handler"),
+                        ),
+                        monospaceColumns = setOf(1, 2, 3),
+                        columnWeights = listOf(0.9f, 1f, 1f, 1.45f),
                     ),
                 ),
             ),
