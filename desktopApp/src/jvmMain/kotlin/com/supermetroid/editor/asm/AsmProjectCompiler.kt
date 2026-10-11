@@ -182,7 +182,7 @@ internal class AsmProjectCompiler(
             val output = sourceDiagnostics.map(AsmSourceLinter::format)
             runCatching { buildArtifacts.publishFailure(projectFilePath, output) }
             throw AsmCompilationException(
-                "SMEDIT source validation found ${sourceDiagnostics.size} unsafe data literal(s)",
+                "SMEDIT source validation found ${sourceDiagnostics.size} source issue(s)",
                 compilerOutput = output,
             )
         }

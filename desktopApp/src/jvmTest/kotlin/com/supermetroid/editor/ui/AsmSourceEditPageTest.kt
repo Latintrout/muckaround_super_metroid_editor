@@ -1,10 +1,18 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
+import com.supermetroid.editor.asm.AsmCompletionItem
+import com.supermetroid.editor.asm.AsmCompletionKind
+import com.supermetroid.editor.asm.AsmCompletionResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+import java.awt.event.MouseEvent
 
 class AsmSourceEditPageTest {
     @Test
@@ -84,10 +92,29 @@ class AsmSourceEditPageTest {
     }
 
     @Test
+    fun `editable macro calls retain the percent prefix for definition lookup`() {
+        val text = "    %DoorHeader(Left, ${'$'}01)"
+        val offset = text.indexOf("DoorHeader") + 4
+
+        assertEquals(
+            AsmEditableSymbolReference(lineIndex = 42, token = "%DoorHeader"),
+            asmEditableSymbolAt(text, offset, pageStartLine = 42),
+        )
+    }
+
+    @Test
     fun `editable symbols in comments are not navigation targets`() {
         val text = "    RTS ; !SPF is only commentary"
 
         assertEquals(null, asmEditableSymbolAt(text, text.indexOf("!SPF") + 1, pageStartLine = 0))
+    }
+
+    @Test
+    fun `caret helpers safely handle an empty first line`() {
+        val text = "\nSecondLine"
+
+        assertEquals(0, asmColumnIndexAtOffset(text, 0))
+        assertEquals(null, asmEditableSymbolAt(text, 0, pageStartLine = 0))
     }
 
     @Test
@@ -124,5 +151,92 @@ class AsmSourceEditPageTest {
         val restored = asmApplyTabIndentation(indented, unindent = true)
         assertEquals(original, restored.text)
         assertEquals(selected.selection, restored.selection)
+    }
+
+    @Test
+    fun `completion replaces only the active token and places the caret after it`() {
+        val value = TextFieldValue("    JSR Gl,X", TextRange(10))
+        val completion = AsmCompletionResult(
+            prefix = "Gl",
+            replaceStart = 8,
+            replaceEnd = 10,
+            items = listOf(AsmCompletionItem("GlobalRoutine", AsmCompletionKind.LABEL, "bank_80.asm:2", 0)),
+        )
+
+        val result = asmApplyCompletion(value, completion, "GlobalRoutine")
+
+        assertEquals("    JSR GlobalRoutine,X", result.text)
+        assertEquals(TextRange(21), result.selection)
+    }
+
+    @Test
+    fun `macro completion inserts parentheses and leaves the caret inside`() {
+        val value = TextFieldValue("    %spr", TextRange(8))
+        val completion = AsmCompletionResult(
+            prefix = "%spr",
+            replaceStart = 4,
+            replaceEnd = 8,
+            items = emptyList(),
+        )
+
+        val result = asmApplyCompletion(
+            value,
+            completion,
+            replacement = "%spritemapEntry()",
+            caretBacktrack = 1,
+        )
+
+        assertEquals("    %spritemapEntry()", result.text)
+        assertEquals(TextRange(result.text.length - 1), result.selection)
+    }
+
+    @Test
+    fun `moving the caret does not summon completion over an existing symbol`() {
+        val source = "    LDA.B DP_Temp03"
+        val previous = TextFieldValue(source, TextRange(source.length))
+        val clicked = previous.copy(selection = TextRange(source.indexOf("Temp03") + 4))
+
+        assertEquals(false, asmAutomaticCompletionRequested(previous, clicked))
+
+        val typed = clicked.copy(
+            text = clicked.text.replaceRange(clicked.selection.start, clicked.selection.end, "0"),
+            selection = TextRange(clicked.selection.start + 1),
+        )
+        assertEquals(true, asmAutomaticCompletionRequested(clicked, typed))
+    }
+
+    @Test
+    fun `middle click and platform definition modifiers are recognized on press`() {
+        assertTrue(asmIsDefinitionPointerGesture(MouseEvent.BUTTON2, false, false, isMac = true))
+        assertTrue(asmIsDefinitionPointerGesture(MouseEvent.BUTTON2, false, false, isMac = false))
+        assertTrue(asmIsDefinitionPointerGesture(MouseEvent.BUTTON1, true, false, isMac = true))
+        assertTrue(asmIsDefinitionPointerGesture(MouseEvent.BUTTON1, false, true, isMac = false))
+        assertTrue(
+            asmIsDefinitionPointerGesture(
+                MouseEvent.NOBUTTON,
+                metaDown = false,
+                controlDown = false,
+                isMac = true,
+                tertiaryPressed = true,
+            ),
+        )
+        assertFalse(asmIsDefinitionPointerGesture(MouseEvent.BUTTON1, false, false, isMac = true))
+        assertFalse(asmIsDefinitionPointerGesture(MouseEvent.BUTTON1, true, false, isMac = false))
+    }
+
+    @Test
+    fun `linked text tolerates a layout offset immediately after a symbol`() {
+        val text = buildAnnotatedString {
+            append("JSR ")
+            pushStringAnnotation("label", "Target")
+            append("Target")
+            pop()
+            append("  ; call")
+        }
+        val symbolEnd = "JSR Target".length
+
+        assertEquals("Target", assertNotNull(asmStringAnnotationAt(text, symbolEnd - 2)).item)
+        assertEquals("Target", assertNotNull(asmStringAnnotationAt(text, symbolEnd)).item)
+        assertEquals(null, asmStringAnnotationAt(text, text.length))
     }
 }

@@ -18,7 +18,7 @@ class AsmProjectWorkspaceTest {
     fun `project workspace is isolated persistent and restorable from its offline snapshot`() {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val repository = AsmProjectWorkspaceRepository(listOf(range))
+        val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "My Hack.smedit").apply { writeText("{}") }
         val referenceSource = File(reference.root, "src/bank_80.asm")
         val originalText = referenceSource.readText()
@@ -55,7 +55,7 @@ class AsmProjectWorkspaceTest {
     fun `source writes cannot escape the managed project tree`() {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val repository = AsmProjectWorkspaceRepository(listOf(range))
+        val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Safe.smedit").apply { writeText("{}") }
         repository.initialize(projectFile.absolutePath, reference)
 
@@ -69,7 +69,7 @@ class AsmProjectWorkspaceTest {
     fun `failed initialization does not activate a partial workspace`() {
         val range = AsmAssetRange("Tiles_Missing.bin", 0x10, 4)
         val reference = fakeReference(emptyList())
-        val repository = AsmProjectWorkspaceRepository(listOf(range))
+        val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Broken.smedit").apply { writeText("{}") }
 
         assertThrows<IllegalArgumentException> {
@@ -80,10 +80,26 @@ class AsmProjectWorkspaceTest {
     }
 
     @Test
-    fun `repair preserves an incomplete prior sidecar as a recoverable backup`() {
+    fun `new workspaces include the objectives reference module disabled`() {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
         val repository = AsmProjectWorkspaceRepository(listOf(range))
+        val projectFile = File(tempDirectory, "Starter.smedit").apply { writeText("{}") }
+
+        val workspace = repository.initialize(projectFile.absolutePath, reference)
+        val fileId = "project/objectives_pause_screen.asm"
+
+        assertEquals(listOf(fileId), workspace.projectModuleFileIds)
+        assertEquals(setOf(fileId), workspace.disabledProjectModuleFileIds)
+        assertTrue(File(workspace.root, "modules/objectives_pause_screen.asm").readText().contains("Objectives_MainPauseRoutine"))
+        assertEquals(emptySet<String>(), repository.sourceOverrideFileIds(projectFile.absolutePath))
+    }
+
+    @Test
+    fun `repair preserves an incomplete prior sidecar as a recoverable backup`() {
+        val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
+        val reference = fakeReference(listOf(range))
+        val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Repair.smedit").apply { writeText("{}") }
         val incomplete = File(tempDirectory, "Repair_smedit/asm").apply { mkdirs() }
         File(incomplete, "user-notes.txt").writeText("preserve me")
@@ -100,7 +116,7 @@ class AsmProjectWorkspaceTest {
     fun `recreating a local tree reapplies trackable source overrides`() {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val repository = AsmProjectWorkspaceRepository(listOf(range))
+        val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Portable.smedit").apply { writeText("{}") }
         val root = File(tempDirectory, "Portable_smedit/asm")
         File(root, "overrides/src").mkdirs()
@@ -118,7 +134,7 @@ class AsmProjectWorkspaceTest {
     fun `project modules are portable ordered editable and separate from bank overrides`() {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val repository = AsmProjectWorkspaceRepository(listOf(range))
+        val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Modules.smedit").apply { writeText("{}") }
         repository.initialize(projectFile.absolutePath, reference)
 
@@ -168,7 +184,7 @@ class AsmProjectWorkspaceTest {
     fun `workspace state tracks unsaved saved and restored project source`() = runBlocking {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val projectRepository = AsmProjectWorkspaceRepository(listOf(range))
+        val projectRepository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "State.smedit").apply { writeText("{}") }
         projectRepository.initialize(projectFile.absolutePath, reference)
         val buildArtifacts = AsmBuildArtifactRepository(projectRepository)
@@ -222,7 +238,7 @@ class AsmProjectWorkspaceTest {
     fun `workspace state manages project modules as saved build inputs`() = runBlocking {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val projectRepository = AsmProjectWorkspaceRepository(listOf(range))
+        val projectRepository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "ModuleState.smedit").apply { writeText("{}") }
         projectRepository.initialize(projectFile.absolutePath, reference)
         val state = AsmWorkspaceState(
@@ -235,7 +251,7 @@ class AsmProjectWorkspaceTest {
         )
         state.bindProject(projectFile.absolutePath, enabled = true)
 
-        assertTrue(state.createProjectModule("door hook"))
+        assertTrue(state.createProjectModule("door hook", "Hooks a custom Landing Site door."))
         val fileId = "project/door_hook.asm"
         assertEquals(listOf(fileId), state.projectModuleFileIds)
         assertEquals(fileId, state.selectedFileId)
@@ -243,6 +259,11 @@ class AsmProjectWorkspaceTest {
         assertTrue(state.isProjectModuleEnabled(fileId))
         assertTrue(state.hasProjectSourceChanges)
         assertTrue(state.sourceBuildRequired)
+        assertEquals("Hooks a custom Landing Site door.", state.workspace?.index?.file(fileId)?.description)
+        assertEquals(
+            "Hooks a custom Landing Site door.",
+            projectModuleDescription(state.sourceEditText(fileId)),
+        )
 
         assertTrue(state.setProjectModuleEnabled(fileId, enabled = false))
         assertFalse(state.isProjectModuleEnabled(fileId))
@@ -256,11 +277,24 @@ class AsmProjectWorkspaceTest {
         assertTrue(state.hasUnsavedSourceChanges(fileId))
         assertTrue(state.saveSource(fileId))
         assertFalse(state.hasUnsavedSourceChanges(fileId))
+        assertTrue(state.setProjectModuleEnabled(fileId, enabled = false))
 
-        assertTrue(state.renameProjectModule(fileId, "door_runtime"))
+        assertTrue(
+            state.updateProjectModuleSettings(
+                fileId,
+                "door_runtime",
+                "Runtime door hooks\nfor the custom room.",
+            ),
+        )
         val renamed = "project/door_runtime.asm"
         assertEquals(listOf(renamed), state.projectModuleFileIds)
         assertEquals(renamed, state.selectedFileId)
+        assertFalse(state.isProjectModuleEnabled(renamed), "settings must preserve the ON/OFF manifest")
+        assertEquals("Runtime door hooks for the custom room.", state.workspace?.index?.file(renamed)?.description)
+        val renamedText = state.sourceEditText(renamed)
+        assertTrue(renamedText.contains("; Project module: door runtime"))
+        assertTrue(renamedText.contains("; SMEDIT description: Runtime door hooks for the custom room."))
+        assertTrue(renamedText.contains("DoorHook:\n    RTS"), "settings must preserve authored source")
         assertTrue(state.deleteProjectModule(renamed))
         assertEquals(emptyList<String>(), state.projectModuleFileIds)
         assertFalse(state.hasProjectSourceChanges)
@@ -270,7 +304,7 @@ class AsmProjectWorkspaceTest {
     fun `reviewed project replacement stages buffers without writing source`() = runBlocking {
         val range = AsmAssetRange("Tiles_Test.bin", 0x10, 4)
         val reference = fakeReference(listOf(range))
-        val projectRepository = AsmProjectWorkspaceRepository(listOf(range))
+        val projectRepository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Replace.smedit").apply { writeText("{}") }
         val project = projectRepository.initialize(projectFile.absolutePath, reference)
         val state = AsmWorkspaceState(

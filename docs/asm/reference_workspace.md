@@ -76,9 +76,38 @@ never be silently omitted from an export.
     the complete source index, and immediately checks the complete source tree
     for unsafe data literals. Label navigation and references therefore reflect
     the saved project text. Asar `!defines` such as `!SPF` are colored and
-    navigate to their declarations like ordinary source symbols; use
-    **Cmd/Ctrl + click** while editing so an ordinary click remains available for
-    caret placement and selection.
+    navigate to their declarations like ordinary source symbols. Resolvable
+    references retain syntax colors without persistent underlines; hovering any
+    navigable token changes the text cursor to a hand. Use **Cmd+D** on macOS or
+    **Ctrl+D** on Windows and Linux to open a definition. Cmd/Ctrl-click and
+    middle-click remain convenient pointer equivalents, while ordinary click
+    only moves the caret or changes the selection and never recenters the source.
+    **Go to Definition** is also in the editor's right-click menu. **Find Usages**
+    uses **Cmd/Ctrl+U** and immediately expands the in-place result list; labels
+    and macros share the same usage count, Prev/Next cycle, and navigation history.
+    Editable-source pointer navigation retains its measured text layout across
+    same-page history moves. If a genuinely new page is still being measured,
+    the first definition gesture is replayed as soon as that layout is ready
+    instead of being silently discarded.
+    Completion opens automatically after two typed characters or explicitly with
+    **Cmd/Ctrl+Tab** or **Show Completions** in that menu. **Cmd/Ctrl+B** invokes
+    Build, and **Cmd/Ctrl+R** saves the active ASM source/project as needed and
+    opens or resumes the emulator through the normal validated ROM build path.
+    **Cmd/Ctrl+Left** and **Cmd/Ctrl+Right** move through ASM navigation history.
+    Standard **Cmd/Ctrl+X**, **C**, **V**, and **A** text editing remains native.
+    Size-qualified mnemonics preserve and complete `.B`, `.W`, and `.L`
+    rather than collapsing back to a bare opcode. It offers 65C816 instructions,
+    Asar directives, `!defines`, global labels, only the `.localLabels` valid in
+    the current scope, and indexed `%macros` with their parameter signatures and
+    source locations. Inside a call, a compact caret-adjacent signature tracks
+    the active argument while respecting nested expressions and quoted commas.
+    Accepting a macro completion inserts its parentheses and leaves the caret
+    inside. Macro calls use the same definition navigation as labels.
+    Disabled modules are excluded from active completion so the editor does not
+    suggest source that the current build cannot see. Use
+    Up/Down and Enter/Tab to accept or Escape to dismiss it. The completion
+    engine reuses the saved project index rather than reparsing a large bank on
+    every keystroke.
     With literal source text in the Find field, **Replace in project…** opens an
     explicit project-wide preview. It reports every occurrence and affected file,
     shows before/after rows, and offers a case-sensitive option. Applying the
@@ -90,8 +119,12 @@ never be silently omitted from an export.
     from the immutable vanilla snapshot; only `Save *` or an explicit
     **unsaved** count means a buffer or project still needs to be written.
     Use **+ Module** above the banks for new standalone project code. Modules are
-    immediately portable authored files, can be renamed or deleted from their
-    editor bar, and use the sidebar arrows for explicit include order. Their
+    immediately portable authored files. The source-header settings cog changes
+    the module name and description; the description is a source-controlled,
+    assembler-safe comment inside the `.asm` file. Destructive module deletion
+    lives inside that settings dialog and still requires a separate confirmation,
+    while the sidebar owns the single ON/OFF toggle and explicit include-order
+    arrows. Their
     empty template is safe by default: adding emitted code still requires an
     intentional `org`/free-space target and a hook from existing engine code.
 12. **ASM source** is now the active ROM build base. A project with no source
@@ -122,8 +155,12 @@ ASM's own compact history remains available for fine-grained
 source/asset/Library browsing.
 
 When **Project** source is selected, the source pane is immediately editable;
-there is no second per-file edit mode. **Save**, **Revert**, and
-**Restore original** provide the explicit write and recovery boundaries. Large
+there is no second per-file edit mode. Its single gray source header combines
+Back/Forward, file or module identity, **Revert**, **Save**, **Build**, and the
+module settings cog; it does not spend another row listing keyboard shortcuts.
+The current address, PC offset, line count, and compact build state live in the
+application's existing bottom-right status bar. **Restore original** provides
+the recovery boundary for a modified pinned source file. Large
 banks are presented in bounded line pages so syntax highlighting, selection,
 and scrolling remain reliable; one continuous right scrollbar addresses the
 whole bank, the bottom scrollbar exposes long lines, and edits from every page
@@ -141,8 +178,8 @@ ordinary source-saving responsive without allowing execution to use stale
 bytes. Unsafe source fails before Asar is launched. Asar still
 assembles its include tree as one program rather than incrementally compiling an
 individual bank, but SMEDIT reuses an unchanged compiled base and unchanged
-generated inputs. Successful builds add only a compact status to the existing
-source header. Source-validation and Asar diagnostics use one collapsible strip
+generated inputs. Successful builds update only that compact global status.
+Source-validation and Asar diagnostics use one collapsible strip
 below the source editor, where it cannot obscure a linked line; located problems
 open the exact source file with several lines of surrounding context rather than
 adding a permanent Problems tool window. Every located error row is also shaded
@@ -219,9 +256,13 @@ ignored by the sidecar's own `.gitignore`; intentionally saved source changes ar
 mirrored under `overrides/src/`, which is small, reviewable, and suitable for
 source control. A recreated local tree reapplies those overrides automatically.
 Standalone project-authored routines and tables live under `modules/`, beside an
-explicit `.order` file and, when needed, a small `.disabled` manifest. They
-appear first in the Project Source tree and can be created, renamed, disabled,
+explicit `.order` file and, when needed, a small `.disabled` manifest. Names and
+descriptions are portable metadata comments in the module itself. Modules appear
+first in the Project Source tree and can be created, configured, disabled,
 re-enabled, deleted, and reordered without editing the pinned `main.asm`.
+New workspaces begin with the documented Objectives pause-screen module present
+but disabled. It is a readable, buildable reference and contributes no bytes
+until the user explicitly enables it.
 At build time SMEDIT creates a reserved gateway that includes those modules after
 the vanilla source and before generated patch backends. Disabled modules remain
 editable and retain their position, but are omitted from the gateway and source
@@ -480,7 +521,12 @@ once conversion.
   it, so repaired source can never inherit stale errors after reopening SMEDIT.
 - `AsmSourceLinter` catches data literals that exceed their explicit
   `db`/`dw`/`dl`/`dd` storage width before Asar can silently keep only the low
-  bits. Intentional truncation remains expressible with an explicit mask.
+  bits. It also resolves complete `%macro(...)` calls and checks their argument
+  counts, including variadic minimums. The editor runs these conservative checks
+  after a short typing pause and immediately feeds Problems plus red/yellow source
+  rows; incomplete calls are ignored while being typed, and Asar remains the
+  authority for the complete language. Intentional truncation remains expressible
+  with an explicit mask.
 - `AsmSourceAssetMaterializer` projects eligible write-plan bytes into exact
   manifest-owned `data/` files, excludes allocations and ambiguous ownership,
   and leaves the project workspace unchanged.
@@ -494,7 +540,9 @@ once conversion.
   provisioning a managed developer compiler.
 - `AsmSourceParser` reads `main.asm` include order and descriptions, then indexes
   every source file, authored section, global label, scoped local label,
-  cross-reference, and extracted asset. Reference resolution uses the same
+  Asar/WLA `Parent_Local` alias, cross-reference, and extracted asset. This lets
+  a reference such as `DebugConst_DisableAudio` navigate to the `.DisableAudio:`
+  declaration beneath `DebugConst:`. Reference resolution uses the same
   local-scope rules as label navigation and ignores comments and quoted strings;
   it is not a raw text search.
 - `AsmAddressAtlas` is the shared bidirectional address layer. It converts
@@ -535,11 +583,13 @@ export SMEDIT_TEST_ROM='/path/to/clean/unheadered/Super Metroid.sfc'
 The separation between editable source and executable output is intentional.
 Follow-up work can now be incremental:
 
-1. Continue conservative editing assistance with source completion and explicit
+1. Continue conservative editing assistance beyond the shipped scope-aware
+   instruction/directive/label/macro completion and debounced diagnostics: add
+   richer expression-aware hints, additional Asar-aware checks, and explicit
    statement formatting that preserves expressions, comments, literal forms,
-   and `.B`/`.W`/`.L` suffixes. Literal project-wide find/replace now has a
-   reviewed, buffer-only preview, and Tab/Shift-Tab provide selection-scoped
-   indentation without a whole-file formatter.
+   and `.B`/`.W`/`.L` suffixes. Literal project-wide
+   find/replace already has a reviewed, buffer-only preview, and Tab/Shift-Tab
+   provide selection-scoped indentation without a whole-file formatter.
 2. Add artifact sinks for semantic editors so room, graphics, map, text, and
    sound changes can materialize into project-owned `data/`/source before Asar.
    Today those edits still run safely after compilation through the shared

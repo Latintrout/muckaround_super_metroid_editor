@@ -222,7 +222,22 @@ class EmulatorWorkspaceState(
     var audioVolume by mutableStateOf(AppConfig.load().emulatorAudioVolume)
     var autoPlayOnOpen by mutableStateOf(AppConfig.load().emulatorAutoPlayOnOpen)
         private set
+    var runRequestSerial by mutableStateOf(0L)
+        private set
+    private var handledRunRequestSerial = 0L
     var saveSlotIndex by mutableStateOf(0)
+
+    /** Requests that the floating emulator become visible and actively run.
+     * The window owns the build/connect lifecycle and observes this serial. */
+    fun requestRun() {
+        runRequestSerial++
+    }
+
+    internal fun consumeRunRequest(): Boolean {
+        if (runRequestSerial <= handledRunRequestSerial) return false
+        handledRunRequestSerial = runRequestSerial
+        return true
+    }
 
     /** Combo action queued by gamepad detection, consumed by the frame loop. */
     var pendingComboAction by mutableStateOf<String?>(null)

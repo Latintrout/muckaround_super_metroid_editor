@@ -406,25 +406,38 @@ Work one checked slice at a time. Do not mark parent rows verified from a spot c
   level/resource relocation and mutation allowlists remain.
 - [ ] **P4.6** Add representative emulator traversal/state-switch smoke tests.
 
-### P5 — Prepare, but do not yet ship, assembly-project mode
+### P5 — Assembly reference and project workspace
 
-- [ ] Define a source workspace descriptor and supported disassembly version.
-- [ ] Let SMEDIT provision the supported `sm_disassembly` checkout as an explicit
-  assembly workspace, then index its banks, labels, macros, and assets for a native
-  ASM editor mode.
-- [ ] Keep SMEDIT-authored comments, relationships, validation facts, and editing
-  context in a versioned overlay database so upstream source stays clean and can be
-  refreshed deliberately.
-- [ ] Make the reference manifest usable without hardcoded ROM addresses in UI code.
-- [ ] Add read-only browsing from source symbol to SMEDIT object and rendered asset.
-- [ ] Prototype source-owned asset edits in a disposable checkout.
-- [ ] Build through an adapter and compare the result with the expected ROM diff.
-- [ ] Only then design “New project from assembly” UX and project persistence.
+- [x] Pin the supported disassembly revision and provision source plus all 1,130
+  ROM-derived assets transactionally.
+- [x] Index banks, sections, labels, scoped local labels, references, addresses,
+  and asset ownership for bidirectional navigation.
+- [x] Keep editable project source isolated from an immutable offline original;
+  persist only reviewable overrides and ordered standalone modules.
+- [x] Compile with pinned cross-platform Asar, retain diagnostics/symbols, and feed
+  the result through the normal owned export transaction and parity guard.
+- [x] Materialize eligible GUI edits into exact source assets and explicitly
+  migrate patch families between ROM and ASM backends one at a time.
+- [x] Provide bounded responsive editing, syntax highlighting, scope-aware
+  completion, source navigation, safe Save/Build boundaries, and disabled starter
+  modules without changing a clean project's bytes.
+- [ ] Expand source-native sinks to variable-sized room resources and migrate more
+  curated patches from post-compile writes into readable symbolic modules.
+- [ ] Add emulator run-to-address, breakpoints, register/stack inspection, and
+  source-mapped crash diagnostics.
 
 ## Progress log
 
 | Date | Change | Evidence |
 |---|---|---|
+| 2026-10-10 | Indexed Asar's cross-scope `Parent_Local` label form | Ordinary `.Local:` declarations now retain their in-scope dotted identity and also expose the WLA symbol name Asar emits, such as `DebugConst_DisableAudio` for `.DisableAudio:` beneath `DebugConst:`. Definition navigation, syntax affordances, completion, and Find Usages can therefore resolve cross-scope references that previously appeared only as search text. A parser regression proves the alias resolves across files and owns its usage. |
+| 2026-10-10 | Prevented intermittent first middle-click loss in editable ASM source | Same-page history navigation no longer clears the measured text layout merely because the navigation serial changed. A definition gesture arriving during a real source/page layout refresh is retained and replayed against the matching text layout, removing the focus/right-click initialization dependency while preserving the existing middle-click and Cmd/Ctrl-click resolver. |
+| 2026-10-10 | Consolidated the ASM source chrome and moved destructive module actions behind settings | Project source now uses one gray header for navigation, source/module identity, Revert, Save, Build, and module settings; the redundant shortcut-help row is gone. Delete module moved into the settings dialog and retains its second destructive confirmation. Address, PC offset, line count, and build state now occupy the otherwise-empty global bottom-right status area, with a state regression proving source-only visibility. |
+| 2026-10-10 | Made ASM link affordances and history navigation IDE-like | Navigable source tokens now keep their semantic syntax color without persistent underline noise and switch to a hand cursor only on hover in both editable and selectable source. Middle-click recognition now uses Compose's live tertiary-button state plus the native button mask, and explicitly establishes editor focus before navigation, covering desktop events that report `NOBUTTON`. Cmd/Ctrl+Left and Cmd/Ctrl+Right navigate ASM Back/Forward in editable source and every read-only ASM pane. A regression covers tertiary-button detection when the native button value is absent. |
+| 2026-10-10 | Standardized ASM commands and made Find Usages visibly in-place | Editable source now uses Cmd on macOS and Ctrl on Windows/Linux with D=definition, U=usages, Tab=completion, B=Build, and R=validated emulator Run; native X/C/V/A editing remains intact and the themed context menu shows the same bindings. Find Usages keeps the invocation row visible and immediately expands its result list. Caret-only clicks no longer mutate workspace navigation, clear reference results, rerun source analysis, or provoke paged-source positioning. State regressions cover in-place usage expansion and repeatable emulator run requests. |
+| 2026-10-10 | Consolidated project-module metadata and enablement UX | A single editor-bar settings cog edits both the normalized module filename and a 240-character description stored as an Asar-safe, source-controlled comment. Settings updates preserve authored source, explicit module order, and disabled state while reparsing the sidebar/header immediately. The duplicate editor-bar Enable/Disable action is removed; the sidebar ON/OFF toggle is authoritative. Repository and state tests cover creation, multiline-description normalization, rename, source preservation, disabled-manifest migration, and deletion. |
+| 2026-10-10 | Added macro-aware ASM source intelligence and live Problems feedback | The source index now records Asar macro definitions, parameter signatures, variadic status, locations, and call sites. Completion suggests only active macros and labels, inserts macro parentheses, shows signatures, preserves `%` tokens, and definition navigation works from editable and reference source. Macro definitions expose the normal usage count/list/cycle through Cmd/Ctrl+U and context-menu access. A caret-adjacent signature tracks the active macro argument through nested expressions and quoted commas. Middle-click navigation is handled from the reliable press event and remains available in selectable reference source. A conservative debounced linter checks oversized data literals plus complete macro existence/arity, ignores incomplete calls during typing, replaces stale diagnostics for dirty source, and drives the existing Problems panel and exact red/yellow source rows before a full build. Synthetic completion/navigation/linter tests and the pinned Super Metroid source audit cover the behavior. |
+| 2026-10-10 | Restored editable-source references and added scope-aware completion plus an opt-in starter module | Editable project source again exposes semantic/editor links and definition usage bars, distinguishes indexed symbols through syntax color, and supports middle-click, Cmd/Ctrl-click, and Cmd/Ctrl+D navigation. A bounded completion popup uses the existing saved source index for all 92 opcodes, Asar directives, globals, defines, and only in-scope local labels without reparsing a bank per keystroke. New workspaces include the complete Objectives pause-screen example disabled, preserving byte-identical clean builds until explicitly enabled. |
 | 2026-10-09 | Made the Project ASM compiler a self-contained cross-platform release toolchain | Each packaging runner builds exact Asar 1.81 revision `a8538ca`, bundles the native executable plus SHA-256 manifest and GPLv3 license/notice in the platform app resources, and makes `prepareAppResources` depend on that payload. `AsmToolchain` verifies package integrity, installs the read-only bundled binary into a versioned per-platform user path, repairs POSIX execute permission, verifies the version banner, and retains explicit/developer fallbacks. The ROM-free `:desktopApp:asarToolchainSmokeTest` resolves through the packaged layout, verifies byte identity after installation, assembles a synthetic LoROM, checks emitted bytes, and requires WLA symbols; the macOS, Windows, and Linux release jobs run it before ordinary tests and installer creation. |
 | 2026-10-07 | Proved pause-map tilemaps, reveal masks, and map-station ownership | `parityMinimap` pins all seven bank-`$B5` maps / 14,336 words, seven unique bank-`$82` `MapData` masks plus the debug Tourian alias, 911 set reveal cells, five vanilla map-station PLMs, 256 source-owned 4bpp graphics tiles, and seven direct engine consumers. The audit corrected SMEDIT's flat LSB-first reveal-mask interpretation to the engine's two-page MSB-first layout, made both readers/writers follow the runtime pointer tables, restored the full three-bit palette plus priority semantics, and replaced the stale `$D3200` 2bpp graphics assumption with `$B6:8000` 4bpp ownership. Exact no-op writes cover every cell. Room creation/movement/validation now excludes the hidden padding row that the engine's explored-map calculation cannot safely address. |
 | 2026-10-07 | Proved mixed load-station ownership and protected special slots | `parityLoadStations` pins all eight bank-`$80` lists / 151 entries / 2,114 bytes, every runtime spawn field, 19 normal save PLMs, and nine direct engine consumers. It separates the 48 save-addressable slots from elevators, Ceres sequences, debug destinations, and the gunship landing record. The audit fixed Debug's missing seventeenth parsed entry and prevents automatic allocation, validation, or export from overwriting a nonzero record owned by another room—especially Crateria slot 0, which belongs to Landing Site/the gunship without a normal save PLM. |

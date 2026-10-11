@@ -27,6 +27,19 @@ import org.junit.jupiter.api.Test
 class EmulatorWorkspaceStateTest {
 
     @Test
+    fun `run requests are observable even when repeated`() {
+        val state = EmulatorWorkspaceState()
+
+        state.requestRun()
+        assertTrue(state.consumeRunRequest())
+        assertFalse(state.consumeRunRequest())
+
+        state.requestRun()
+        assertEquals(2L, state.runRequestSerial)
+        assertTrue(state.consumeRunRequest())
+    }
+
+    @Test
     fun `currentAction maps keys and clears conflicting directions`() {
         val state = EmulatorWorkspaceState()
 

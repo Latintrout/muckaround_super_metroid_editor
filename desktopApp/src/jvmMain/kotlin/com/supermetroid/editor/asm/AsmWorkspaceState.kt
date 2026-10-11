@@ -15,6 +15,7 @@ internal sealed interface AsmWorkspaceLocation {
         val fileId: String,
         val lineIndex: Int,
         val referenceSymbol: AsmSymbolId? = null,
+        val referenceMacro: AsmMacroId? = null,
         val workspaceKind: AsmWorkspaceKind = AsmWorkspaceKind.REFERENCE,
         val columnIndex: Int = 0,
     ) : AsmWorkspaceLocation
@@ -24,6 +25,11 @@ internal sealed interface AsmWorkspaceLocation {
     ) : AsmWorkspaceLocation
     data class Library(val pageId: String, val instructionToken: String?) : AsmWorkspaceLocation
     data class Rom(val view: AsmRomPreviewView) : AsmWorkspaceLocation
+}
+
+internal sealed interface AsmReferenceExpansionTarget {
+    data class Label(val id: AsmSymbolId) : AsmReferenceExpansionTarget
+    data class Macro(val id: AsmMacroId) : AsmReferenceExpansionTarget
 }
 
 internal class AsmWorkspaceState(
@@ -58,6 +64,12 @@ internal class AsmWorkspaceState(
         private set
     var activeReferenceSymbol by mutableStateOf<AsmSymbolId?>(null)
         private set
+    var activeReferenceMacro by mutableStateOf<AsmMacroId?>(null)
+        private set
+    var referenceExpansionTarget by mutableStateOf<AsmReferenceExpansionTarget?>(null)
+        private set
+    var referenceExpansionSerial by mutableStateOf(0L)
+        private set
     var selectedAssetPath by mutableStateOf<String?>(null)
         private set
     var selectedAssetCategory by mutableStateOf<String?>(null)
@@ -85,6 +97,18 @@ internal class AsmWorkspaceState(
         private set
     var buildReport by mutableStateOf<AsmBuildReport?>(null)
         private set
+    var liveDiagnostics by mutableStateOf<List<AsmBuildDiagnostic>>(emptyList())
+        private set
+    private var liveDiagnosticFileId: String? = null
+    val displayedDiagnostics: List<AsmBuildDiagnostic>
+        get() {
+            val liveFile = liveDiagnosticFileId
+            val liveTextSupersedesBuiltText = liveFile != null && liveFile in dirtySourceFileIds
+            val built = buildReport?.diagnostics.orEmpty().filterNot { diagnostic ->
+                liveTextSupersedesBuiltText && diagnostic.fileId == liveFile
+            }
+            return (built + liveDiagnostics).distinct()
+        }
 
     private val backStack = mutableListOf<AsmWorkspaceLocation>()
     private val forwardStack = mutableListOf<AsmWorkspaceLocation>()
@@ -124,6 +148,47 @@ internal class AsmWorkspaceState(
     val sourceBuildRequired: Boolean
         get() = workspaceKind == AsmWorkspaceKind.PROJECT &&
             (activeUnsavedSourceFileIds.isNotEmpty() || buildReport?.succeeded != true)
+    val sourceStatusSummary: String
+        get() {
+            if (browserMode != AsmBrowserMode.SOURCE) return ""
+            val index = workspace?.index ?: return ""
+            val fileId = selectedFileId ?: return ""
+            val source = index.file(fileId) ?: return ""
+            val compiledAddress = if (workspaceKind == AsmWorkspaceKind.PROJECT) {
+                buildReport?.takeIf { it.succeeded }?.symbols?.addressAt(fileId, selectedLineIndex)
+            } else null
+            val indexedAddress = index.addressAtlas.exactAt(fileId, selectedLineIndex).firstOrNull()?.snesAddress
+            val contextualAddress = index.addressAtlas.contextAt(fileId, selectedLineIndex)
+            val exactAddress = compiledAddress ?: indexedAddress
+            val displayedAddress = exactAddress ?: contextualAddress?.snesAddress
+            val pcOffset = exactAddress?.let(::snesLoRomToPc) ?: contextualAddress?.pcOffset
+            val lineCount = if (workspaceKind == AsmWorkspaceKind.PROJECT) {
+                sourceEditText(fileId).lineSequence().count()
+            } else {
+                source.lines.size
+            }
+            return buildList {
+                if (displayedAddress != null && pcOffset != null) {
+                    add(
+                        "${if (exactAddress == null) "Near " else ""}${formatSnesAddress(displayedAddress)} · " +
+                            formatPcOffset(pcOffset),
+                    )
+                }
+                add("$lineCount lines")
+                if (workspaceKind == AsmWorkspaceKind.PROJECT) {
+                    add(
+                        when {
+                            liveDiagnostics.isNotEmpty() -> "source issue"
+                            buildReport?.validationOnly == true -> "source issue"
+                            buildReport != null && buildReport?.succeeded != true -> "build failed"
+                            sourceBuildRequired -> "build needed"
+                            buildReport?.succeeded == true -> "build ✓"
+                            else -> ""
+                        },
+                    )
+                }
+            }.filter(String::isNotBlank).joinToString(" · ")
+        }
 
     fun isProjectModule(fileId: String?): Boolean = fileId != null && fileId in projectModuleFileIds
 
@@ -368,8 +433,16 @@ internal class AsmWorkspaceState(
         columnIndex: Int = 0,
     ) {
         val source = workspace?.index?.file(fileId) ?: return
+        if (selectedFileId != source.id) {
+            liveDiagnosticFileId = null
+            liveDiagnostics = emptyList()
+        }
         if (addToHistory) rememberCurrentLocation()
-        if (!preserveReferences) activeReferenceSymbol = null
+        if (!preserveReferences) {
+            activeReferenceSymbol = null
+            activeReferenceMacro = null
+            referenceExpansionTarget = null
+        }
         browserMode = AsmBrowserMode.SOURCE
         selectedFileId = source.id
         expandedSourceFileId = source.id
@@ -410,6 +483,20 @@ internal class AsmWorkspaceState(
         if (saved != null && text != saved) dirtySourceFileIds[fileId] = Unit
         else dirtySourceFileIds.remove(fileId)
         sourceBufferRevision++
+    }
+
+    fun publishLiveDiagnostics(
+        fileId: String,
+        revision: Long,
+        diagnostics: List<AsmBuildDiagnostic>,
+    ) {
+        if (
+            workspaceKind != AsmWorkspaceKind.PROJECT ||
+            selectedFileId != fileId ||
+            sourceBufferRevision != revision
+        ) return
+        liveDiagnosticFileId = fileId
+        liveDiagnostics = diagnostics
     }
 
     fun sourceTexts(): List<AsmSourceText> = workspace?.index?.files.orEmpty().map { source ->
@@ -516,6 +603,7 @@ internal class AsmWorkspaceState(
                 workspace?.index?.file(selectedId)?.lines?.getOrNull(selectedLineIndex)?.length ?: 0,
             )
             activeReferenceSymbol = null
+            activeReferenceMacro = null
             navigationSerial++
             true
         } catch (problem: Exception) {
@@ -558,6 +646,7 @@ internal class AsmWorkspaceState(
             savedSourceTexts[selectedId] = restored
             dirtySourceFileIds.remove(selectedId)
             activeReferenceSymbol = null
+            activeReferenceMacro = null
             editSessionSerial++
             sourceBufferRevision++
             navigationSerial++
@@ -571,14 +660,14 @@ internal class AsmWorkspaceState(
         }
     }
 
-    suspend fun createProjectModule(name: String): Boolean {
+    suspend fun createProjectModule(name: String, description: String = ""): Boolean {
         if (workspaceKind != AsmWorkspaceKind.PROJECT || boundProjectFilePath.isBlank() || busy) return false
         busy = true
         error = null
         return try {
             progress = "Creating project module…"
             val (result, fileId) = withContext(Dispatchers.IO) {
-                projectRepository.createModule(boundProjectFilePath, name)
+                projectRepository.createModule(boundProjectFilePath, name, description)
             }
             adoptProjectWorkspace(result)
             buildReport = null
@@ -593,30 +682,42 @@ internal class AsmWorkspaceState(
         }
     }
 
-    suspend fun renameProjectModule(fileId: String, name: String): Boolean {
+    suspend fun renameProjectModule(fileId: String, name: String): Boolean =
+        updateProjectModuleSettings(
+            fileId = fileId,
+            name = name,
+            description = workspace?.index?.file(fileId)?.description.orEmpty(),
+        )
+
+    suspend fun updateProjectModuleSettings(
+        fileId: String,
+        name: String,
+        description: String,
+    ): Boolean {
         if (!isProjectModule(fileId) || boundProjectFilePath.isBlank() || busy) return false
         if (hasUnsavedSourceChanges(fileId)) {
-            error = "Save or revert this module before renaming it"
+            error = "Save or revert this module before changing its settings"
             return false
         }
         busy = true
         error = null
         return try {
-            progress = "Renaming project module…"
+            progress = "Updating project module…"
             val (result, newFileId) = withContext(Dispatchers.IO) {
-                projectRepository.renameModule(boundProjectFilePath, fileId, name)
+                projectRepository.updateModuleSettings(boundProjectFilePath, fileId, name, description)
             }
-            val buffered = sourceBuffers.remove(fileId)
-            val saved = savedSourceTexts.remove(fileId)
+            sourceBuffers.remove(fileId)
+            savedSourceTexts.remove(fileId)
             dirtySourceFileIds.remove(fileId)
-            if (buffered != null) sourceBuffers[newFileId] = buffered
-            if (saved != null) savedSourceTexts[newFileId] = saved
+            val updatedText = result.referenceWorkspace.index.file(newFileId)?.file?.readText().orEmpty()
+            sourceBuffers[newFileId] = updatedText
+            savedSourceTexts[newFileId] = updatedText
             adoptProjectWorkspace(result)
             buildReport = null
             openSource(newFileId, addToHistory = false)
             true
         } catch (problem: Exception) {
-            error = problem.message ?: "Could not rename the project module"
+            error = problem.message ?: "Could not update the project module"
             false
         } finally {
             busy = false
@@ -759,6 +860,7 @@ internal class AsmWorkspaceState(
         index.resolveLabel(fileId, selectedLineIndex, token)?.let { label ->
             openSource(label.fileId, label.lineIndex)
             activeReferenceSymbol = label.symbolId
+            activeReferenceMacro = null
         }
     }
 
@@ -767,6 +869,7 @@ internal class AsmWorkspaceState(
             ?.let { label ->
                 openSource(label.fileId, label.lineIndex)
                 activeReferenceSymbol = label.symbolId
+                activeReferenceMacro = null
             }
     }
 
@@ -777,7 +880,50 @@ internal class AsmWorkspaceState(
         selectedLineIndex = lineIndex
         selectedColumnIndex = 0
         activeReferenceSymbol = label.symbolId
+        activeReferenceMacro = null
         navigationSerial++
+    }
+
+    /** Shows a symbol's usage list in-place. Unlike definition navigation,
+     * this deliberately keeps the current source/caret visible. */
+    fun findLabelUsages(fileId: String, lineIndex: Int, token: String): Boolean {
+        val index = workspace?.index ?: return false
+        val label = index.definition(fileId, lineIndex, token)
+            ?: index.resolveLabel(fileId, lineIndex, token)
+            ?: return false
+        selectedFileId = fileId
+        selectedLineIndex = lineIndex.coerceAtLeast(0)
+        activeReferenceSymbol = label.symbolId
+        activeReferenceMacro = null
+        referenceExpansionTarget = AsmReferenceExpansionTarget.Label(label.symbolId)
+        referenceExpansionSerial++
+        return true
+    }
+
+    fun openMacro(macro: AsmMacro) {
+        openSource(macro.fileId, macro.lineIndex)
+        activeReferenceSymbol = null
+        activeReferenceMacro = macro.id
+    }
+
+    fun showMacroReferences(macro: AsmMacro) {
+        selectedFileId = macro.fileId
+        selectedLineIndex = macro.lineIndex
+        selectedColumnIndex = 0
+        activeReferenceSymbol = null
+        activeReferenceMacro = macro.id
+        navigationSerial++
+    }
+
+    /** Shows a macro's usage list in-place and expands it immediately. */
+    fun findMacroUsages(macro: AsmMacro, fileId: String, lineIndex: Int): Boolean {
+        selectedFileId = fileId
+        selectedLineIndex = lineIndex.coerceAtLeast(0)
+        activeReferenceSymbol = null
+        activeReferenceMacro = macro.id
+        referenceExpansionTarget = AsmReferenceExpansionTarget.Macro(macro.id)
+        referenceExpansionSerial++
+        return true
     }
 
     fun selectSourceLine(lineIndex: Int) {
@@ -792,10 +938,23 @@ internal class AsmWorkspaceState(
         selectedLineIndex = lineIndex.coerceAtLeast(0)
         selectedColumnIndex = columnIndex.coerceAtLeast(0)
         activeReferenceSymbol = null
+        activeReferenceMacro = null
+        referenceExpansionTarget = null
     }
 
     fun openReference(label: AsmLabel, usage: AsmLabelUsage) {
         activeReferenceSymbol = label.symbolId
+        activeReferenceMacro = null
+        openSource(
+            fileId = usage.fileId,
+            lineIndex = usage.lineIndex,
+            preserveReferences = true,
+        )
+    }
+
+    fun openMacroReference(macro: AsmMacro, usage: AsmMacroUsage) {
+        activeReferenceSymbol = null
+        activeReferenceMacro = macro.id
         openSource(
             fileId = usage.fileId,
             lineIndex = usage.lineIndex,
@@ -909,6 +1068,8 @@ internal class AsmWorkspaceState(
         sourceBuffers.clear()
         savedSourceTexts.clear()
         dirtySourceFileIds.clear()
+        liveDiagnosticFileId = null
+        liveDiagnostics = emptyList()
         editSessionSerial++
         sourceBufferRevision++
     }
@@ -934,6 +1095,7 @@ internal class AsmWorkspaceState(
                 fileId = it,
                 lineIndex = selectedLineIndex,
                 referenceSymbol = activeReferenceSymbol,
+                referenceMacro = activeReferenceMacro,
                 workspaceKind = workspaceKind,
                 columnIndex = selectedColumnIndex,
             )
@@ -954,6 +1116,7 @@ internal class AsmWorkspaceState(
             is AsmWorkspaceLocation.Source -> {
                 restoreWorkspaceKind(location.workspaceKind)
                 activeReferenceSymbol = location.referenceSymbol
+                activeReferenceMacro = location.referenceMacro
                 openSource(
                     location.fileId,
                     location.lineIndex,

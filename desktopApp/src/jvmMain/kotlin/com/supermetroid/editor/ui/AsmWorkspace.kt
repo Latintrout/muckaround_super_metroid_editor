@@ -1,7 +1,13 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ContextMenuDataProvider
+import androidx.compose.foundation.ContextMenuItem
+import androidx.compose.foundation.ContextMenuRepresentation
+import androidx.compose.foundation.ContextMenuState
+import androidx.compose.foundation.LocalContextMenuRepresentation
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -27,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +41,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
@@ -48,6 +56,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
@@ -63,6 +72,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,16 +84,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
@@ -94,7 +106,10 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.isBackPressed
 import androidx.compose.ui.input.pointer.isForwardPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.AnnotatedString
@@ -114,12 +129,22 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.rememberPopupPositionProviderAtPosition
 import com.supermetroid.editor.asm.AsmAsset
 import com.supermetroid.editor.asm.AsmAddressQuery
 import com.supermetroid.editor.asm.AsmAddressSpace
 import com.supermetroid.editor.asm.AsmBrowserMode
+import com.supermetroid.editor.asm.AsmBuildDiagnostic
 import com.supermetroid.editor.asm.AsmBuildReport
+import com.supermetroid.editor.asm.AsmCompletionEngine
+import com.supermetroid.editor.asm.AsmCompletionItem
+import com.supermetroid.editor.asm.AsmCompletionKind
+import com.supermetroid.editor.asm.AsmCompletionResult
 import com.supermetroid.editor.asm.AsmDiagnosticSeverity
 import com.supermetroid.editor.asm.AsmEditorLink
 import com.supermetroid.editor.asm.AsmEditorTarget
@@ -130,7 +155,12 @@ import com.supermetroid.editor.asm.AsmLibrary
 import com.supermetroid.editor.asm.AsmLibraryGuide
 import com.supermetroid.editor.asm.AsmLabel
 import com.supermetroid.editor.asm.AsmLabelUsage
+import com.supermetroid.editor.asm.AsmMacro
+import com.supermetroid.editor.asm.AsmMacroCallAnalyzer
+import com.supermetroid.editor.asm.AsmMacroCallHint
+import com.supermetroid.editor.asm.AsmMacroUsage
 import com.supermetroid.editor.asm.AsmReferenceContract
+import com.supermetroid.editor.asm.AsmReferenceExpansionTarget
 import com.supermetroid.editor.asm.AsmReferenceIndex
 import com.supermetroid.editor.asm.AsmRomDiffRange
 import com.supermetroid.editor.asm.AsmRomPreview
@@ -140,22 +170,142 @@ import com.supermetroid.editor.asm.AsmSemanticIndex
 import com.supermetroid.editor.asm.AsmSourceFile
 import com.supermetroid.editor.asm.AsmSourceReplacementPreview
 import com.supermetroid.editor.asm.AsmSourceText
+import com.supermetroid.editor.asm.AsmSourceLinter
+import com.supermetroid.editor.asm.AsmSourceUsage
 import com.supermetroid.editor.asm.AsmWorkspaceState
 import com.supermetroid.editor.asm.AsmWorkspaceKind
 import com.supermetroid.editor.asm.formatPcOffset
 import com.supermetroid.editor.asm.formatSnesAddress
 import com.supermetroid.editor.asm.parseAsmAddressQuery
 import com.supermetroid.editor.asm.pcToSnesLoRom
+import com.supermetroid.editor.asm.parseAsmMacros
 import com.supermetroid.editor.asm.snesLoRomToPc
 import com.supermetroid.editor.data.ProjectRomBuildMode
 import com.supermetroid.editor.rom.RomParser
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.awt.event.InputEvent
+import java.awt.Cursor
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import kotlin.math.roundToInt
 import kotlinx.coroutines.yield
+
+private val ASM_CONTEXT_MENU_REPRESENTATION = object : ContextMenuRepresentation {
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    override fun Representation(state: ContextMenuState, items: () -> List<ContextMenuItem>) {
+        val status = state.status as? ContextMenuState.Status.Open ?: return
+        val focusManager = LocalFocusManager.current
+        val inputModeManager = LocalInputModeManager.current
+        Popup(
+            focusable = true,
+            onDismissRequest = { state.status = ContextMenuState.Status.Closed },
+            popupPositionProvider = rememberPopupPositionProviderAtPosition(status.rect.center),
+            onKeyEvent = { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else when (event.key) {
+                    Key.DirectionDown -> {
+                        inputModeManager.requestInputMode(InputMode.Keyboard)
+                        focusManager.moveFocus(FocusDirection.Next)
+                        true
+                    }
+                    Key.DirectionUp -> {
+                        inputModeManager.requestInputMode(InputMode.Keyboard)
+                        focusManager.moveFocus(FocusDirection.Previous)
+                        true
+                    }
+                    Key.Escape -> {
+                        state.status = ContextMenuState.Status.Closed
+                        true
+                    }
+                    else -> false
+                }
+            },
+        ) {
+            val menuItems = items()
+            val firstShortcutItem = menuItems.indexOfFirst { '\t' in it.label }
+            Surface(
+                modifier = Modifier.width(ASM_CONTEXT_MENU_WIDTH),
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shadowElevation = 10.dp,
+                tonalElevation = 4.dp,
+            ) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    menuItems.forEachIndexed { index, item ->
+                        if (index == firstShortcutItem && index > 0) {
+                            Divider(
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+                        }
+                        AsmContextMenuRow(item) {
+                            state.status = ContextMenuState.Status.Closed
+                            item.onClick()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalComposeUiApi::class)
+private fun AsmContextMenuRow(item: ContextMenuItem, onClick: () -> Unit) {
+    val fs = LocalEditorTheme.current.fontSize.value
+    val label = item.label.substringBefore('\t')
+    val shortcut = item.label.substringAfter('\t', missingDelimiterValue = "")
+        .ifEmpty { asmStandardEditShortcut(label) }
+    var hovered by remember(item.label) { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .heightIn(min = 34.dp)
+            .background(
+                if (hovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                else Color.Transparent,
+            )
+            .onPointerEvent(PointerEventType.Enter) { hovered = true }
+            .onPointerEvent(PointerEventType.Exit) { hovered = false }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            fontSize = fs.detail,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (shortcut.isNotEmpty()) {
+            Text(
+                shortcut,
+                fontSize = fs.statusBar,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private fun asmStandardEditShortcut(label: String): String = when (label) {
+    "Cut" -> "$ASM_MODIFIER_LABEL+X"
+    "Copy" -> "$ASM_MODIFIER_LABEL+C"
+    "Paste" -> "$ASM_MODIFIER_LABEL+V"
+    "Select All" -> "$ASM_MODIFIER_LABEL+A"
+    else -> ""
+}
 
 private data class AsmSearchResult(
     val title: String,
@@ -210,19 +360,20 @@ internal fun AsmWorkspaceSidebar(
         )
     }
     if (showCreateModuleDialog) {
-        AsmModuleNameDialog(
+        AsmModuleSettingsDialog(
             title = "New project module",
             initialName = if (state.projectModuleFileIds.isEmpty()) {
                 "custom_code"
             } else {
                 "custom_code_${state.projectModuleFileIds.size + 1}"
             },
+            initialDescription = "",
             confirmLabel = "Create module",
             onDismiss = { showCreateModuleDialog = false },
-            onConfirm = { name ->
+            onConfirm = { name, description ->
                 showCreateModuleDialog = false
                 scope.launch {
-                    if (state.createProjectModule(name)) {
+                    if (state.createProjectModule(name, description)) {
                         onProjectBuildModeChanged(ProjectRomBuildMode.ASM_SOURCE)
                     }
                 }
@@ -388,15 +539,19 @@ internal fun AsmWorkspaceSidebar(
 }
 
 @Composable
-private fun AsmModuleNameDialog(
+private fun AsmModuleSettingsDialog(
     title: String,
     initialName: String,
+    initialDescription: String,
     confirmLabel: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, String) -> Unit,
+    destructiveLabel: String? = null,
+    onDestructive: (() -> Unit)? = null,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     var name by remember(initialName) { mutableStateOf(initialName) }
+    var description by remember(initialDescription) { mutableStateOf(initialDescription) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, fontSize = fs.heading) },
@@ -410,8 +565,23 @@ private fun AsmModuleNameDialog(
                     textStyle = TextStyle(fontSize = fs.body, fontFamily = FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { if (it.length <= ASM_MODULE_DESCRIPTION_MAX_LENGTH) description = it },
+                    label = { Text("Description", fontSize = fs.detail) },
+                    textStyle = TextStyle(fontSize = fs.body),
+                    minLines = 2,
+                    maxLines = 4,
+                    supportingText = {
+                        Text(
+                            "${description.length}/$ASM_MODULE_DESCRIPTION_MAX_LENGTH",
+                            fontSize = fs.statusBar,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Text(
-                    "SMEDIT stores this as a small source-controlled .asm file and includes it in the order shown in Source.",
+                    "The name becomes the source-controlled .asm filename. The description is stored as a harmless comment inside that file.",
                     fontSize = fs.detail,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -419,12 +589,24 @@ private fun AsmModuleNameDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(name) },
+                onClick = { onConfirm(name, description) },
                 enabled = name.isNotBlank(),
                 shape = ASM_CONTROL_SHAPE,
             ) { Text(confirmLabel, fontSize = fs.body) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", fontSize = fs.body) } },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (destructiveLabel != null && onDestructive != null) {
+                    TextButton(
+                        onClick = onDestructive,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Text(destructiveLabel, fontSize = fs.body)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel", fontSize = fs.body) }
+            }
+        },
     )
 }
 
@@ -1486,6 +1668,7 @@ internal fun AsmWorkspaceCanvas(
     onOpenInEditor: (AsmEditorTarget) -> Unit = {},
     onSaveProject: () -> Boolean = { true },
     buildProjectRom: (() -> AsmRomPreview?)? = null,
+    onRunInEmulator: (() -> Unit)? = null,
     problemsPaneHeightDp: Float = DEFAULT_ASM_PROBLEMS_HEIGHT_DP,
     onProblemsPaneHeightChange: (Float) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -1518,6 +1701,7 @@ internal fun AsmWorkspaceCanvas(
             onOpenInEditor = onOpenInEditor,
             onSaveProject = onSaveProject,
             buildProjectRom = buildProjectRom,
+            onRunInEmulator = onRunInEmulator,
             problemsPaneHeightDp = problemsPaneHeightDp,
             onProblemsPaneHeightChange = onProblemsPaneHeightChange,
             modifier = modifier,
@@ -2045,6 +2229,7 @@ private fun AsmSourceCanvas(
     onOpenInEditor: (AsmEditorTarget) -> Unit,
     onSaveProject: () -> Boolean,
     buildProjectRom: (() -> AsmRomPreview?)?,
+    onRunInEmulator: (() -> Unit)?,
     problemsPaneHeightDp: Float,
     onProblemsPaneHeightChange: (Float) -> Unit,
     modifier: Modifier,
@@ -2073,14 +2258,7 @@ private fun AsmSourceCanvas(
     }
     val indexedExactAddress = addressAnchorsByLine[state.selectedLineIndex]
     val compiledExactAddress = compiledAddressesByLine[state.selectedLineIndex]
-    val contextualAddress = index.addressAtlas.contextAt(source.id, state.selectedLineIndex)
     val exactSnesAddress = compiledExactAddress ?: indexedExactAddress?.snesAddress
-    val displayedSnesAddress = exactSnesAddress ?: contextualAddress?.snesAddress
-    val displayedPcOffset = exactSnesAddress?.let(::snesLoRomToPc) ?: contextualAddress?.pcOffset
-    val addressSummary = displayedPcOffset?.let { pcOffset ->
-        val prefix = if (exactSnesAddress != null) "" else "Near "
-        "$prefix${formatSnesAddress(checkNotNull(displayedSnesAddress))} · ${formatPcOffset(pcOffset)} · "
-    }.orEmpty()
     val editorLinks = remember(semanticIndex, exactSnesAddress) {
         val address = exactSnesAddress
         if (semanticIndex == null || address == null) emptyList()
@@ -2094,20 +2272,33 @@ private fun AsmSourceCanvas(
     val labelUsages = remember(index, referenceLabel) {
         referenceLabel?.let(index::usagesFor).orEmpty()
     }
+    val referenceMacro = remember(index, source.id, state.selectedLineIndex, state.activeReferenceMacro) {
+        index.macro(state.activeReferenceMacro)
+            ?: index.macrosAt(source.id, state.selectedLineIndex).firstOrNull()
+    }
+    val macroUsages = remember(index, referenceMacro) {
+        referenceMacro?.let(index::usagesFor).orEmpty()
+    }
     val isProjectModule = state.isProjectModule(source.id)
     var confirmRestoreOrDelete by remember(source.id) { mutableStateOf(false) }
-    var showRenameModule by remember(source.id) { mutableStateOf(false) }
-    if (showRenameModule) {
-        AsmModuleNameDialog(
-            title = "Rename project module",
+    var showModuleSettings by remember(source.id) { mutableStateOf(false) }
+    if (showModuleSettings) {
+        AsmModuleSettingsDialog(
+            title = "Module settings",
             initialName = source.id.substringAfterLast('/').removeSuffix(".asm"),
-            confirmLabel = "Rename",
-            onDismiss = { showRenameModule = false },
-            onConfirm = { name ->
-                showRenameModule = false
+            initialDescription = source.description,
+            confirmLabel = "Apply",
+            onDismiss = { showModuleSettings = false },
+            onConfirm = { name, description ->
+                showModuleSettings = false
                 scope.launch {
-                    if (state.renameProjectModule(source.id, name)) onSaveProject()
+                    if (state.updateProjectModuleSettings(source.id, name, description)) onSaveProject()
                 }
+            },
+            destructiveLabel = "Delete module…",
+            onDestructive = {
+                showModuleSettings = false
+                confirmRestoreOrDelete = true
             },
         )
     }
@@ -2147,52 +2338,64 @@ private fun AsmSourceCanvas(
             },
         )
     }
-    Column(modifier.fillMaxSize()) {
-        val buildSuffix = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
-            val report = state.buildReport
-            when {
-                report?.validationOnly == true -> " · source issue"
-                report != null && !report.succeeded -> " · build failed"
-                state.sourceBuildRequired -> " · build needed"
-                report?.succeeded == true -> " · build ✓"
-                else -> ""
+    val saveSource: () -> Unit = {
+        scope.launch {
+            if (state.saveSource(source.id)) onSaveProject()
+        }
+    }
+    val buildSource: (() -> Unit)? = buildProjectRom?.let { build ->
+        {
+            scope.launch {
+                if (state.saveAllSources() && onSaveProject()) {
+                    state.validateProjectBuild(build)
+                }
             }
-        } else ""
+        }
+    }
+    val runSource: (() -> Unit)? = onRunInEmulator?.let { run ->
+        {
+            scope.launch {
+                if (state.saveAllSources() && onSaveProject()) run()
+            }
+        }
+    }
+    Column(modifier.fillMaxSize()) {
         AsmNavigationHeader(
             state,
             source.displayName,
             source.description,
-            "$addressSummary${source.lines.size} lines$buildSuffix",
+            trailing = "",
+            actions = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
+                {
+                    AsmSourceToolbarActions(
+                        state = state,
+                        source = source,
+                        onSave = saveSource,
+                        onBuild = buildSource,
+                        onEditModuleSettings = if (isProjectModule) ({ showModuleSettings = true }) else null,
+                        onRestoreOriginal = if (isProjectModule) null else ({ confirmRestoreOrDelete = true }),
+                    )
+                }
+            } else null,
         )
         if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
+            AsmEditorLinkBar(editorLinks, onOpenInEditor)
+            when {
+                referenceLabel != null -> AsmReferencesBar(state, index, referenceLabel, labelUsages)
+                referenceMacro != null -> AsmMacroReferencesBar(state, index, referenceMacro, macroUsages)
+            }
             AsmEditableSourcePane(
                 state = state,
                 source = source,
-                onSave = {
-                    scope.launch {
-                        if (state.saveSource(source.id)) onSaveProject()
-                    }
-                },
-                onBuild = buildProjectRom?.let { build ->
-                    {
-                        scope.launch {
-                            if (state.saveAllSources() && onSaveProject()) {
-                                state.validateProjectBuild(build)
-                            }
-                        }
-                    }
-                },
-                onRenameModule = if (isProjectModule) ({ showRenameModule = true }) else null,
-                onSetModuleEnabled = if (isProjectModule) ({ enabled ->
-                    scope.launch { state.setProjectModuleEnabled(source.id, enabled) }
-                }) else null,
-                onRestoreOrDelete = { confirmRestoreOrDelete = true },
+                onBuild = buildSource,
+                onRun = runSource,
                 modifier = Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
             )
-            state.buildReport?.let { report ->
+            if (state.buildReport != null || state.displayedDiagnostics.isNotEmpty()) {
                 AsmBuildProblemsStrip(
                     state = state,
-                    report = report,
+                    report = state.buildReport,
+                    diagnostics = state.displayedDiagnostics,
                     requestedHeightDp = problemsPaneHeightDp,
                     onHeightChange = onProblemsPaneHeightChange,
                 )
@@ -2202,13 +2405,9 @@ private fun AsmSourceCanvas(
                 AsmReadOnlySourceNotice(onOpenProjectSource = state::showProjectWorkspace)
             }
             AsmEditorLinkBar(editorLinks, onOpenInEditor)
-            if (referenceLabel != null) {
-                AsmReferencesBar(
-                    state = state,
-                    index = index,
-                    label = referenceLabel,
-                    usages = labelUsages,
-                )
+            when {
+                referenceLabel != null -> AsmReferencesBar(state, index, referenceLabel, labelUsages)
+                referenceMacro != null -> AsmMacroReferencesBar(state, index, referenceMacro, macroUsages)
             }
             AsmScrollableTextPane(
                 listState = listState,
@@ -2261,6 +2460,11 @@ private fun AsmSourceCanvas(
                                         "definition" -> state.showReferences(source.id, lineIndex, annotation.item)
                                         "asset" -> state.openAssetReference(annotation.item)
                                         "instruction" -> state.showInstruction(annotation.item)
+                                        "macro" -> index.resolveMacro(annotation.item)?.let { macro ->
+                                            state.openMacro(macro)
+                                        }
+                                        "macroDefinition" -> index.resolveMacro(annotation.item)
+                                            ?.let(state::showMacroReferences)
                                         "address" -> annotation.item.toIntOrNull()?.let(state::openAddress)
                                     }
                                 }
@@ -2276,20 +2480,23 @@ private fun AsmSourceCanvas(
 @Composable
 private fun AsmBuildProblemsStrip(
     state: AsmWorkspaceState,
-    report: AsmBuildReport,
+    report: AsmBuildReport?,
+    diagnostics: List<AsmBuildDiagnostic>,
     requestedHeightDp: Float,
     onHeightChange: (Float) -> Unit,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val density = LocalDensity.current
-    val errors = report.diagnostics.count { it.severity == AsmDiagnosticSeverity.ERROR }
-    val warnings = report.diagnostics.count { it.severity == AsmDiagnosticSeverity.WARNING }
-    var expanded by remember(report.generatedAt) { mutableStateOf(!report.succeeded) }
+    val errors = diagnostics.count { it.severity == AsmDiagnosticSeverity.ERROR }
+    val warnings = diagnostics.count { it.severity == AsmDiagnosticSeverity.WARNING }
+    var expanded by remember(report?.generatedAt, diagnostics) {
+        mutableStateOf(errors > 0 || report?.succeeded == false)
+    }
     val panelHeightDp = requestedHeightDp.takeIf(Float::isFinite)
         ?.coerceIn(MIN_ASM_PROBLEMS_HEIGHT_DP, MAX_ASM_PROBLEMS_HEIGHT_DP)
         ?: DEFAULT_ASM_PROBLEMS_HEIGHT_DP
     val bodyScroll = rememberScrollState()
-    val failed = errors > 0 || !report.succeeded
+    val failed = errors > 0 || report?.succeeded == false
     val accent = when {
         failed -> MaterialTheme.colorScheme.error
         warnings > 0 -> Color(0xFFE0A12B)
@@ -2337,8 +2544,9 @@ private fun AsmBuildProblemsStrip(
                         buildString {
                             append(
                                 when {
-                                    report.succeeded -> "Build completed"
-                                    report.validationOnly -> "Source validation"
+                                    state.liveDiagnostics.isNotEmpty() -> "Source diagnostics"
+                                    report?.succeeded == true -> "Build completed"
+                                    report?.validationOnly == true -> "Source validation"
                                     else -> "Build failed"
                                 },
                             )
@@ -2354,8 +2562,8 @@ private fun AsmBuildProblemsStrip(
                     Column(
                         Modifier.weight(1f).fillMaxWidth().verticalScroll(bodyScroll),
                     ) {
-                        if (report.diagnostics.isEmpty()) {
-                            report.output.takeLast(4).forEach { line ->
+                        if (diagnostics.isEmpty()) {
+                            report?.output.orEmpty().takeLast(4).forEach { line ->
                                 Text(
                                     line,
                                     fontSize = fs.detail,
@@ -2365,7 +2573,7 @@ private fun AsmBuildProblemsStrip(
                                 )
                             }
                         } else {
-                            report.diagnostics.forEach { problem ->
+                            diagnostics.forEach { problem ->
                                 val navigableFileId = problem.fileId
                                     ?.takeIf { state.workspace?.index?.file(it) != null }
                                 val location = problem.fileId?.let { fileId ->
@@ -2439,79 +2647,65 @@ private fun AsmReadOnlySourceNotice(onOpenProjectSource: () -> Unit) {
 }
 
 @Composable
-private fun AsmSourceEditBar(
+private fun AsmSourceToolbarActions(
     state: AsmWorkspaceState,
     source: AsmSourceFile,
     onSave: () -> Unit,
     onBuild: (() -> Unit)?,
-    onRenameModule: (() -> Unit)?,
-    onSetModuleEnabled: ((Boolean) -> Unit)?,
-    onRestoreOrDelete: () -> Unit,
+    onEditModuleSettings: (() -> Unit)?,
+    onRestoreOriginal: (() -> Unit)?,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val unsaved = state.hasUnsavedSourceChanges(source.id)
     val modified = source.id in state.projectModifiedFileIds
-    val isProjectModule = state.isProjectModule(source.id)
-    Surface(
-        color = if (unsaved) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.38f)
-        else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
-        modifier = Modifier.fillMaxWidth(),
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        OutlinedButton(
+            onClick = { state.discardSourceBuffer(source.id) },
+            enabled = unsaved && !state.busy,
+            shape = ASM_CONTROL_SHAPE,
         ) {
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(
-                onClick = { state.discardSourceBuffer(source.id) },
-                enabled = unsaved && !state.busy,
-                shape = ASM_CONTROL_SHAPE,
+            Text("Revert", fontSize = fs.detail)
+        }
+        Button(onClick = onSave, enabled = unsaved && !state.busy, shape = ASM_CONTROL_SHAPE) {
+            Text(if (unsaved) "Save *" else "Save", fontSize = fs.detail)
+        }
+        OutlinedButton(
+            onClick = { onBuild?.invoke() },
+            enabled = onBuild != null && !state.busy && !state.previewBusy,
+            shape = ASM_CONTROL_SHAPE,
+        ) {
+            Text(
+                when {
+                    state.previewBusy -> "Building…"
+                    state.sourceBuildRequired -> "Build*"
+                    else -> "Build"
+                },
+                fontSize = fs.detail,
+            )
+        }
+        if (onEditModuleSettings != null) {
+            IconButton(
+                onClick = onEditModuleSettings,
+                enabled = !unsaved && !state.busy,
+                modifier = Modifier.size(32.dp),
             ) {
-                Text("Revert", fontSize = fs.detail)
-            }
-            Button(onClick = onSave, enabled = unsaved && !state.busy, shape = ASM_CONTROL_SHAPE) {
-                Text(if (unsaved) "Save *" else "Save", fontSize = fs.detail)
-            }
-            OutlinedButton(
-                onClick = { onBuild?.invoke() },
-                enabled = onBuild != null && !state.busy && !state.previewBusy,
-                shape = ASM_CONTROL_SHAPE,
-            ) {
-                Text(
-                    when {
-                        state.previewBusy -> "Building…"
-                        state.sourceBuildRequired -> "Build*"
-                        else -> "Build"
-                    },
-                    fontSize = fs.detail,
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = "Module settings",
+                    modifier = Modifier.size(18.dp),
                 )
             }
-            if (onRenameModule != null) {
-                OutlinedButton(
-                    onClick = { onSetModuleEnabled?.invoke(!state.isProjectModuleEnabled(source.id)) },
-                    enabled = onSetModuleEnabled != null && !unsaved && !state.busy,
-                    shape = ASM_CONTROL_SHAPE,
-                ) {
-                    Text(
-                        if (state.isProjectModuleEnabled(source.id)) "Disable" else "Enable",
-                        fontSize = fs.detail,
-                    )
-                }
-                OutlinedButton(
-                    onClick = onRenameModule,
-                    enabled = !unsaved && !state.busy,
-                    shape = ASM_CONTROL_SHAPE,
-                ) {
-                    Text("Rename", fontSize = fs.detail)
-                }
-            }
+        }
+        if (onRestoreOriginal != null) {
             OutlinedButton(
-                onClick = onRestoreOrDelete,
-                enabled = (isProjectModule || modified || unsaved) && !state.busy,
+                onClick = onRestoreOriginal,
+                enabled = (modified || unsaved) && !state.busy,
                 shape = ASM_CONTROL_SHAPE,
             ) {
-                Text(if (isProjectModule) "Delete" else "Restore original", fontSize = fs.detail)
+                Text("Restore original", fontSize = fs.detail)
             }
         }
     }
@@ -2522,11 +2716,8 @@ private fun AsmSourceEditBar(
 private fun AsmEditableSourcePane(
     state: AsmWorkspaceState,
     source: AsmSourceFile,
-    onSave: () -> Unit,
     onBuild: (() -> Unit)?,
-    onRenameModule: (() -> Unit)?,
-    onSetModuleEnabled: ((Boolean) -> Unit)?,
-    onRestoreOrDelete: () -> Unit,
+    onRun: (() -> Unit)?,
     modifier: Modifier,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
@@ -2555,7 +2746,123 @@ private fun AsmEditableSourcePane(
         val cursor = lineStart + state.selectedColumnIndex.coerceIn(0, lineEnd - lineStart)
         mutableStateOf(TextFieldValue(page.text, selection = TextRange(cursor)))
     }
-    var fieldLayout by remember(pageKey) { mutableStateOf<TextLayoutResult?>(null) }
+    // Navigation within the same page changes pageKey so the caret can move to
+    // the destination, but it does not necessarily make Compose lay identical
+    // text out again. Keep the last valid layout across that navigation; a
+    // pageKey-scoped layout could otherwise remain null until a later focus or
+    // selection event and silently drop the first pointer navigation gesture.
+    var fieldLayout by remember(source.id, page.startLine) { mutableStateOf<TextLayoutResult?>(null) }
+    var pendingDefinitionPosition by remember(source.id, page.startLine) { mutableStateOf<Offset?>(null) }
+    val editorFocusRequester = remember(source.id, page.startLine) { FocusRequester() }
+    var hoveredEditableLink by remember(pageKey) { mutableStateOf(false) }
+    var contextMenuOffset by remember(pageKey) { mutableStateOf<Int?>(null) }
+    var completionExplicit by remember(pageKey) { mutableStateOf(false) }
+    var completionFromTyping by remember(pageKey) { mutableStateOf(false) }
+    var selectedCompletionIndex by remember(pageKey) { mutableStateOf(0) }
+    var dismissedCompletionSignature by remember(pageKey) { mutableStateOf<String?>(null) }
+    val liveDiagnosticRevision = state.sourceBufferRevision
+    val inactiveModuleFileIds = state.disabledProjectModuleFileIds - source.id
+    val indexedMacros = state.workspace?.index?.macros.orEmpty()
+        .filterNot { it.fileId in inactiveModuleFileIds }
+    LaunchedEffect(source.id, liveDiagnosticRevision, indexedMacros, inactiveModuleFileIds) {
+        delay(ASM_LIVE_DIAGNOSTIC_DELAY_MS)
+        val text = state.sourceEditText(source.id)
+        val macros = indexedMacros.filterNot { it.fileId == source.id } + parseAsmMacros(source.id, text)
+        val diagnostics = withContext(Dispatchers.Default) {
+            AsmSourceLinter.lintText(source.id, text, macros)
+        }
+        state.publishLiveDiagnostics(source.id, liveDiagnosticRevision, diagnostics)
+    }
+    val completionResult = remember(
+        fieldValue.text,
+        fieldValue.selection,
+        completionExplicit,
+        completionFromTyping,
+        state.workspace?.index,
+        source.id,
+        page.startLine,
+    ) {
+        if (!fieldValue.selection.collapsed || (!completionExplicit && !completionFromTyping)) {
+            null
+        } else state.workspace?.index?.let { completionIndex ->
+            AsmCompletionEngine.complete(
+                index = completionIndex,
+                fileId = source.id,
+                pageStartLine = page.startLine,
+                text = fieldValue.text,
+                caretOffset = fieldValue.selection.end,
+                explicit = completionExplicit,
+                excludedFileIds = inactiveModuleFileIds,
+            )
+        }
+    }
+    val completionSignature = completionResult?.let { result ->
+        "${page.startLine}:${result.replaceStart}:${result.prefix}:${fieldValue.text.hashCode()}"
+    }
+    val completionVisible = completionResult != null && completionSignature != dismissedCompletionSignature
+    val macroCallHint = remember(
+        fieldValue.text,
+        fieldValue.selection,
+        state.workspace?.index,
+        inactiveModuleFileIds,
+    ) {
+        if (!fieldValue.selection.collapsed) null
+        else state.workspace?.index?.let { completionIndex ->
+            AsmMacroCallAnalyzer.hint(
+                index = completionIndex,
+                text = fieldValue.text,
+                caretOffset = fieldValue.selection.end,
+                excludedFileIds = inactiveModuleFileIds,
+            )
+        }
+    }
+    LaunchedEffect(completionSignature) {
+        selectedCompletionIndex = 0
+    }
+    fun applyEditorValue(adjusted: TextFieldValue) {
+        val textChanged = adjusted.text != fieldValue.text
+        fieldValue = adjusted
+        // A caret move or selection is local editor state, not workspace
+        // navigation. Publishing it used to clear Find Usages and could cause
+        // the paged source view to reposition after an ordinary click.
+        if (!textChanged) return
+        state.updateSourceEditText(source.id, page.merge(adjusted.text))
+        val activeOffset = adjusted.selection.end.coerceIn(0, adjusted.text.length)
+        state.selectSourcePosition(
+            page.startLine + asmLineIndexAtOffset(adjusted.text, activeOffset),
+            asmColumnIndexAtOffset(adjusted.text, activeOffset),
+        )
+    }
+    fun acceptCompletion(item: AsmCompletionItem) {
+        val result = completionResult ?: return
+        applyEditorValue(
+            asmApplyCompletion(
+                value = fieldValue,
+                completion = result,
+                replacement = item.replacement,
+                caretBacktrack = item.caretBacktrack,
+            ),
+        )
+        completionExplicit = false
+        completionFromTyping = false
+        dismissedCompletionSignature = null
+    }
+    LaunchedEffect(fieldLayout, pendingDefinitionPosition, fieldValue.text) {
+        val position = pendingDefinitionPosition ?: return@LaunchedEffect
+        val layout = fieldLayout
+            ?.takeIf { it.layoutInput.text.text == fieldValue.text }
+            ?: return@LaunchedEffect
+        pendingDefinitionPosition = null
+        val offset = layout.getOffsetForPosition(position)
+        asmOpenEditableReference(
+            state = state,
+            index = state.workspace?.index,
+            fileId = source.id,
+            pageText = fieldValue.text,
+            requestedOffset = offset,
+            pageStartLine = page.startLine,
+        )
+    }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val lineCount = fieldValue.text.count { it == '\n' } + 1
@@ -2567,16 +2874,19 @@ private fun AsmEditableSourcePane(
     val lineHeightPx = with(density) { lineHeight.toPx() }
     val sourceTopPaddingPx = with(density) { ASM_SOURCE_VERTICAL_PADDING.toPx() }
     val diagnosticEdgeWidthPx = with(density) { ASM_DIAGNOSTIC_EDGE_WIDTH.toPx() }
-    val selectedPageLine = (state.selectedLineIndex - page.startLine)
-        .takeIf { it in 0 until lineCount }
+    val selectedPageLine = asmLineIndexAtOffset(
+        fieldValue.text,
+        fieldValue.selection.end.coerceIn(0, fieldValue.text.length),
+    ).takeIf { it in 0 until lineCount }
     val diagnosticPageLines = remember(
         state.buildReport?.generatedAt,
+        state.liveDiagnostics,
         source.id,
         page.startLine,
         lineCount,
     ) {
         buildMap<Int, AsmDiagnosticSeverity> {
-            state.buildReport?.diagnostics.orEmpty().forEach { diagnostic ->
+            state.displayedDiagnostics.forEach { diagnostic ->
                 val lineIndex = diagnostic.lineIndex ?: return@forEach
                 if (diagnostic.fileId != source.id || lineIndex !in page.startLine until (page.startLine + lineCount)) {
                     return@forEach
@@ -2637,21 +2947,21 @@ private fun AsmEditableSourcePane(
         definition = if (isDarkCodeTheme()) Color(0xFFFFCB6B) else Color(0xFF8A6100),
         symbol = if (isDarkCodeTheme()) Color(0xFF82AAFF) else Color(0xFF1455A0),
     )
-    val transformation = remember(syntaxColors) {
+    val transformation = remember(syntaxColors, state.workspace?.index, source.id, page.startLine) {
         VisualTransformation { input ->
-            TransformedText(asmEditableHighlight(input.text, syntaxColors), OffsetMapping.Identity)
+            TransformedText(
+                asmEditableHighlight(
+                    text = input.text,
+                    colors = syntaxColors,
+                    index = state.workspace?.index,
+                    fileId = source.id,
+                    pageStartLine = page.startLine,
+                ),
+                OffsetMapping.Identity,
+            )
         }
     }
     Column(modifier) {
-        AsmSourceEditBar(
-            state = state,
-            source = source,
-            onSave = onSave,
-            onBuild = onBuild,
-            onRenameModule = onRenameModule,
-            onSetModuleEnabled = onSetModuleEnabled,
-            onRestoreOrDelete = onRestoreOrDelete,
-        )
         BoxWithConstraints(
             Modifier.weight(1f).fillMaxWidth().onSizeChanged { editorViewportHeightPx = it.height },
         ) {
@@ -2748,61 +3058,194 @@ private fun AsmEditableSourcePane(
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp),
                 )
-                BasicTextField(
-                    value = fieldValue,
-                    onValueChange = { updated ->
-                        val adjusted = asmApplyAutomaticIndentation(fieldValue, updated)
-                        fieldValue = adjusted
-                        state.updateSourceEditText(source.id, page.merge(adjusted.text))
-                        val activeOffset = adjusted.selection.end.coerceIn(0, adjusted.text.length)
-                        state.selectSourcePosition(
-                            page.startLine + asmLineIndexAtOffset(adjusted.text, activeOffset),
-                            asmColumnIndexAtOffset(adjusted.text, activeOffset),
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                        .onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown || event.key != Key.Tab) {
-                                return@onPreviewKeyEvent false
-                            }
-                            val adjusted = asmApplyTabIndentation(fieldValue, unindent = event.isShiftPressed)
-                            fieldValue = adjusted
-                            state.updateSourceEditText(source.id, page.merge(adjusted.text))
-                            val activeOffset = adjusted.selection.end.coerceIn(0, adjusted.text.length)
-                            state.selectSourcePosition(
-                                page.startLine + asmLineIndexAtOffset(adjusted.text, activeOffset),
-                                asmColumnIndexAtOffset(adjusted.text, activeOffset),
+                CompositionLocalProvider(LocalContextMenuRepresentation provides ASM_CONTEXT_MENU_REPRESENTATION) {
+                    ContextMenuDataProvider(
+                        items = {
+                            listOf(
+                                ContextMenuItem("Go to Definition\t$ASM_MODIFIER_LABEL+D") {
+                                    asmOpenEditableReference(
+                                        state = state,
+                                        index = state.workspace?.index,
+                                        fileId = source.id,
+                                        pageText = fieldValue.text,
+                                        requestedOffset = contextMenuOffset ?: fieldValue.selection.end,
+                                        pageStartLine = page.startLine,
+                                    )
+                                },
+                                ContextMenuItem("Find Usages\t$ASM_MODIFIER_LABEL+U") {
+                                    asmShowEditableUsages(
+                                        state = state,
+                                        index = state.workspace?.index,
+                                        fileId = source.id,
+                                        pageText = fieldValue.text,
+                                        requestedOffset = contextMenuOffset ?: fieldValue.selection.end,
+                                        pageStartLine = page.startLine,
+                                    )
+                                },
+                                ContextMenuItem("Show Completions\t$ASM_MODIFIER_LABEL+Tab") {
+                                    val offset = (contextMenuOffset ?: fieldValue.selection.end)
+                                        .coerceIn(0, fieldValue.text.length)
+                                    applyEditorValue(fieldValue.copy(selection = TextRange(offset)))
+                                    completionExplicit = true
+                                    completionFromTyping = false
+                                    dismissedCompletionSignature = null
+                                },
                             )
-                            true
+                        },
+                    ) {
+                        BasicTextField(
+                        value = fieldValue,
+                        onValueChange = { updated ->
+                            completionFromTyping = asmAutomaticCompletionRequested(fieldValue, updated)
+                            completionExplicit = false
+                            applyEditorValue(asmApplyAutomaticIndentation(fieldValue, updated))
+                        },
+                        modifier = Modifier.weight(1f)
+                        .focusRequester(editorFocusRequester)
+                        .pointerHoverIcon(
+                            if (hoveredEditableLink) ASM_LINK_CURSOR else ASM_TEXT_CURSOR,
+                            overrideDescendants = true,
+                        )
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            val commandDown = if (ASM_IS_MAC) event.isMetaPressed else event.isCtrlPressed
+                            when {
+                                commandDown && event.key == Key.Tab -> {
+                                    completionExplicit = true
+                                    completionFromTyping = false
+                                    dismissedCompletionSignature = null
+                                    true
+                                }
+                                commandDown && event.key == Key.U -> {
+                                    asmShowEditableUsages(
+                                        state = state,
+                                        index = state.workspace?.index,
+                                        fileId = source.id,
+                                        pageText = fieldValue.text,
+                                        requestedOffset = fieldValue.selection.end,
+                                        pageStartLine = page.startLine,
+                                    )
+                                }
+                                commandDown && event.key == Key.D -> {
+                                    asmOpenEditableReference(
+                                        state = state,
+                                        index = state.workspace?.index,
+                                        fileId = source.id,
+                                        pageText = fieldValue.text,
+                                        requestedOffset = fieldValue.selection.end,
+                                        pageStartLine = page.startLine,
+                                    )
+                                }
+                                commandDown && event.key == Key.B -> {
+                                    if (!state.busy && !state.previewBusy) onBuild?.invoke()
+                                    true
+                                }
+                                commandDown && event.key == Key.R -> {
+                                    if (!state.busy && !state.previewBusy) onRun?.invoke()
+                                    true
+                                }
+                                commandDown && event.key == Key.DirectionLeft -> {
+                                    state.goBack()
+                                    true
+                                }
+                                commandDown && event.key == Key.DirectionRight -> {
+                                    state.goForward()
+                                    true
+                                }
+                                completionVisible && event.key == Key.DirectionDown -> {
+                                    val count = checkNotNull(completionResult).items.size
+                                    selectedCompletionIndex = (selectedCompletionIndex + 1) % count
+                                    true
+                                }
+                                completionVisible && event.key == Key.DirectionUp -> {
+                                    val count = checkNotNull(completionResult).items.size
+                                    selectedCompletionIndex = (selectedCompletionIndex - 1 + count) % count
+                                    true
+                                }
+                                completionVisible && (event.key == Key.Enter || event.key == Key.Tab) -> {
+                                    val items = checkNotNull(completionResult).items
+                                    acceptCompletion(items[selectedCompletionIndex.coerceIn(items.indices)])
+                                    true
+                                }
+                                completionVisible && event.key == Key.Escape -> {
+                                    dismissedCompletionSignature = completionSignature
+                                    completionExplicit = false
+                                    completionFromTyping = false
+                                    true
+                                }
+                                event.key == Key.Tab -> {
+                                    applyEditorValue(
+                                        asmApplyTabIndentation(fieldValue, unindent = event.isShiftPressed),
+                                    )
+                                    true
+                                }
+                                else -> false
+                            }
                         }
-                        .onPointerEvent(PointerEventType.Release, PointerEventPass.Initial) { event ->
-                            val mouse = event.nativeEvent as? MouseEvent ?: return@onPointerEvent
-                            if ((!mouse.isMetaDown && !mouse.isControlDown) || mouse.button != MouseEvent.BUTTON1) {
+                        .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { event ->
+                            val offset = event.changes.firstOrNull()?.position
+                                ?.let { fieldLayout?.getOffsetForPosition(it) }
+                            hoveredEditableLink = offset != null && asmEditableReferenceIsNavigable(
+                                index = state.workspace?.index,
+                                fileId = source.id,
+                                pageText = fieldValue.text,
+                                requestedOffset = offset,
+                                pageStartLine = page.startLine,
+                            )
+                        }
+                        .onPointerEvent(PointerEventType.Exit) {
+                            hoveredEditableLink = false
+                        }
+                        .onPointerEvent(PointerEventType.Press, PointerEventPass.Initial) { event ->
+                            val mouse = event.nativeEvent as? MouseEvent
+                            completionFromTyping = false
+                            completionExplicit = false
+                            val change = event.changes.firstOrNull() ?: return@onPointerEvent
+                            if (mouse?.button == MouseEvent.BUTTON3) {
+                                contextMenuOffset = fieldLayout?.getOffsetForPosition(change.position)
                                 return@onPointerEvent
                             }
-                            val change = event.changes.firstOrNull() ?: return@onPointerEvent
-                            val offset = fieldLayout?.getOffsetForPosition(change.position)
-                                ?: return@onPointerEvent
-                            val reference = asmEditableSymbolAt(fieldValue.text, offset, page.startLine)
-                                ?: return@onPointerEvent
-                            val definition = state.workspace?.index?.resolveLabel(
-                                source.id,
-                                reference.lineIndex,
-                                reference.token,
-                            ) ?: return@onPointerEvent
-                            state.openSource(definition.fileId, definition.lineIndex)
-                            change.consume()
+                            // Resolve definition gestures on press. AWT release events can report
+                            // NOBUTTON on some mice/trackpads, which made middle-click intermittent.
+                            if (!asmIsDefinitionPointerGesture(
+                                    button = mouse?.button ?: MouseEvent.NOBUTTON,
+                                    metaDown = mouse?.isMetaDown == true,
+                                    controlDown = mouse?.isControlDown == true,
+                                    isMac = ASM_IS_MAC,
+                                    tertiaryPressed = event.buttons.isTertiaryPressed ||
+                                        ((mouse?.modifiersEx ?: 0) and InputEvent.BUTTON2_DOWN_MASK) != 0,
+                                )
+                            ) return@onPointerEvent
+                            runCatching { editorFocusRequester.requestFocus() }
+                            val layout = fieldLayout
+                                ?.takeIf { it.layoutInput.text.text == fieldValue.text }
+                            if (layout == null) {
+                                pendingDefinitionPosition = change.position
+                                return@onPointerEvent
+                            }
+                            val offset = layout.getOffsetForPosition(change.position)
+                            if (asmOpenEditableReference(
+                                    state = state,
+                                    index = state.workspace?.index,
+                                    fileId = source.id,
+                                    pageText = fieldValue.text,
+                                    requestedOffset = offset,
+                                    pageStartLine = page.startLine,
+                                )
+                            ) change.consume()
                         },
-                    textStyle = TextStyle(
-                        fontSize = fs.body,
-                        lineHeight = lineHeight,
-                        fontFamily = FontFamily.Monospace,
-                        color = syntaxColors.foreground,
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    visualTransformation = transformation,
-                    onTextLayout = { fieldLayout = it },
-                )
+                        textStyle = TextStyle(
+                            fontSize = fs.body,
+                            lineHeight = lineHeight,
+                            fontFamily = FontFamily.Monospace,
+                            color = syntaxColors.foreground,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        visualTransformation = transformation,
+                        onTextLayout = { fieldLayout = it },
+                        )
+                    }
+                }
             }
             VerticalScrollbar(
                 adapter = verticalAdapter,
@@ -2820,6 +3263,137 @@ private fun AsmEditableSourcePane(
                     .height(ASM_SCROLLBAR_SIZE),
                 style = scrollbarStyle,
             )
+            if (completionVisible) {
+                val result = checkNotNull(completionResult)
+                val cursor = fieldLayout?.getCursorRect(fieldValue.selection.end)
+                if (cursor != null) {
+                    val popupWidth = minOf(ASM_COMPLETION_WIDTH, (maxWidth - 16.dp).coerceAtLeast(180.dp))
+                    val popupHeight = minOf(
+                        ASM_COMPLETION_MAX_HEIGHT,
+                        (result.items.size * ASM_COMPLETION_ROW_HEIGHT.value + 8f).dp,
+                    )
+                    val desiredX = with(density) {
+                        (ASM_LINE_NUMBER_WIDTH.toPx() + cursor.left - horizontal.value).toDp()
+                    }
+                    val desiredBelow = with(density) {
+                        (sourceTopPaddingPx + cursor.bottom - vertical.value).toDp()
+                    }
+                    val desiredAbove = with(density) {
+                        (sourceTopPaddingPx + cursor.top - vertical.value).toDp()
+                    } - popupHeight
+                    val popupX = desiredX.coerceIn(
+                        4.dp,
+                        (maxWidth - popupWidth - ASM_SCROLLBAR_SIZE - 4.dp).coerceAtLeast(4.dp),
+                    )
+                    val popupY = if (desiredBelow + popupHeight <= maxHeight - ASM_SCROLLBAR_SIZE) {
+                        desiredBelow
+                    } else {
+                        desiredAbove.coerceAtLeast(4.dp)
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 8.dp,
+                        shadowElevation = 8.dp,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier
+                            .offset { IntOffset(popupX.roundToPx(), popupY.roundToPx()) }
+                            .width(popupWidth)
+                            .heightIn(max = ASM_COMPLETION_MAX_HEIGHT)
+                            .zIndex(10f),
+                    ) {
+                        LazyColumn(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            itemsIndexed(result.items, key = { _, item -> "${item.kind}:${item.text}" }) { index, item ->
+                                val selected = index == selectedCompletionIndex
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                            else Color.Transparent,
+                                        )
+                                        .clickable { acceptCompletion(item) }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        item.text,
+                                        fontSize = fs.body,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        asmCompletionKindLabel(item.kind),
+                                        fontSize = fs.statusBar,
+                                        color = MaterialTheme.colorScheme.secondary,
+                                    )
+                                }
+                                Text(
+                                    item.detail,
+                                    fontSize = fs.statusBar,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                            else Color.Transparent,
+                                        )
+                                        .padding(start = 10.dp, end = 10.dp, bottom = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (macroCallHint != null) {
+                val cursor = fieldLayout?.getCursorRect(fieldValue.selection.end)
+                if (cursor != null) {
+                    val hintWidth = minOf(ASM_MACRO_HINT_WIDTH, (maxWidth - 16.dp).coerceAtLeast(180.dp))
+                    val desiredX = with(density) {
+                        (ASM_LINE_NUMBER_WIDTH.toPx() + cursor.left - horizontal.value).toDp()
+                    }
+                    val desiredBelow = with(density) {
+                        (sourceTopPaddingPx + cursor.bottom - vertical.value).toDp()
+                    }
+                    val popupX = desiredX.coerceIn(
+                        4.dp,
+                        (maxWidth - hintWidth - ASM_SCROLLBAR_SIZE - 4.dp).coerceAtLeast(4.dp),
+                    )
+                    val popupY = if (desiredBelow + ASM_MACRO_HINT_HEIGHT <= maxHeight - ASM_SCROLLBAR_SIZE) {
+                        desiredBelow
+                    } else {
+                        with(density) {
+                            (sourceTopPaddingPx + cursor.top - vertical.value).toDp()
+                        }.minus(ASM_MACRO_HINT_HEIGHT).coerceAtLeast(4.dp)
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 6.dp,
+                        shadowElevation = 6.dp,
+                        shape = RoundedCornerShape(5.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .offset { IntOffset(popupX.roundToPx(), popupY.roundToPx()) }
+                            .width(hintWidth)
+                            .height(ASM_MACRO_HINT_HEIGHT)
+                            .zIndex(9f),
+                    ) {
+                        Text(
+                            asmMacroHintText(macroCallHint),
+                            fontSize = fs.detail,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -2874,6 +3448,163 @@ internal data class AsmSourceEditPage(
     fun merge(updatedPageText: String): String = prefix + updatedPageText + suffix
 }
 
+internal fun asmApplyCompletion(
+    value: TextFieldValue,
+    completion: AsmCompletionResult,
+    replacement: String,
+    caretBacktrack: Int = 0,
+): TextFieldValue {
+    val start = completion.replaceStart.coerceIn(0, value.text.length)
+    val end = completion.replaceEnd.coerceIn(start, value.text.length)
+    val updated = value.text.replaceRange(start, end, replacement)
+    val caret = (start + replacement.length - caretBacktrack).coerceIn(start, start + replacement.length)
+    return TextFieldValue(updated, TextRange(caret))
+}
+
+internal fun asmAutomaticCompletionRequested(
+    previous: TextFieldValue,
+    updated: TextFieldValue,
+): Boolean = updated.selection.collapsed && updated.text != previous.text
+
+internal fun asmEditableReferenceIsNavigable(
+    index: AsmReferenceIndex?,
+    fileId: String,
+    pageText: String,
+    requestedOffset: Int,
+    pageStartLine: Int,
+): Boolean {
+    val sourceIndex = index ?: return false
+    val tokenReference = asmEditableTokenAt(pageText, requestedOffset, pageStartLine) ?: return false
+    val token = tokenReference.token
+    if (token.startsWith('"') && sourceIndex.resolveAsset(token.removeSurrounding("\"")) != null) return true
+    if (token.startsWith('$')) {
+        val resolution = parseAsmAddressQuery(token)?.let(sourceIndex.addressAtlas::resolve)
+        if (
+            resolution != null &&
+            (resolution.exactSourceAnchors.isNotEmpty() ||
+                resolution.containingAsset != null || resolution.nearestSourceAnchor != null)
+        ) return true
+    }
+    if (token.startsWith('%') && sourceIndex.resolveMacro(token) != null) return true
+    if (!ASM_EDITABLE_SYMBOL_REGEX.matches(token)) return false
+    if (sourceIndex.macrosAt(fileId, tokenReference.lineIndex).any { it.name.equals(token, ignoreCase = true) }) {
+        return true
+    }
+    if (AsmInstructionReference.find(token.substringBefore('.').uppercase()) != null) return true
+    return sourceIndex.definition(fileId, tokenReference.lineIndex, token) != null ||
+        sourceIndex.resolveLabel(fileId, tokenReference.lineIndex, token) != null
+}
+
+private fun asmOpenEditableReference(
+    state: AsmWorkspaceState,
+    index: AsmReferenceIndex?,
+    fileId: String,
+    pageText: String,
+    requestedOffset: Int,
+    pageStartLine: Int,
+): Boolean {
+    val sourceIndex = index ?: return false
+    val tokenReference = asmEditableTokenAt(pageText, requestedOffset, pageStartLine)
+    val token = tokenReference?.token
+    if (token?.startsWith('"') == true) {
+        val assetReference = token.removeSurrounding("\"")
+        if (sourceIndex.resolveAsset(assetReference) != null) {
+            state.openAssetReference(assetReference)
+            return true
+        }
+    }
+    if (token?.startsWith('$') == true) {
+        val address = parseAsmAddressQuery(token)
+        val resolution = address?.let(sourceIndex.addressAtlas::resolve)
+        if (
+            address != null && resolution != null &&
+            (resolution.exactSourceAnchors.isNotEmpty() ||
+                resolution.containingAsset != null || resolution.nearestSourceAnchor != null)
+        ) {
+            state.openAddress(address.snesAddress)
+            return true
+        }
+    }
+    if (token?.startsWith('%') == true) {
+        sourceIndex.resolveMacro(token)?.let { macro ->
+            state.openMacro(macro)
+            return true
+        }
+    }
+    val reference = asmEditableSymbolAt(pageText, requestedOffset, pageStartLine) ?: return false
+    sourceIndex.macrosAt(fileId, reference.lineIndex)
+        .firstOrNull { it.name.equals(reference.token, ignoreCase = true) }
+        ?.let { macro ->
+            state.showMacroReferences(macro)
+            return true
+        }
+    val instruction = reference.token.substringBefore('.').uppercase()
+    if (AsmInstructionReference.find(instruction) != null) {
+        state.showInstruction(reference.token.uppercase())
+        return true
+    }
+    sourceIndex.definition(fileId, reference.lineIndex, reference.token)?.let {
+        state.showReferences(fileId, reference.lineIndex, reference.token)
+        return true
+    }
+    sourceIndex.resolveLabel(fileId, reference.lineIndex, reference.token) ?: return false
+    state.openLabel(fileId, reference.lineIndex, reference.token)
+    return true
+}
+
+private fun asmShowEditableUsages(
+    state: AsmWorkspaceState,
+    index: AsmReferenceIndex?,
+    fileId: String,
+    pageText: String,
+    requestedOffset: Int,
+    pageStartLine: Int,
+): Boolean {
+    val sourceIndex = index ?: return false
+    val reference = asmEditableSymbolAt(pageText, requestedOffset, pageStartLine) ?: return false
+    if (reference.token.startsWith('%')) {
+        val macro = sourceIndex.resolveMacro(reference.token) ?: return false
+        return state.findMacroUsages(macro, fileId, reference.lineIndex)
+    }
+    sourceIndex.macrosAt(fileId, reference.lineIndex)
+        .firstOrNull { it.name.equals(reference.token, ignoreCase = true) }
+        ?.let { macro ->
+            return state.findMacroUsages(macro, fileId, reference.lineIndex)
+        }
+    return state.findLabelUsages(fileId, reference.lineIndex, reference.token)
+}
+
+private fun asmCompletionKindLabel(kind: AsmCompletionKind): String = when (kind) {
+    AsmCompletionKind.INSTRUCTION -> "opcode"
+    AsmCompletionKind.DIRECTIVE -> "directive"
+    AsmCompletionKind.MACRO -> "macro"
+    AsmCompletionKind.LOCAL_LABEL -> "local"
+    AsmCompletionKind.LABEL -> "label"
+    AsmCompletionKind.DEFINE -> "define"
+}
+
+@Composable
+private fun asmMacroHintText(hint: AsmMacroCallHint): AnnotatedString {
+    val accent = MaterialTheme.colorScheme.primary
+    return buildAnnotatedString {
+        append('%')
+        append(hint.macro.name)
+        append('(')
+        hint.macro.parameters.forEachIndexed { index, parameter ->
+            if (index > 0) append(", ")
+            if (index == hint.parameterIndex) {
+                pushStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold))
+                append(parameter)
+                pop()
+            } else {
+                append(parameter)
+            }
+        }
+        append(')')
+        append("  ·  argument ${hint.argumentIndex + 1}")
+    }
+}
+
 internal fun asmSourceEditPage(text: String, requestedStartLine: Int, maxLines: Int): AsmSourceEditPage {
     require(maxLines > 0) { "maxLines must be positive" }
     val starts = mutableListOf(0)
@@ -2907,8 +3638,11 @@ internal fun asmLineIndexAtOffset(text: String, requestedOffset: Int): Int =
 
 internal fun asmColumnIndexAtOffset(text: String, requestedOffset: Int): Int {
     val offset = requestedOffset.coerceIn(0, text.length)
-    val lineStart = text.lastIndexOf('\n', (offset - 1).coerceAtLeast(0))
-        .let { if (it < 0) 0 else it + 1 }
+    val lineStart = if (offset == 0) {
+        0
+    } else {
+        text.lastIndexOf('\n', offset - 1).let { if (it < 0) 0 else it + 1 }
+    }
     return offset - lineStart
 }
 
@@ -2922,8 +3656,11 @@ internal fun asmApplyTabIndentation(
     val text = value.text
     val selectionStart = value.selection.min.coerceIn(0, text.length)
     val selectionEnd = value.selection.max.coerceIn(0, text.length)
-    val lineStart = text.lastIndexOf('\n', (selectionStart - 1).coerceAtLeast(0))
-        .let { if (it < 0) 0 else it + 1 }
+    val lineStart = if (selectionStart == 0) {
+        0
+    } else {
+        text.lastIndexOf('\n', selectionStart - 1).let { if (it < 0) 0 else it + 1 }
+    }
 
     if (selectionStart == selectionEnd) {
         if (!unindent) {
@@ -2996,25 +3733,41 @@ private fun asmLeadingIndentLength(text: String, lineStart: Int): Int {
 
 internal data class AsmEditableSymbolReference(val lineIndex: Int, val token: String)
 
-private val ASM_EDITABLE_SYMBOL_REGEX = Regex("!?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+private data class AsmEditableTokenReference(val lineIndex: Int, val token: String)
+
+private val ASM_EDITABLE_SYMBOL_REGEX = Regex("[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
 
 internal fun asmEditableSymbolAt(
     text: String,
     requestedOffset: Int,
     pageStartLine: Int,
 ): AsmEditableSymbolReference? {
+    val reference = asmEditableTokenAt(text, requestedOffset, pageStartLine) ?: return null
+    if (!ASM_EDITABLE_SYMBOL_REGEX.matches(reference.token)) return null
+    return AsmEditableSymbolReference(reference.lineIndex, reference.token)
+}
+
+private fun asmEditableTokenAt(
+    text: String,
+    requestedOffset: Int,
+    pageStartLine: Int,
+): AsmEditableTokenReference? {
     val offset = requestedOffset.coerceIn(0, text.length)
-    val lineStart = text.lastIndexOf('\n', (offset - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+    val lineStart = if (offset == 0) {
+        0
+    } else {
+        text.lastIndexOf('\n', offset - 1).let { if (it < 0) 0 else it + 1 }
+    }
     val lineEnd = text.indexOf('\n', offset).let { if (it < 0) text.length else it }
     val line = text.substring(lineStart, lineEnd)
     val column = (offset - lineStart).coerceIn(0, line.length)
-    val codeEnd = line.indexOf(';').let { if (it < 0) line.length else it }
+    val codeEnd = asmCommentStart(line)
     if (column > codeEnd) return null
-    val match = ASM_EDITABLE_SYMBOL_REGEX.findAll(line.substring(0, codeEnd)).firstOrNull {
-        column in it.range || (column == it.range.last + 1 && column == line.length)
+    val match = ASM_EDIT_TOKEN_REGEX.findAll(line.substring(0, codeEnd)).firstOrNull {
+        column in it.range || column == it.range.last + 1
     } ?: return null
     val lineIndex = pageStartLine + text.substring(0, lineStart).count { it == '\n' }
-    return AsmEditableSymbolReference(lineIndex, match.value)
+    return AsmEditableTokenReference(lineIndex, match.value)
 }
 
 /** Applies only to a single newline entered by the user. Paste, replacement,
@@ -3058,8 +3811,50 @@ private fun AsmReferencesBar(
     label: AsmLabel,
     usages: List<AsmLabelUsage>,
 ) {
+    AsmSourceReferencesBar(
+        state = state,
+        index = index,
+        referenceKey = label.symbolId,
+        expansionTarget = AsmReferenceExpansionTarget.Label(label.symbolId),
+        symbolName = label.name,
+        usages = usages,
+        onOpen = { state.openReference(label, it) },
+    )
+}
+
+@Composable
+private fun AsmMacroReferencesBar(
+    state: AsmWorkspaceState,
+    index: AsmReferenceIndex,
+    macro: AsmMacro,
+    usages: List<AsmMacroUsage>,
+) {
+    AsmSourceReferencesBar(
+        state = state,
+        index = index,
+        referenceKey = macro.id,
+        expansionTarget = AsmReferenceExpansionTarget.Macro(macro.id),
+        symbolName = "%${macro.name}",
+        usages = usages,
+        onOpen = { state.openMacroReference(macro, it) },
+    )
+}
+
+@Composable
+private fun <T : AsmSourceUsage> AsmSourceReferencesBar(
+    state: AsmWorkspaceState,
+    index: AsmReferenceIndex,
+    referenceKey: Any,
+    expansionTarget: AsmReferenceExpansionTarget,
+    symbolName: String,
+    usages: List<T>,
+    onOpen: (T) -> Unit,
+) {
     val fs = LocalEditorTheme.current.fontSize.value
-    var expanded by remember(label.symbolId) { mutableStateOf(false) }
+    var expanded by remember(referenceKey) { mutableStateOf(false) }
+    LaunchedEffect(expansionTarget, state.referenceExpansionTarget, state.referenceExpansionSerial) {
+        if (state.referenceExpansionTarget == expansionTarget) expanded = true
+    }
     val currentIndex = usages.indexOfFirst {
         it.fileId == state.selectedFileId && it.lineIndex == state.selectedLineIndex
     }
@@ -3087,7 +3882,7 @@ private fun AsmReferencesBar(
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
-                    label.name,
+                    symbolName,
                     fontSize = fs.body,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -3101,11 +3896,11 @@ private fun AsmReferencesBar(
                 )
                 Spacer(Modifier.width(5.dp))
                 TextButton(
-                    onClick = { previous?.let { state.openReference(label, it) } },
+                    onClick = { previous?.let(onOpen) },
                     enabled = previous != null,
                 ) { Text("Prev", fontSize = fs.detail) }
                 TextButton(
-                    onClick = { next?.let { state.openReference(label, it) } },
+                    onClick = { next?.let(onOpen) },
                     enabled = next != null,
                 ) { Text("Next", fontSize = fs.detail) }
                 TextButton(
@@ -3122,7 +3917,7 @@ private fun AsmReferencesBar(
                             color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
                             else Color.Transparent,
                             shape = RoundedCornerShape(4.dp),
-                            modifier = Modifier.fillMaxWidth().clickable { state.openReference(label, usage) },
+                            modifier = Modifier.fillMaxWidth().clickable { onOpen(usage) },
                         ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 4.dp),
@@ -3158,55 +3953,90 @@ private fun AsmReferencesBar(
  *
  * ClickableText owns the primary press gesture, which competes with SelectionContainer's
  * drag and double-click recognizers. This observer watches the initial pointer pass without
- * consuming it, then treats only an unmoved primary-button release as a link activation.
+ * consuming it, then treats an unmoved primary- or middle-button release as link activation.
  */
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 private fun AsmSelectableLinkedText(
     text: AnnotatedString,
     style: TextStyle,
     onAnnotationClick: (AnnotatedString.Range<String>) -> Unit,
 ) {
     var layoutResult by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
+    var hoveredLink by remember(text) { mutableStateOf(false) }
     BasicText(
         text = text,
         style = style,
         softWrap = false,
         onTextLayout = { layoutResult = it },
-        modifier = Modifier.pointerInput(text) {
-            awaitEachGesture {
-                val down = awaitFirstDown(
-                    requireUnconsumed = false,
-                    pass = PointerEventPass.Initial,
-                )
-                var releasePosition = down.position
-                var releaseMouseEvent: MouseEvent? = null
-                var released = false
-                var movedBeyondClick = false
-
-                while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                    releasePosition = change.position
-                    if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
-                        movedBeyondClick = true
-                    }
-                    if (!change.pressed) {
-                        releaseMouseEvent = event.nativeEvent as? MouseEvent
-                        released = true
-                        break
-                    }
-                }
-
-                val isPrimaryRelease = releaseMouseEvent?.button?.let { it == MouseEvent.BUTTON1 } ?: true
-                if (released && !movedBeyondClick && isPrimaryRelease) {
-                    val offset = layoutResult?.getOffsetForPosition(releasePosition) ?: return@awaitEachGesture
-                    text.getStringAnnotations(start = offset, end = offset)
-                        .firstOrNull()
-                        ?.let(onAnnotationClick)
-                }
+        modifier = Modifier
+            .pointerHoverIcon(
+                if (hoveredLink) ASM_LINK_CURSOR else ASM_TEXT_CURSOR,
+                overrideDescendants = true,
+            )
+            .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { event ->
+                val offset = event.changes.firstOrNull()?.position
+                    ?.let { layoutResult?.getOffsetForPosition(it) }
+                hoveredLink = offset != null && asmStringAnnotationAt(text, offset) != null
             }
-        },
+            .onPointerEvent(PointerEventType.Exit) { hoveredLink = false }
+            .pointerInput(text) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(
+                        requireUnconsumed = false,
+                        pass = PointerEventPass.Initial,
+                    )
+                    val pressMouseEvent = currentEvent.nativeEvent as? MouseEvent
+                    var releasePosition = down.position
+                    var releaseMouseEvent: MouseEvent? = null
+                    var released = false
+                    var movedBeyondClick = false
+
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        releasePosition = change.position
+                        if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                            movedBeyondClick = true
+                        }
+                        if (!change.pressed) {
+                            releaseMouseEvent = event.nativeEvent as? MouseEvent
+                            released = true
+                            break
+                        }
+                    }
+
+                    val releasedButton = releaseMouseEvent?.button
+                        ?.takeUnless { it == MouseEvent.NOBUTTON }
+                        ?: pressMouseEvent?.button
+                    val isLinkRelease = releasedButton == null ||
+                        releasedButton == MouseEvent.BUTTON1 || releasedButton == MouseEvent.BUTTON2
+                    if (released && !movedBeyondClick && isLinkRelease) {
+                        val offset = layoutResult?.getOffsetForPosition(releasePosition) ?: return@awaitEachGesture
+                        asmStringAnnotationAt(text, offset)?.let(onAnnotationClick)
+                    }
+                }
+            },
     )
+}
+
+internal fun asmIsDefinitionPointerGesture(
+    button: Int,
+    metaDown: Boolean,
+    controlDown: Boolean,
+    isMac: Boolean,
+    tertiaryPressed: Boolean = false,
+): Boolean = button == MouseEvent.BUTTON2 || tertiaryPressed ||
+    (button == MouseEvent.BUTTON1 && if (isMac) metaDown else controlDown)
+
+internal fun asmStringAnnotationAt(
+    text: AnnotatedString,
+    requestedOffset: Int,
+): AnnotatedString.Range<String>? {
+    val offset = requestedOffset.coerceIn(0, text.length)
+    return text.getStringAnnotations(start = offset, end = offset).firstOrNull()
+        ?: offset.takeIf { it > 0 }
+            ?.let { text.getStringAnnotations(start = it - 1, end = it - 1).firstOrNull() }
 }
 
 @Composable
@@ -3240,19 +4070,17 @@ private fun AsmScrollableTextPane(
                 .focusable()
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val command = event.isCtrlPressed || event.isMetaPressed
+                    val command = if (ASM_IS_MAC) event.isMetaPressed else event.isCtrlPressed
                     when {
                         command && event.key == Key.F -> {
                             onFind()
                             true
                         }
-                        (event.isAltPressed && event.key == Key.DirectionLeft) ||
-                            (command && event.key == Key.LeftBracket) -> {
+                        command && event.key == Key.DirectionLeft -> {
                             onBack()
                             true
                         }
-                        (event.isAltPressed && event.key == Key.DirectionRight) ||
-                            (command && event.key == Key.RightBracket) -> {
+                        command && event.key == Key.DirectionRight -> {
                             onForward()
                             true
                         }
@@ -3333,7 +4161,13 @@ private fun AsmScrollableTextPane(
 }
 
 @Composable
-private fun AsmNavigationHeader(state: AsmWorkspaceState, title: String, detail: String, trailing: String) {
+private fun AsmNavigationHeader(
+    state: AsmWorkspaceState,
+    title: String,
+    detail: String,
+    trailing: String,
+    actions: (@Composable () -> Unit)? = null,
+) {
     val fs = LocalEditorTheme.current.fontSize.value
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3348,7 +4182,10 @@ private fun AsmNavigationHeader(state: AsmWorkspaceState, title: String, detail:
                 Text(title, fontSize = fs.heading, fontWeight = FontWeight.Bold)
                 if (detail.isNotBlank()) Text(detail, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(trailing, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (trailing.isNotBlank()) {
+                Text(trailing, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            actions?.invoke()
         }
     }
     Divider()
@@ -3605,10 +4442,13 @@ private fun asmAnnotatedLine(
     val foreground = codeForeground()
     val commentStart = line.indexOf(';').let { if (it < 0) line.length else it }
     val code = line.substring(0, commentStart)
-    val tokenRegex = Regex("\"[^\"]*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|!?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+    val tokenRegex = Regex("\"[^\"]*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
     val matches = tokenRegex.findAll(code).toList()
     val definition = Regex("^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.[A-Za-z0-9_]+):").find(code)?.groupValues?.get(1)
         ?: Regex("^\\s*(![A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\?=|#=|=)").find(code)?.groupValues?.get(1)
+    val macroDefinition = if (index != null && fileId != null) {
+        index.macrosAt(fileId, lineIndex).firstOrNull()
+    } else null
     val instructionMatch = matches.firstOrNull { match ->
         match.value != definition && AsmInstructionReference.find(match.value.substringBefore('.')) != null
     }
@@ -3622,10 +4462,22 @@ private fun asmAnnotatedLine(
                     val reference = token.removeSurrounding("\"")
                     val asset = index?.resolveAsset(reference)
                     if (asset != null) pushStringAnnotation("asset", reference)
-                    pushStyle(SpanStyle(color = if (asset != null) labelColor else stringColor, textDecoration = if (asset != null) TextDecoration.Underline else null))
+                    pushStyle(SpanStyle(color = if (asset != null) labelColor else stringColor))
                     append(token)
                     pop()
                     if (asset != null) pop()
+                }
+                token == macroDefinition?.name -> {
+                    pushStringAnnotation("macroDefinition", macroDefinition.name)
+                    pushStyle(
+                        SpanStyle(
+                            color = definitionColor,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    append(token)
+                    pop()
+                    pop()
                 }
                 token == definition -> {
                     val navigableDefinition = index != null && fileId != null &&
@@ -3635,7 +4487,6 @@ private fun asmAnnotatedLine(
                         SpanStyle(
                             color = definitionColor,
                             fontWeight = FontWeight.SemiBold,
-                            textDecoration = if (navigableDefinition) TextDecoration.Underline else null,
                         ),
                     )
                     append(token)
@@ -3645,6 +4496,14 @@ private fun asmAnnotatedLine(
                 match == instructionMatch -> {
                     pushStringAnnotation("instruction", token.uppercase())
                     pushStyle(SpanStyle(color = directiveColor, fontWeight = FontWeight.SemiBold)); append(token); pop(); pop()
+                }
+                token.startsWith('%') && index?.resolveMacro(token) != null -> {
+                    val macro = checkNotNull(index.resolveMacro(token))
+                    pushStringAnnotation("macro", macro.name)
+                    pushStyle(SpanStyle(color = labelColor))
+                    append(token)
+                    pop()
+                    pop()
                 }
                 token.startsWith('$') || token.startsWith('%') || token.firstOrNull()?.isDigit() == true -> {
                     val parsedAddress = if (token.startsWith('$')) parseAsmAddressQuery(token) else null
@@ -3661,7 +4520,6 @@ private fun asmAnnotatedLine(
                     pushStyle(
                         SpanStyle(
                             color = numberColor,
-                            textDecoration = if (navigableAddress != null) TextDecoration.Underline else null,
                         ),
                     )
                     append(token)
@@ -3676,7 +4534,7 @@ private fun asmAnnotatedLine(
                 }
                 index != null && fileId != null && index.resolveLabel(fileId, lineIndex, token) != null -> {
                     pushStringAnnotation("label", token)
-                    pushStyle(SpanStyle(color = labelColor, textDecoration = TextDecoration.Underline)); append(token); pop(); pop()
+                    pushStyle(SpanStyle(color = labelColor)); append(token); pop(); pop()
                 }
                 else -> {
                     pushStyle(SpanStyle(color = foreground)); append(token); pop()
@@ -3712,7 +4570,13 @@ private data class AsmEditSyntaxColors(
     val symbol: Color,
 )
 
-private fun asmEditableHighlight(text: String, colors: AsmEditSyntaxColors): AnnotatedString {
+private fun asmEditableHighlight(
+    text: String,
+    colors: AsmEditSyntaxColors,
+    index: AsmReferenceIndex? = null,
+    fileId: String? = null,
+    pageStartLine: Int = 0,
+): AnnotatedString {
     val lines = text.split('\n')
     return buildAnnotatedString {
         lines.forEachIndexed { lineIndex, line ->
@@ -3722,6 +4586,9 @@ private fun asmEditableHighlight(text: String, colors: AsmEditSyntaxColors): Ann
         val definition = ASM_EDIT_DEFINITION_REGEX.find(code)?.let { match ->
             match.groupValues[1].ifEmpty { match.groupValues[2] }
         }
+        val macroDefinition = if (index != null && fileId != null) {
+            index.macrosAt(fileId, pageStartLine + lineIndex).firstOrNull()
+        } else null
         val instruction = matches.firstOrNull { match ->
             match.value != definition && AsmInstructionReference.find(match.value.substringBefore('.')) != null
         }
@@ -3729,10 +4596,25 @@ private fun asmEditableHighlight(text: String, colors: AsmEditSyntaxColors): Ann
         matches.forEach { match ->
             append(code.substring(cursor, match.range.first))
             val token = match.value
+            val absoluteLineIndex = pageStartLine + lineIndex
+            val resolvedLabel = if (index != null && fileId != null) {
+                index.resolveLabel(fileId, absoluteLineIndex, token)
+            } else null
             val style = when {
-                token.startsWith('"') -> SpanStyle(color = colors.string)
-                token == definition -> SpanStyle(color = colors.definition, fontWeight = FontWeight.SemiBold)
+                token.startsWith('"') -> {
+                    val asset = index?.resolveAsset(token.removeSurrounding("\""))
+                    SpanStyle(
+                        color = if (asset == null) colors.string else colors.symbol,
+                    )
+                }
+                token == definition || token == macroDefinition?.name -> SpanStyle(
+                    color = colors.definition,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 match == instruction -> SpanStyle(color = colors.directive, fontWeight = FontWeight.SemiBold)
+                token.startsWith('%') && index?.resolveMacro(token) != null ->
+                    SpanStyle(color = colors.symbol)
+                resolvedLabel != null -> SpanStyle(color = colors.symbol)
                 token.startsWith('!') -> SpanStyle(color = colors.symbol)
                 token.startsWith('$') || token.startsWith('%') || token.firstOrNull()?.isDigit() == true ->
                     SpanStyle(color = colors.number)
@@ -3770,7 +4652,7 @@ private fun asmCommentStart(line: String): Int {
 }
 
 private val ASM_EDIT_TOKEN_REGEX =
-    Regex("\"(?:\\\\.|[^\"])*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|!?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+    Regex("\"(?:\\\\.|[^\"])*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
 private val ASM_EDIT_DEFINITION_REGEX =
     Regex("^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.[A-Za-z0-9_]+):|^\\s*(![A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\?=|#=|=)")
 private val ASM_LABEL_ONLY_REGEX = Regex("(?:[A-Za-z_][A-Za-z0-9_.]*|\\.[A-Za-z0-9_]+):")
@@ -3793,6 +4675,18 @@ private const val MAX_ASM_PROBLEMS_HEIGHT_DP = 420f
 private val ASM_PROBLEMS_DIVIDER_HEIGHT = 6.dp
 private const val ASM_OPCODE_INDENT = 4
 private const val ASM_MOUSE_WHEEL_SCALE = 38f
+private const val ASM_LIVE_DIAGNOSTIC_DELAY_MS = 350L
+private const val ASM_MODULE_DESCRIPTION_MAX_LENGTH = 240
+private val ASM_IS_MAC = System.getProperty("os.name", "").lowercase().contains("mac")
+private val ASM_MODIFIER_LABEL = if (ASM_IS_MAC) "Cmd" else "Ctrl"
+private val ASM_LINK_CURSOR = PointerIcon(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR))
+private val ASM_TEXT_CURSOR = PointerIcon(Cursor.getPredefinedCursor(Cursor.TEXT_CURSOR))
+private val ASM_COMPLETION_WIDTH = 390.dp
+private val ASM_COMPLETION_MAX_HEIGHT = 260.dp
+private val ASM_COMPLETION_ROW_HEIGHT = 44.dp
+private val ASM_MACRO_HINT_WIDTH = 430.dp
+private val ASM_MACRO_HINT_HEIGHT = 34.dp
+private val ASM_CONTEXT_MENU_WIDTH = 400.dp
 private const val MOUSE_BACK_BUTTON = 4
 private const val MOUSE_FORWARD_BUTTON = 5
 

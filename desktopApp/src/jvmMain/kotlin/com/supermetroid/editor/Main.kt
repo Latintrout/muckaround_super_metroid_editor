@@ -1250,6 +1250,10 @@ fun main() = application {
                                         buildProjectRom = romParser?.let { parser ->
                                             { editorState.buildRomPreview(parser) }
                                         },
+                                        onRunInEmulator = {
+                                            emulatorWorkspaceState.requestRun()
+                                            emulatorEnabled = true
+                                        },
                                         problemsPaneHeightDp = asmProblemsPaneHeightDp,
                                         onProblemsPaneHeightChange = { asmProblemsPaneHeightDp = it },
                                         modifier = Modifier.fillMaxSize(),
@@ -1386,7 +1390,16 @@ fun main() = application {
                                         }
 
                                         val brush = es.brush
-                                        if ((leftTab == TAB_ROOMS || leftTab == TAB_ITEMS) && brush != null) {
+                                        val asmSourceStatus = asmWorkspaceState.sourceStatusSummary
+                                        if (leftTab == TAB_ASM && asmSourceStatus.isNotBlank()) {
+                                            Text(
+                                                asmSourceStatus,
+                                                fontSize = fs.statusBar,
+                                                fontFamily = monoFont,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                            )
+                                        } else if ((leftTab == TAB_ROOMS || leftTab == TAB_ITEMS) && brush != null) {
                                             val bt = brush.blockType
                                             Text(
                                                 "${brush.cols}×${brush.rows} #${brush.primaryIndex} 0x${bt.toString(16).uppercase()} ${blockTypeName(bt)}" +

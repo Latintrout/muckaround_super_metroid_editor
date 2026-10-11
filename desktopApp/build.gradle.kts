@@ -30,6 +30,17 @@ val asarRuntimeOutputDirectory = asarToolchainRoot.map { it.dir("runtime") }
 val asarBuiltExecutable = asarRuntimeOutputDirectory.map { it.file(asarExecutableName) }
 val platformAppResourcesDirectory = layout.buildDirectory.dir("appResources/$appResourcePlatformDir")
 val packagedAsarDirectory = platformAppResourcesDirectory.map { it.dir("tools/asar/$asarVersion") }
+val generatedAsmTemplatesDirectory = layout.buildDirectory.dir("generated/asm-module-templates")
+
+val prepareAsmModuleTemplates by tasks.registering(Sync::class) {
+    group = "build"
+    description = "Bundle the readable ASM examples used by new project workspaces"
+    from(rootProject.file("examples/asm")) {
+        include("*.asm")
+        into("asm-templates")
+    }
+    into(generatedAsmTemplatesDirectory)
+}
 
 val macGestureJvmArgs = listOf(
     "--add-exports", "java.desktop/com.apple.eawt.event=ALL-UNNAMED",
@@ -57,6 +68,7 @@ kotlin {
     
     sourceSets {
         val jvmMain by getting {
+            resources.srcDir(generatedAsmTemplatesDirectory)
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(project(":shared"))
@@ -90,6 +102,10 @@ kotlin {
 }
 
 val regularJvmTest = tasks.named<org.gradle.api.tasks.testing.Test>("jvmTest")
+
+tasks.named("jvmProcessResources") {
+    dependsOn(prepareAsmModuleTemplates)
+}
 
 tasks.register<org.gradle.api.tasks.testing.Test>("asmReferenceIntegrationTest") {
     group = "verification"

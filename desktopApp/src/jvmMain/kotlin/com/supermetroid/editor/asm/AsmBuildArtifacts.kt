@@ -74,18 +74,26 @@ internal object AsmSourceLinter {
         excludedFileIds: Set<String> = emptySet(),
     ): List<AsmBuildDiagnostic> {
         if (!sourceRoot.isDirectory) return emptyList()
-        return sourceRoot.walkTopDown()
+        val sourceFiles = sourceRoot.walkTopDown()
             .filter { it.isFile && it.extension.equals("asm", ignoreCase = true) }
             .filterNot { it.relativeTo(sourceRoot).invariantSeparatorsPath in excludedFileIds }
-            .flatMap { file ->
-                lintText(file.relativeTo(sourceRoot).invariantSeparatorsPath, file.readText()).asSequence()
-            }
+            .map { file -> file.relativeTo(sourceRoot).invariantSeparatorsPath to file.readText() }
             .toList()
+        val macros = sourceFiles.flatMap { (fileId, text) -> parseAsmMacros(fileId, text) }
+        return sourceFiles.flatMap { (fileId, text) ->
+            lintText(fileId, text, macros)
+        }
     }
 
-    fun lintText(fileId: String, text: String): List<AsmBuildDiagnostic> = buildList {
+    fun lintText(
+        fileId: String,
+        text: String,
+        macros: List<AsmMacro>? = null,
+    ): List<AsmBuildDiagnostic> = buildList {
+        val macrosByName = macros?.associateBy(AsmMacro::name)
         text.lineSequence().forEachIndexed { lineIndex, sourceLine ->
-            splitStatements(sourceLine.substringBefore(';')).forEach statementLoop@{ statement ->
+            val code = asmCodeBeforeComment(sourceLine)
+            splitStatements(code).forEach statementLoop@{ statement ->
                 val match = dataDirective.matchEntire(statement) ?: return@statementLoop
                 val directive = match.groupValues[1].lowercase()
                 val digits = checkNotNull(widths[directive])
@@ -98,6 +106,39 @@ internal object AsmSourceLinter {
                         AsmBuildDiagnostic(
                             severity = AsmDiagnosticSeverity.ERROR,
                             message = "${literal.value} does not fit $directive ($bits bits); Asar would silently keep only the low $bits bits. Use an in-range value or mask explicitly with &\$${"F".repeat(digits)} if truncation is intentional.",
+                            fileId = fileId,
+                            lineIndex = lineIndex,
+                        ),
+                    )
+                }
+            }
+            if (macrosByName != null) {
+                parseMacroCalls(code).forEach { call ->
+                    val macro = macrosByName[call.name]
+                        ?: macros.firstOrNull { it.name.equals(call.name, ignoreCase = true) }
+                    if (macro == null) {
+                        add(
+                            AsmBuildDiagnostic(
+                                severity = AsmDiagnosticSeverity.ERROR,
+                                message = "Unknown macro %${call.name}(...).",
+                                fileId = fileId,
+                                lineIndex = lineIndex,
+                            ),
+                        )
+                        return@forEach
+                    }
+                    val fixedParameters = macro.parameters.count { it != "..." }
+                    val validArity = if (macro.variadic) {
+                        call.argumentCount >= fixedParameters
+                    } else {
+                        call.argumentCount == fixedParameters
+                    }
+                    if (validArity) return@forEach
+                    val expectation = if (macro.variadic) "at least $fixedParameters" else fixedParameters.toString()
+                    add(
+                        AsmBuildDiagnostic(
+                            severity = AsmDiagnosticSeverity.ERROR,
+                            message = "${macro.signature} expects $expectation argument${if (fixedParameters == 1 && !macro.variadic) "" else "s"}; found ${call.argumentCount}.",
                             fileId = fileId,
                             lineIndex = lineIndex,
                         ),
@@ -144,6 +185,56 @@ internal object AsmSourceLinter {
         }
         result += current.toString()
         return result
+    }
+
+    private data class MacroCall(val name: String, val argumentCount: Int)
+
+    private val macroCallStart = Regex("%([A-Za-z_][A-Za-z0-9_]*)\\s*\\(")
+
+    private fun parseMacroCalls(code: String): List<MacroCall> = macroCallStart.findAll(code).mapNotNull { match ->
+        if (asmOffsetInsideString(code, match.range.first)) return@mapNotNull null
+        val open = match.range.last
+        var depth = 1
+        var quoted = false
+        var escaped = false
+        var close = -1
+        var cursor = open + 1
+        while (cursor < code.length && close < 0) {
+            val character = code[cursor]
+            when {
+                escaped -> escaped = false
+                character == '\\' && quoted -> escaped = true
+                character == '"' -> quoted = !quoted
+                !quoted && character == '(' -> depth++
+                !quoted && character == ')' -> {
+                    depth--
+                    if (depth == 0) close = cursor
+                }
+            }
+            cursor++
+        }
+        if (close < 0) return@mapNotNull null
+        val arguments = code.substring(open + 1, close)
+        MacroCall(match.groupValues[1], countMacroArguments(arguments))
+    }.toList()
+
+    private fun countMacroArguments(arguments: String): Int {
+        if (arguments.isBlank()) return 0
+        var count = 1
+        var depth = 0
+        var quoted = false
+        var escaped = false
+        arguments.forEach { character ->
+            when {
+                escaped -> escaped = false
+                character == '\\' && quoted -> escaped = true
+                character == '"' -> quoted = !quoted
+                !quoted && character == '(' -> depth++
+                !quoted && character == ')' -> depth--
+                !quoted && character == ',' && depth == 0 -> count++
+            }
+        }
+        return count
     }
 }
 

@@ -67,6 +67,7 @@ class AsmReferenceTest {
             org ${'$'}848000
             ;;; ${'$'}8000: Set up PLMs ;;;
             SetupPLMs:
+                JSL BootGame_wait
                 RTS
             """.trimIndent(),
         )
@@ -86,6 +87,13 @@ class AsmReferenceTest {
         assertEquals("Boot game", bank80.sections.single { it.address == "\$8000" }.title)
         assertEquals("bank_84.asm", assertNotNull(index.resolveLabel("bank_80.asm", 4, "SetupPLMs")).fileId)
         assertEquals(5, assertNotNull(index.resolveLabel("bank_80.asm", 6, ".wait")).lineIndex)
+        val qualifiedLocal = assertNotNull(index.resolveLabel("bank_84.asm", 4, "BootGame_wait"))
+        assertEquals("bank_80.asm", qualifiedLocal.fileId)
+        assertEquals(5, qualifiedLocal.lineIndex)
+        assertEquals(
+            listOf("bank_80.asm" to 6, "bank_84.asm" to 4),
+            index.usagesFor(qualifiedLocal).map { it.fileId to it.lineIndex },
+        )
         assertEquals("memory.asm", assertNotNull(index.resolveLabel("bank_80.asm", 4, "Enemy.var5")).fileId)
         assertNull(index.resolveLabel("bank_84.asm", 4, ".wait"))
     }
@@ -147,6 +155,32 @@ class AsmReferenceTest {
         assertEquals("main.asm", define.fileId)
         assertEquals(0, define.lineIndex)
         assertEquals(listOf("bank_90.asm" to 0), index.usagesFor(define).map { it.fileId to it.lineIndex })
+    }
+
+    @Test
+    fun `macro usages resolve across files without matching strings or comments`() {
+        val source = File(tempDirectory, "macro-xref-src").apply { mkdirs() }
+        File(source, "main.asm").writeText(
+            "incsrc macros.asm\nincsrc bank_84.asm\n",
+        )
+        File(source, "macros.asm").writeText(
+            "macro DoorHeader(direction, cap)\nendmacro\n",
+        )
+        File(source, "bank_84.asm").writeText(
+            """
+                %DoorHeader(Left, ${'$'}01)
+                db "%DoorHeader(Right, ${'$'}02)"
+                ; %DoorHeader(Up, ${'$'}03)
+                %DoorHeader(Down, function(${ '$' }04, ${ '$' }05))
+            """.trimIndent(),
+        )
+
+        val index = AsmSourceParser().parse(source, File(tempDirectory, "macro-xref-data"), emptyList())
+        val macro = assertNotNull(index.resolveMacro("%DoorHeader"))
+
+        assertEquals(listOf(macro), index.macrosAt("macros.asm", 0))
+        assertEquals(listOf(0, 3), index.usagesFor(macro).map(AsmMacroUsage::lineIndex))
+        assertEquals(listOf("bank_84.asm", "bank_84.asm"), index.usagesFor(macro).map(AsmMacroUsage::fileId))
     }
 
     @Test
@@ -219,6 +253,26 @@ class AsmReferenceTest {
     }
 
     @Test
+    fun `source status summary follows source selection and stays out of other browser modes`() = runBlocking {
+        val repository = AsmReferenceRepository(
+            referenceRoot = File(tempDirectory, "asm-status"),
+            fetchBytes = { fakeSourceArchive() },
+            assetRanges = emptyList(),
+        )
+        repository.installOrRefresh(ByteArray(0x300000), "fixture.sfc")
+        val state = AsmWorkspaceState(repository)
+        state.loadInstalled()
+        state.openSource("bank_80.asm", 2)
+
+        val source = assertNotNull(state.workspace?.index?.file("bank_80.asm"))
+        assertTrue(state.sourceStatusSummary.contains("${source.lines.size} lines"))
+        assertTrue(state.sourceStatusSummary.contains("\$80:8000"))
+
+        state.showLibraryBrowser()
+        assertEquals("", state.sourceStatusSummary)
+    }
+
+    @Test
     fun `workspace address navigation prefers a named exact source anchor`() = runBlocking {
         val repository = AsmReferenceRepository(
             referenceRoot = File(tempDirectory, "asm"),
@@ -285,6 +339,61 @@ class AsmReferenceTest {
         assertEquals(helper.symbolId, state.activeReferenceSymbol)
     }
 
+    @Test
+    fun `find usages stays on the invocation row and requests an expanded result list`() = runBlocking {
+        val repository = AsmReferenceRepository(
+            referenceRoot = File(tempDirectory, "asm-find-usages"),
+            fetchBytes = { fakeSourceArchive() },
+            assetRanges = emptyList(),
+        )
+        repository.installOrRefresh(ByteArray(0x300000), "fixture.sfc")
+        val state = AsmWorkspaceState(repository)
+        state.loadInstalled()
+        state.openSource("bank_80.asm", 3)
+
+        assertTrue(state.findLabelUsages("bank_80.asm", 3, "Helper"))
+
+        val helper = assertNotNull(state.workspace?.index?.resolveLabel("bank_80.asm", 3, "Helper"))
+        assertEquals(3, state.selectedLineIndex)
+        assertEquals(helper.symbolId, state.activeReferenceSymbol)
+        assertEquals(
+            AsmReferenceExpansionTarget.Label(helper.symbolId),
+            state.referenceExpansionTarget,
+        )
+        assertEquals(1L, state.referenceExpansionSerial)
+    }
+
+    @Test
+    fun `macro reference navigation preserves its usage cycle through history`() = runBlocking {
+        val repository = AsmReferenceRepository(
+            referenceRoot = File(tempDirectory, "asm-macro-xref"),
+            fetchBytes = { fakeSourceArchive() },
+            assetRanges = emptyList(),
+        )
+        repository.installOrRefresh(ByteArray(0x300000), "fixture.sfc")
+        val state = AsmWorkspaceState(repository)
+        state.loadInstalled()
+        val index = assertNotNull(state.workspace).index
+        val macro = assertNotNull(index.resolveMacro("%Pair"))
+        val usage = index.usagesFor(macro).single()
+
+        state.openMacro(macro)
+        assertEquals(7, state.selectedLineIndex)
+        assertEquals(macro.id, state.activeReferenceMacro)
+
+        state.openMacroReference(macro, usage)
+        assertEquals(9, state.selectedLineIndex)
+        assertEquals(macro.id, state.activeReferenceMacro)
+
+        state.goBack()
+        assertEquals(7, state.selectedLineIndex)
+        assertEquals(macro.id, state.activeReferenceMacro)
+
+        state.goForward()
+        assertEquals(9, state.selectedLineIndex)
+        assertEquals(macro.id, state.activeReferenceMacro)
+    }
+
     private fun fakeSourceArchive(): ByteArray {
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
@@ -296,7 +405,7 @@ class AsmReferenceTest {
             entry("src/main.asm", "incsrc bank_80.asm ; Game engine\n")
             entry(
                 "src/bank_80.asm",
-                "; Game engine\norg \$808000\nBoot:\n    JSR Helper\n    RTS\nHelper:\n    RTS\n",
+                "; Game engine\norg \$808000\nBoot:\n    JSR Helper\n    RTS\nHelper:\n    RTS\nmacro Pair(left, right)\nendmacro\n%Pair(\$01, \$02)\n",
             )
             entry("README.md", "test")
         }

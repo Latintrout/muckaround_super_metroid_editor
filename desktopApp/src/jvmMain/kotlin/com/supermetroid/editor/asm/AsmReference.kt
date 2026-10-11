@@ -95,12 +95,66 @@ internal data class AsmSymbolId(
 
 internal data class AsmLabelUsage(
     val symbolId: AsmSymbolId,
+    override val fileId: String,
+    override val lineIndex: Int,
+    override val column: Int,
+    val token: String,
+    override val sourceLine: String,
+) : AsmSourceUsage
+
+internal interface AsmSourceUsage {
+    val fileId: String
+    val lineIndex: Int
+    val column: Int
+    val sourceLine: String
+}
+
+internal data class AsmMacroId(
     val fileId: String,
     val lineIndex: Int,
-    val column: Int,
-    val token: String,
-    val sourceLine: String,
+    val name: String,
 )
+
+internal data class AsmMacroUsage(
+    val macroId: AsmMacroId,
+    override val fileId: String,
+    override val lineIndex: Int,
+    override val column: Int,
+    val token: String,
+    override val sourceLine: String,
+) : AsmSourceUsage
+
+internal data class AsmMacro(
+    val name: String,
+    val parameters: List<String>,
+    val variadic: Boolean,
+    val fileId: String,
+    val lineIndex: Int,
+) {
+    val id: AsmMacroId get() = AsmMacroId(fileId, lineIndex, name)
+    val signature: String
+        get() = "%$name(${parameters.joinToString(", ")})"
+}
+
+private val ASM_MACRO_DEFINITION_REGEX =
+    Regex("^\\s*macro\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)", RegexOption.IGNORE_CASE)
+
+internal fun parseAsmMacroDefinition(fileId: String, lineIndex: Int, line: String): AsmMacro? {
+    val match = ASM_MACRO_DEFINITION_REGEX.find(asmCodeBeforeComment(line)) ?: return null
+    val parameters = match.groupValues[2].split(',').map(String::trim).filter(String::isNotEmpty)
+    return AsmMacro(
+        name = match.groupValues[1],
+        parameters = parameters,
+        variadic = parameters.lastOrNull() == "...",
+        fileId = fileId,
+        lineIndex = lineIndex,
+    )
+}
+
+internal fun parseAsmMacros(fileId: String, text: String): List<AsmMacro> =
+    text.lineSequence().mapIndexedNotNull { lineIndex, line ->
+        parseAsmMacroDefinition(fileId, lineIndex, line)
+    }.toList()
 
 internal data class AsmSourceFile(
     val id: String,
@@ -125,6 +179,7 @@ internal data class AsmReferenceIndex(
     val labels: List<AsmLabel>,
     val assets: List<AsmAsset>,
     val addressAtlas: AsmAddressAtlas,
+    val macros: List<AsmMacro> = emptyList(),
 ) {
     private val filesById = files.associateBy { it.id }
     private val globalLabels = labels.filter { it.localScope == null }.groupBy { it.name }
@@ -134,6 +189,10 @@ internal data class AsmReferenceIndex(
     private val labelsByLocation = labels.groupBy { it.fileId to it.lineIndex }
     private val labelsBySymbol = labels.associateBy(AsmLabel::symbolId)
     private val usagesBySymbol = buildLabelUsages()
+    private val macrosByName = macros.associateBy(AsmMacro::name)
+    private val macrosByLocation = macros.groupBy { it.fileId to it.lineIndex }
+    private val macrosById = macros.associateBy(AsmMacro::id)
+    private val macroUsagesById = buildMacroUsages()
 
     fun file(id: String?): AsmSourceFile? = id?.let(filesById::get)
 
@@ -149,7 +208,18 @@ internal data class AsmReferenceIndex(
             label.name == token || label.name.substringAfterLast('.') == token.removePrefix(".")
         }
 
-    fun usagesFor(label: AsmLabel): List<AsmLabelUsage> = usagesBySymbol[label.symbolId].orEmpty()
+    fun usagesFor(label: AsmLabel): List<AsmLabelUsage> =
+        labelsAt(label.fileId, label.lineIndex)
+            .flatMap { declaration -> usagesBySymbol[declaration.symbolId].orEmpty() }
+            .distinctBy { usage -> Triple(usage.fileId, usage.lineIndex, usage.column) }
+            .sortedWith(compareBy(AsmLabelUsage::fileId, AsmLabelUsage::lineIndex, AsmLabelUsage::column))
+
+    fun macrosAt(fileId: String, lineIndex: Int): List<AsmMacro> =
+        macrosByLocation[fileId to lineIndex].orEmpty()
+
+    fun macro(id: AsmMacroId?): AsmMacro? = id?.let(macrosById::get)
+
+    fun usagesFor(macro: AsmMacro): List<AsmMacroUsage> = macroUsagesById[macro.id].orEmpty()
 
     fun resolveLabel(fileId: String, lineIndex: Int, token: String): AsmLabel? {
         val source = filesById[fileId] ?: return null
@@ -167,6 +237,11 @@ internal data class AsmReferenceIndex(
             .removePrefix("../data/")
             .removePrefix("./data/")
         return assetsByPath[normalized]
+    }
+
+    fun resolveMacro(token: String): AsmMacro? {
+        val name = token.removePrefix("%").substringBefore('(')
+        return macrosByName[name] ?: macros.firstOrNull { it.name.equals(name, ignoreCase = true) }
     }
 
     private fun buildLabelUsages(): Map<AsmSymbolId, List<AsmLabelUsage>> {
@@ -200,12 +275,37 @@ internal data class AsmReferenceIndex(
             usages.sortedWith(compareBy(AsmLabelUsage::fileId, AsmLabelUsage::lineIndex, AsmLabelUsage::column))
         }
     }
+
+    private fun buildMacroUsages(): Map<AsmMacroId, List<AsmMacroUsage>> {
+        val byMacro = linkedMapOf<AsmMacroId, MutableList<AsmMacroUsage>>()
+        files.forEach { source ->
+            source.lines.forEachIndexed { lineIndex, sourceLine ->
+                val code = asmCodeBeforeComment(sourceLine)
+                ASM_REFERENCE_TOKEN_REGEX.findAll(code).forEach tokenLoop@{ match ->
+                    val token = match.value
+                    if (!token.startsWith('%')) return@tokenLoop
+                    val macro = resolveMacro(token) ?: return@tokenLoop
+                    byMacro.getOrPut(macro.id) { mutableListOf() } += AsmMacroUsage(
+                        macroId = macro.id,
+                        fileId = source.id,
+                        lineIndex = lineIndex,
+                        column = match.range.first,
+                        token = token,
+                        sourceLine = sourceLine.trim(),
+                    )
+                }
+            }
+        }
+        return byMacro.mapValues { (_, usages) ->
+            usages.sortedWith(compareBy(AsmMacroUsage::fileId, AsmMacroUsage::lineIndex, AsmMacroUsage::column))
+        }
+    }
 }
 
 private val ASM_REFERENCE_TOKEN_REGEX =
-    Regex("\"(?:\\\\.|[^\"])*\"|!?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+    Regex("\"(?:\\\\.|[^\"])*\"|[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
 
-private fun asmCodeBeforeComment(line: String): String {
+internal fun asmCodeBeforeComment(line: String): String {
     var quoted = false
     var escaped = false
     line.forEachIndexed { index, character ->
@@ -217,6 +317,19 @@ private fun asmCodeBeforeComment(line: String): String {
         }
     }
     return line
+}
+
+internal fun asmOffsetInsideString(text: String, requestedOffset: Int): Boolean {
+    var quoted = false
+    var escaped = false
+    text.take(requestedOffset.coerceIn(0, text.length)).forEach { character ->
+        when {
+            escaped -> escaped = false
+            character == '\\' && quoted -> escaped = true
+            character == '"' -> quoted = !quoted
+        }
+    }
+    return quoted
 }
 
 private fun isAsmDefinitionOccurrence(code: String, range: IntRange): Boolean {
@@ -285,6 +398,7 @@ internal class AsmSourceParser {
         }.distinct()
 
         val labels = mutableListOf<AsmLabel>()
+        val macros = mutableListOf<AsmMacro>()
         val files = sourceNames.mapNotNull { relativeName ->
             val source = relativeNames[relativeName] ?: return@mapNotNull null
             val lines = source.readLines()
@@ -293,6 +407,7 @@ internal class AsmSourceParser {
             var globalScope: String? = null
             var structScope: String? = null
             lines.forEachIndexed { lineIndex, line ->
+                parseAsmMacroDefinition(relativeName, lineIndex, line)?.let(macros::add)
                 structRegex.find(line)?.groupValues?.get(1)?.let { name ->
                     structScope = name
                     globalScope = name
@@ -301,9 +416,20 @@ internal class AsmSourceParser {
                 val labelName = labelRegex.find(line)?.groupValues?.get(1)
                 if (labelName != null) {
                     if (!labelName.startsWith('.')) globalScope = labelName
-                    labels += AsmLabel(labelName, relativeName, lineIndex, globalScope.takeIf { labelName.startsWith('.') })
+                    val localScope = globalScope.takeIf { labelName.startsWith('.') }
+                    labels += AsmLabel(labelName, relativeName, lineIndex, localScope)
                     if (labelName.startsWith('.') && structScope != null) {
                         labels += AsmLabel("$structScope$labelName", relativeName, lineIndex)
+                    } else if (labelName.startsWith('.') && localScope != null) {
+                        // Asar publishes ordinary scoped labels in WLA symbols as
+                        // Parent_Local. Source may use that exported name from a
+                        // different scope/file even though the declaration is
+                        // written as `.Local:` beneath `Parent:`.
+                        labels += AsmLabel(
+                            "${localScope}_${labelName.removePrefix(".")}",
+                            relativeName,
+                            lineIndex,
+                        )
                     }
                 }
                 defineRegex.find(line)?.groupValues?.get(1)?.let { name ->
@@ -332,11 +458,18 @@ internal class AsmSourceParser {
                 .firstOrNull { it.startsWith(";") && !it.startsWith(";;;") }
                 ?.removePrefix(";")?.trim()
                 .orEmpty()
+            val moduleDescription = if (relativeName.startsWith(ASM_PROJECT_MODULE_PREFIX)) {
+                projectModuleDescription(lines.joinToString("\n"))
+            } else null
+            val fallbackDescription = inferredDescription.takeUnless {
+                relativeName.startsWith(ASM_PROJECT_MODULE_PREFIX) &&
+                    it.startsWith("Project module:", ignoreCase = true)
+            }.orEmpty()
             AsmSourceFile(
                 id = relativeName,
                 file = source,
                 displayName = sourceDisplayName(relativeName),
-                description = descriptions[relativeName].orEmpty().ifEmpty { inferredDescription },
+                description = descriptions[relativeName] ?: moduleDescription ?: fallbackDescription,
                 isBank = relativeName.substringAfterLast('/').startsWith("bank_", ignoreCase = true),
                 lines = lines,
                 sections = sections,
@@ -344,7 +477,7 @@ internal class AsmSourceParser {
             )
         }
         val assets = ranges.map { range -> AsmAsset(range, File(dataDirectory, range.path)) }
-        return AsmReferenceIndex(files, labels, assets, AsmAddressAtlas.build(files, labels, assets))
+        return AsmReferenceIndex(files, labels, assets, AsmAddressAtlas.build(files, labels, assets), macros)
     }
 }
 

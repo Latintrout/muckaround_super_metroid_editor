@@ -135,6 +135,32 @@ class AsmBuildArtifactsTest {
     }
 
     @Test
+    fun `source validation checks complete macro calls without guessing at incomplete edits`() {
+        val macros = listOf(
+            AsmMacro("Pair", listOf("left", "right"), false, "macros.asm", 0),
+            AsmMacro("Many", listOf("first", "..."), true, "macros.asm", 4),
+        )
+        val diagnostics = AsmSourceLinter.lintText(
+            "project/example.asm",
+            """
+                %Pair(${ '$' }01, function(${ '$' }02, ${ '$' }03))
+                %Pair(${ '$' }01)
+                %Many()
+                %Missing(${ '$' }00)
+                %StillTyping(
+                db "%Missing(${ '$' }00)"
+            """.trimIndent(),
+            macros,
+        )
+
+        assertEquals(3, diagnostics.size)
+        assertTrue(diagnostics[0].message.contains("expects 2 arguments; found 1"))
+        assertTrue(diagnostics[1].message.contains("expects at least 1 argument"))
+        assertTrue(diagnostics[2].message.contains("Unknown macro %Missing"))
+        assertEquals(listOf(1, 2, 3), diagnostics.mapNotNull(AsmBuildDiagnostic::lineIndex))
+    }
+
+    @Test
     fun `pinned source has no unsafe data literal diagnostics when local fixture exists`() {
         val cursor: File? = File(System.getProperty("user.dir")).absoluteFile
         val sourceRoot = generateSequence(cursor) { it.parentFile }

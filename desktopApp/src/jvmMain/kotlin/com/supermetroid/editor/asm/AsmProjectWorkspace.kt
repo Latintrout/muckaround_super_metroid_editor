@@ -14,6 +14,27 @@ internal enum class AsmWorkspaceKind { REFERENCE, PROJECT }
 internal const val ASM_PROJECT_MODULE_PREFIX = "project/"
 internal const val ASM_PROJECT_MODULE_ORDER_FILE = ".order"
 internal const val ASM_PROJECT_MODULE_DISABLED_FILE = ".disabled"
+private val ASM_PROJECT_MODULE_TITLE_REGEX = Regex("^;\\s*Project module:\\s*.*$", RegexOption.IGNORE_CASE)
+private val ASM_PROJECT_MODULE_DESCRIPTION_REGEX = Regex("^;\\s*SMEDIT description:\\s*(.*)$", RegexOption.IGNORE_CASE)
+
+internal fun projectModuleDescription(text: String): String? = text.lineSequence()
+    .mapNotNull { ASM_PROJECT_MODULE_DESCRIPTION_REGEX.matchEntire(it.trimEnd()) }
+    .firstOrNull()
+    ?.groupValues
+    ?.get(1)
+    ?.trim()
+
+internal data class AsmStarterModule(
+    val fileName: String,
+    val resourcePath: String,
+)
+
+internal val DEFAULT_ASM_STARTER_MODULES = listOf(
+    AsmStarterModule(
+        fileName = "objectives_pause_screen.asm",
+        resourcePath = "/asm-templates/objectives_pause_screen.asm",
+    ),
+)
 
 internal data class AsmProjectWorkspace(
     val root: File,
@@ -41,6 +62,7 @@ internal data class AsmProjectBuildWorkspace(
  */
 internal class AsmProjectWorkspaceRepository(
     private val assetRanges: List<AsmAssetRange> = AsmAssetManifest.loadBundled(),
+    private val starterModules: List<AsmStarterModule> = DEFAULT_ASM_STARTER_MODULES,
 ) {
     fun load(projectFilePath: String): AsmProjectWorkspace? {
         synchronizeProjectModules(projectFilePath)
@@ -135,6 +157,11 @@ internal class AsmProjectWorkspaceRepository(
                 copyTree(existingModules, File(staging, MODULES_DIRECTORY))
                 ensureProjectModuleDirectory(File(staging, MODULES_DIRECTORY))
                 syncProjectModules(
+                    modulesDirectory = File(staging, MODULES_DIRECTORY),
+                    workingSourceRoot = File(working, "src"),
+                )
+            } else if (starterModules.isNotEmpty()) {
+                installStarterModules(
                     modulesDirectory = File(staging, MODULES_DIRECTORY),
                     workingSourceRoot = File(working, "src"),
                 )
@@ -243,7 +270,11 @@ internal class AsmProjectWorkspaceRepository(
         return (overrides + modules).toCollection(linkedSetOf())
     }
 
-    fun createModule(projectFilePath: String, requestedName: String): Pair<AsmProjectWorkspace, String> {
+    fun createModule(
+        projectFilePath: String,
+        requestedName: String,
+        description: String = "",
+    ): Pair<AsmProjectWorkspace, String> {
         val current = requireNotNull(loadForBuild(projectFilePath)) { "Project ASM workspace is unavailable" }
         val modulesDirectory = File(current.root, MODULES_DIRECTORY)
         ensureProjectModuleDirectory(modulesDirectory)
@@ -252,7 +283,7 @@ internal class AsmProjectWorkspaceRepository(
         require(!target.exists()) { "A project module named $fileName already exists" }
         val order = readModuleOrder(modulesDirectory).toMutableList()
         val displayName = fileName.removeSuffix(".asm").replace('_', ' ')
-        writeTextAtomically(target, projectModuleTemplate(displayName))
+        writeTextAtomically(target, projectModuleTemplate(displayName, normalizeProjectModuleDescription(description)))
         order.add(fileName)
         writeModuleOrder(modulesDirectory, order)
         syncProjectModules(modulesDirectory, File(current.workingDirectory, "src"))
@@ -264,25 +295,51 @@ internal class AsmProjectWorkspaceRepository(
 
     fun renameModule(projectFilePath: String, fileId: String, requestedName: String): Pair<AsmProjectWorkspace, String> {
         val current = requireNotNull(loadForBuild(projectFilePath)) { "Project ASM workspace is unavailable" }
+        val source = resolveProjectModule(File(current.root, MODULES_DIRECTORY), fileId)
+        return updateModuleSettings(
+            projectFilePath = projectFilePath,
+            fileId = fileId,
+            requestedName = requestedName,
+            description = projectModuleDescription(source.readText()).orEmpty(),
+        )
+    }
+
+    fun updateModuleSettings(
+        projectFilePath: String,
+        fileId: String,
+        requestedName: String,
+        description: String,
+    ): Pair<AsmProjectWorkspace, String> {
+        val current = requireNotNull(loadForBuild(projectFilePath)) { "Project ASM workspace is unavailable" }
         require(isProjectModuleFileId(fileId)) { "Not a project ASM module: $fileId" }
         val modulesDirectory = File(current.root, MODULES_DIRECTORY)
         val oldName = fileId.removePrefix(ASM_PROJECT_MODULE_PREFIX)
         val newName = normalizeProjectModuleName(requestedName)
-        if (oldName == newName) return checkNotNull(load(projectFilePath)) to fileId
         val source = resolveProjectModule(modulesDirectory, fileId)
         val target = resolveProjectModule(modulesDirectory, ASM_PROJECT_MODULE_PREFIX + newName)
         require(source.isFile) { "Project ASM module does not exist: $fileId" }
-        require(!target.exists()) { "A project module named $newName already exists" }
+        require(oldName == newName || !target.exists()) { "A project module named $newName already exists" }
         val order = readModuleOrder(modulesDirectory).map { if (it == oldName) newName else it }
         val disabled = readDisabledModules(modulesDirectory, readModuleOrder(modulesDirectory))
             .mapTo(linkedSetOf()) { if (it == oldName) newName else it }
-        moveFileAtomically(source, target)
+        val displayName = newName.removeSuffix(".asm").replace('_', ' ')
+        val updatedSource = updateProjectModuleMetadata(
+            text = source.readText(),
+            displayName = displayName,
+            description = normalizeProjectModuleDescription(description),
+        )
+        if (oldName == newName) {
+            writeTextAtomically(source, updatedSource)
+        } else {
+            writeTextAtomically(target, updatedSource)
+            Files.delete(source.toPath())
+        }
         writeModuleOrder(modulesDirectory, order)
         writeDisabledModules(modulesDirectory, disabled)
         syncProjectModules(modulesDirectory, File(current.workingDirectory, "src"))
         val newFileId = ASM_PROJECT_MODULE_PREFIX + newName
         return checkNotNull(load(projectFilePath)) {
-            "Project ASM workspace did not validate after renaming $oldName"
+            "Project ASM workspace did not validate after updating $oldName"
         } to newFileId
     }
 
@@ -409,6 +466,28 @@ internal class AsmProjectWorkspaceRepository(
         readDisabledModules(modulesDirectory, readModuleOrder(modulesDirectory))
     }
 
+    private fun installStarterModules(modulesDirectory: File, workingSourceRoot: File) {
+        require(starterModules.map(AsmStarterModule::fileName).distinct().size == starterModules.size) {
+            "Bundled ASM starter modules contain duplicate names"
+        }
+        modulesDirectory.mkdirs()
+        starterModules.forEach { starter ->
+            require(normalizeProjectModuleName(starter.fileName) == starter.fileName) {
+                "Unsafe bundled ASM starter module name: ${starter.fileName}"
+            }
+            val bytes = checkNotNull(javaClass.getResourceAsStream(starter.resourcePath)) {
+                "Missing bundled ASM starter module ${starter.resourcePath}"
+            }.use { it.readBytes() }
+            writeBytesAtomically(File(modulesDirectory, starter.fileName), bytes)
+        }
+        val order = starterModules.map(AsmStarterModule::fileName)
+        writeModuleOrder(modulesDirectory, order)
+        // Starter modules are readable references, but a new workspace remains
+        // byte-identical until the user explicitly enables one.
+        writeDisabledModules(modulesDirectory, order)
+        syncProjectModules(modulesDirectory, workingSourceRoot)
+    }
+
     private fun syncProjectModules(modulesDirectory: File, workingSourceRoot: File) {
         val projectSource = File(workingSourceRoot, ASM_PROJECT_MODULE_DIRECTORY)
         if (!modulesDirectory.isDirectory) {
@@ -507,6 +586,33 @@ internal class AsmProjectWorkspaceRepository(
         return "$stem.asm"
     }
 
+    private fun normalizeProjectModuleDescription(requestedDescription: String): String {
+        val description = requestedDescription.lineSequence()
+            .joinToString(" ") { it.trim() }
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        require(description.length <= 240) { "Project ASM module descriptions must be 240 characters or fewer" }
+        return description
+    }
+
+    private fun updateProjectModuleMetadata(text: String, displayName: String, description: String): String {
+        val newline = if ("\r\n" in text) "\r\n" else "\n"
+        val lines = text.split(Regex("\\r?\\n")).toMutableList()
+        val title = "; Project module: $displayName"
+        val titleIndex = lines.indexOfFirst { ASM_PROJECT_MODULE_TITLE_REGEX.matches(it.trimEnd()) }
+            .also { index ->
+                if (index >= 0) lines[index] = title else lines.add(0, title)
+            }
+            .let { if (it >= 0) it else 0 }
+        val descriptionLine = "; SMEDIT description: $description"
+        val descriptionIndex = lines.indexOfFirst {
+            ASM_PROJECT_MODULE_DESCRIPTION_REGEX.matches(it.trimEnd())
+        }
+        if (descriptionIndex >= 0) lines[descriptionIndex] = descriptionLine
+        else lines.add(titleIndex + 1, descriptionLine)
+        return lines.joinToString(newline)
+    }
+
     private fun resolveProjectModule(modulesDirectory: File, fileId: String): File {
         require(isProjectModuleFileId(fileId)) { "Invalid project ASM module path: $fileId" }
         val relativeName = fileId.removePrefix(ASM_PROJECT_MODULE_PREFIX)
@@ -521,8 +627,9 @@ internal class AsmProjectWorkspaceRepository(
     private fun isProjectModuleFileId(fileId: String): Boolean =
         fileId.startsWith(ASM_PROJECT_MODULE_PREFIX) && fileId.endsWith(".asm", ignoreCase = true)
 
-    private fun projectModuleTemplate(displayName: String): String = """
+    private fun projectModuleTemplate(displayName: String, description: String): String = """
         ; Project module: $displayName
+        ; SMEDIT description: $description
         ; Included by SMEDIT after the vanilla source banks and before generated patch modules.
         ; Add an org/free-space target, labels, and code here. Build errors link back to this file.
 
@@ -615,15 +722,6 @@ internal class AsmProjectWorkspaceRepository(
             }
         } finally {
             Files.deleteIfExists(temporary.toPath())
-        }
-    }
-
-    private fun moveFileAtomically(source: File, target: File) {
-        target.parentFile?.mkdirs()
-        try {
-            Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(source.toPath(), target.toPath())
         }
     }
 

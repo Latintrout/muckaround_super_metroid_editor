@@ -97,7 +97,7 @@ internal object AsmLibrary {
                     "Reading Super Metroid's label hierarchy",
                     listOf(
                         "The dot is the scope marker. Indentation and capitalization are only source-formatting conventions: a flush-left CapitalLabel is commonly a main label, while an indented .DottedLabel is commonly one of its children, but the leading dot is what changes the assembled symbol.",
-                        "A dotted label belongs to the nearest preceding main label until another main label begins. Outside that scope, Super Metroid source refers to it through the combined main-and-local name. Do not casually add or remove the dot: that renames the symbol and can break every reference to it.",
+                        "A dotted label belongs to the nearest preceding main label until another main label begins. Outside that scope, Super Metroid source refers to it through Asar's exported Main_Local name: for example, .DisableAudio beneath DebugConst becomes DebugConst_DisableAudio. Do not casually add or remove the dot: that renames the symbol and can break every reference to it.",
                     ),
                     AsmCodeExample(
                         "A real Samus physics table",

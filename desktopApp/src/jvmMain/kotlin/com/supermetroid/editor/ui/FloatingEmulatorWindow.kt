@@ -231,6 +231,36 @@ fun FloatingEmulatorWindow(
         workspaceState.updateProjectFilePath(editorState.projectFilePath.takeIf { it.isNotBlank() })
     }
 
+    suspend fun ensureEmulatorRunning(forceBuild: Boolean) {
+        workspaceState.updateRomPath(editorState.project.romPath.takeIf { it.isNotBlank() })
+        val rp = romParser
+        if (forceBuild && rp != null) {
+            val patchedPath = editorState.exportToRomAsync(rp, workspaceState::setStatus)
+            if (patchedPath == null) {
+                workspaceState.setStatus("Export failed; emulator was not started.")
+                return
+            }
+            if (workspaceState.isConnected) workspaceState.disconnectBridge()
+            workspaceState.updateRomPath(patchedPath)
+        }
+        if (!workspaceState.isConnected) workspaceState.connectBridge()
+        workspaceState.propagateAudioState()
+        if (workspaceState.isConnected && !workspaceState.session.active) {
+            if (!forceBuild && rp != null) {
+                val patchedPath = editorState.exportToRomAsync(rp, workspaceState::setStatus)
+                if (patchedPath != null) {
+                    workspaceState.updateRomPath(patchedPath)
+                } else {
+                    workspaceState.setStatus("Export failed; emulator was not started.")
+                    return
+                }
+            }
+            workspaceState.clearSavedStateSelection()
+            workspaceState.startSession()
+        }
+        if (workspaceState.session.active) workspaceState.setLoopRunning(true)
+    }
+
     // Auto-set ROM path from editor — restart emulator if a session is active
     var observedRomPath by remember { mutableStateOf(editorState.project.romPath) }
     LaunchedEffect(editorState.project.romPath) {
@@ -266,25 +296,11 @@ fun FloatingEmulatorWindow(
     // Closing the floating window disconnects its session, so opening it builds
     // the latest project ROM and boots a fresh game when globally enabled.
     LaunchedEffect(Unit) {
-        if (!workspaceState.autoPlayOnOpen) return@LaunchedEffect
-        workspaceState.updateRomPath(editorState.project.romPath.takeIf { it.isNotBlank() })
-        if (!workspaceState.isConnected) workspaceState.connectBridge()
-        workspaceState.propagateAudioState()
-        if (workspaceState.isConnected && !workspaceState.session.active) {
-            val rp = romParser
-            if (rp != null) {
-                val patchedPath = editorState.exportToRomAsync(rp, workspaceState::setStatus)
-                if (patchedPath != null) {
-                    workspaceState.updateRomPath(patchedPath)
-                } else {
-                    workspaceState.setStatus("Export failed; emulator was not started.")
-                    return@LaunchedEffect
-                }
-            }
-            workspaceState.clearSavedStateSelection()
-            workspaceState.startSession()
-        }
-        if (workspaceState.session.active) workspaceState.setLoopRunning(true)
+        val runRequested = workspaceState.consumeRunRequest()
+        if (workspaceState.autoPlayOnOpen || runRequested) ensureEmulatorRunning(forceBuild = runRequested)
+    }
+    LaunchedEffect(workspaceState.runRequestSerial) {
+        if (workspaceState.consumeRunRequest()) ensureEmulatorRunning(forceBuild = true)
     }
 
     // Re-fit persisted geometry whenever the editor moves to a smaller display

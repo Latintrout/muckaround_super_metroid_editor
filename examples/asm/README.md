@@ -10,13 +10,20 @@ to be copied into a project's **ASM > Modules** collection, enabled, and built f
 | [`high_jump_without_boots.asm`](high_jump_without_boots.asm) | A symbolic data-table override that gives ordinary jumps the vanilla Hi-Jump velocities. |
 | [`objectives_pause_screen.asm`](objectives_pause_screen.asm) | A complete third pause page with hooks, an extended state machine, runtime tilemap/DMA work, live boss-state reads, and Super Metroid's native pause font. |
 
+New Project ASM workspaces include `objectives_pause_screen.asm` in their Modules
+list as a disabled starter reference. It changes no bytes until explicitly enabled;
+the source remains available for reading, copying, and modification.
+
 ## Trying an example
 
 1. Open a ROM-backed SMEDIT project and enable **Project ASM**.
-2. Under **ASM > Modules**, create a module and paste in one example (or use the matching
-   module already present in the checked-in Super Metroid Sandbox project).
+2. Under **ASM > Modules**, create a module and paste in one example. For the Objectives
+   screen, enable the disabled starter module already included in new workspaces. The
+   checked-in Super Metroid Sandbox project also contains runnable copies.
 3. Keep the module enabled, then choose **Build** or launch **EMU**.
-4. Disable the module to test the same project without it; its source and ordering are preserved.
+4. Use the module's sidebar **ON/OFF** toggle to test the same project without it;
+   its source, description, and ordering are preserved. The editor-bar cog owns
+   its name and description.
 
 The examples target the pinned
 [InsaneFirebat Super Metroid disassembly](https://github.com/InsaneFirebat/sm_disassembly)
