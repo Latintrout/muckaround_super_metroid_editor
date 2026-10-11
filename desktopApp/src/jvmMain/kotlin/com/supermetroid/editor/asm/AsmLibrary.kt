@@ -98,17 +98,21 @@ internal object AsmLibrary {
                     listOf(
                         "The dot is the scope marker. Indentation and capitalization are only source-formatting conventions: a flush-left CapitalLabel is commonly a main label, while an indented .DottedLabel is commonly one of its children, but the leading dot is what changes the assembled symbol.",
                         "A dotted label belongs to the nearest preceding main label until another main label begins. Outside that scope, Super Metroid source refers to it through Asar's exported Main_Local name: for example, .DisableAudio beneath DebugConst becomes DebugConst_DisableAudio. Do not casually add or remove the dot: that renames the symbol and can break every reference to it.",
+                        "The Samus jump table follows the same rule: .InitialYSpeeds_Jumping beneath SamusPhysicsConstants is exported as SamusPhysicsConstants_InitialYSpeeds_Jumping.",
+                        "More dots create deeper scopes. If .EquipmentBitmasks contains ..boots, the exported name is EquipmentScreenData_EquipmentBitmasks_boots. From inside EquipmentScreenData, Asar also accepts the flattened local spelling .EquipmentBitmasks_boots. SMEDIT treats all of these spellings as one definition and one usage set.",
+                        "Struct fields use a dot in their public name instead: Enemy.properties or Enemy[1].properties both refer to the .properties field declared by struct Enemy. The bracket chooses an array entry; it is not part of the field's symbol name.",
                     ),
                     AsmCodeExample(
-                        "A real Samus physics table",
+                        "Scoped and nested table labels",
                         code(
-                            "SamusPhysicsConstants:",
-                            "  .InitialYSpeeds_Jumping:",
-                            "    dw \$04E0,\$01C0,\$02C0",
+                            "EquipmentScreenData:",
+                            "  .EquipmentBitmasks:",
+                            "  ..boots:",
+                            "    dw \$0100,\$0200,\$2000",
                             "",
-                            "    LDA.W SamusPhysicsConstants_InitialYSpeeds_Jumping,X",
+                            "    LDA.W EquipmentScreenData_EquipmentBitmasks_boots,Y",
                         ),
-                        ".InitialYSpeeds_Jumping is scoped beneath SamusPhysicsConstants, so its complete symbol is SamusPhysicsConstants_InitialYSpeeds_Jumping. The two spaces make the hierarchy easier to see but do not affect assembly.",
+                        "..boots is nested beneath .EquipmentBitmasks, so Asar exports the complete underscore-separated name. The two-space indentation makes the hierarchy readable but does not control it; the dots do.",
                     ),
                 ),
                 AsmLibrarySection(

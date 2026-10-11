@@ -59,6 +59,12 @@ class AsmReferenceTest {
                 JSR SetupPLMs
               .wait:
                 BRA .wait
+              .phase:
+                BRA ..done
+              ..done:
+                LDA ...value
+              ...value:
+                dw ${'$'}0000
             """.trimIndent(),
         )
         File(source, "bank_84.asm").writeText(
@@ -68,6 +74,8 @@ class AsmReferenceTest {
             ;;; ${'$'}8000: Set up PLMs ;;;
             SetupPLMs:
                 JSL BootGame_wait
+                JSL BootGame_phase_done
+                LDA BootGame_phase_done_value
                 RTS
             """.trimIndent(),
         )
@@ -76,6 +84,9 @@ class AsmReferenceTest {
             """
             struct Enemy ${'$'}0F78
               .var5: skip 2
+            endstruct
+            struct BabyTurtle ${'$'}0FA8
+              .YVelocity skip 2
             endstruct
             """.trimIndent(),
         )
@@ -94,7 +105,30 @@ class AsmReferenceTest {
             listOf("bank_80.asm" to 6, "bank_84.asm" to 4),
             index.usagesFor(qualifiedLocal).map { it.fileId to it.lineIndex },
         )
+        val nestedLocal = assertNotNull(index.resolveLabel("bank_80.asm", 8, "..done"))
+        assertEquals(9, nestedLocal.lineIndex)
+        val deeplyNestedLocal = assertNotNull(index.resolveLabel("bank_80.asm", 10, "...value"))
+        assertEquals(11, deeplyNestedLocal.lineIndex)
+        assertEquals(
+            deeplyNestedLocal.fileId to deeplyNestedLocal.lineIndex,
+            assertNotNull(index.resolveLabel("bank_80.asm", 10, ".phase_done_value"))
+                .let { it.fileId to it.lineIndex },
+        )
+        assertEquals(
+            nestedLocal.fileId to nestedLocal.lineIndex,
+            assertNotNull(index.resolveLabel("bank_84.asm", 5, "BootGame_phase_done"))
+                .let { it.fileId to it.lineIndex },
+        )
+        assertEquals(
+            deeplyNestedLocal.fileId to deeplyNestedLocal.lineIndex,
+            assertNotNull(index.resolveLabel("bank_84.asm", 6, "BootGame_phase_done_value"))
+                .let { it.fileId to it.lineIndex },
+        )
         assertEquals("memory.asm", assertNotNull(index.resolveLabel("bank_80.asm", 4, "Enemy.var5")).fileId)
+        assertEquals(
+            "memory.asm",
+            assertNotNull(index.resolveLabel("bank_80.asm", 4, "BabyTurtle.YVelocity")).fileId,
+        )
         assertNull(index.resolveLabel("bank_84.asm", 4, ".wait"))
     }
 
@@ -155,6 +189,33 @@ class AsmReferenceTest {
         assertEquals("main.asm", define.fileId)
         assertEquals(0, define.lineIndex)
         assertEquals(listOf("bank_90.asm" to 0), index.usagesFor(define).map { it.fileId to it.lineIndex })
+    }
+
+    @Test
+    fun `source reference audit catches emitted symbols missing from the navigation index`() {
+        val source = File(tempDirectory, "coverage-src").apply { mkdirs() }
+        File(source, "main.asm").writeText("incsrc bank_80.asm\n")
+        File(source, "bank_80.asm").writeText(
+            """
+            Root:
+              .group:
+                BRA ..entry
+              ..entry:
+                LDA Root_group_entry
+                LDA GeneratedOnly
+            """.trimIndent(),
+        )
+        val index = AsmSourceParser().parse(source, File(tempDirectory, "coverage-data"), emptyList())
+        val coverage = AsmSourceReferenceAuditor.audit(
+            index,
+            AsmCompiledSymbols(
+                labels = mapOf("Root_group_entry" to 0x808000, "GeneratedOnly" to 0x808002),
+                lineAddressesByFile = emptyMap(),
+            ),
+        )
+
+        assertEquals(3, coverage.referenceCount)
+        assertEquals(listOf("GeneratedOnly"), coverage.unresolved.map(AsmUnresolvedSourceReference::token))
     }
 
     @Test

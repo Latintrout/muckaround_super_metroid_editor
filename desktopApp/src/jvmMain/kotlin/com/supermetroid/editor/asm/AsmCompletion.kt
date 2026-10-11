@@ -239,8 +239,9 @@ internal object AsmCompletionEngine {
         prefix: String,
         excludedFileIds: Set<String>,
     ): List<AsmCompletionItem> {
-        val source = index.file(fileId) ?: return emptyList()
-        val scope = source.scopeByLine.getOrNull(lineIndex)
+        if (index.file(fileId) == null) return emptyList()
+        val localDepth = asmLocalLabelDepth(prefix)
+        val scope = index.localScopeAt(fileId, lineIndex, localDepth)
         return index.labels.asSequence()
             .filterNot { it.fileId in excludedFileIds }
             .filter { label ->

@@ -2058,9 +2058,9 @@ private fun AsmLibraryExample(
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val localLabels = remember(example.code) {
-        Regex("(?m)^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.[A-Za-z0-9_]+):")
+        Regex("(?m)^[ \\t]*([A-Za-z_][A-Za-z0-9_]*:|\\.+[A-Za-z0-9_]+:?)[ \\t]*$")
             .findAll(example.code)
-            .map { it.groupValues[1] }
+            .map { it.groupValues[1].removeSuffix(":") }
             .toSet()
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3735,7 +3735,10 @@ internal data class AsmEditableSymbolReference(val lineIndex: Int, val token: St
 
 private data class AsmEditableTokenReference(val lineIndex: Int, val token: String)
 
-private val ASM_EDITABLE_SYMBOL_REGEX = Regex("[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+private val ASM_EDITABLE_SYMBOL_REGEX = Regex(
+    "[!%]?(?:\\.+)?[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?" +
+        "(?:\\.[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?)*",
+)
 
 internal fun asmEditableSymbolAt(
     text: String,
@@ -4442,9 +4445,16 @@ private fun asmAnnotatedLine(
     val foreground = codeForeground()
     val commentStart = line.indexOf(';').let { if (it < 0) line.length else it }
     val code = line.substring(0, commentStart)
-    val tokenRegex = Regex("\"[^\"]*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+    val tokenRegex = Regex(
+        "\"[^\"]*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|" +
+            "[!%]?(?:\\.+)?[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?" +
+            "(?:\\.[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?)*",
+    )
     val matches = tokenRegex.findAll(code).toList()
-    val definition = Regex("^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.[A-Za-z0-9_]+):").find(code)?.groupValues?.get(1)
+    val definition = Regex("^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.+[A-Za-z0-9_]+):").find(code)?.groupValues?.get(1)
+        ?: Regex("^\\s*(\\.+[A-Za-z0-9_]+)\\s*$").find(code)?.groupValues?.get(1)
+        ?: Regex("^\\s*(\\.[A-Za-z0-9_]+)\\s+(?:skip|db|dw|dl|dd)\\b", RegexOption.IGNORE_CASE)
+            .find(code)?.groupValues?.get(1)
         ?: Regex("^\\s*(![A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\?=|#=|=)").find(code)?.groupValues?.get(1)
     val macroDefinition = if (index != null && fileId != null) {
         index.macrosAt(fileId, lineIndex).firstOrNull()
@@ -4652,10 +4662,15 @@ private fun asmCommentStart(line: String): Int {
 }
 
 private val ASM_EDIT_TOKEN_REGEX =
-    Regex("\"(?:\\\\.|[^\"])*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|%[01]+|\\b[0-9]+\\b|[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+    Regex(
+        "\"(?:\\\\.|[^\"])*\"|\\$[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}|\\$[0-9A-Fa-f]+|" +
+            "%[01]+|\\b[0-9]+\\b|" +
+            "[!%]?(?:\\.+)?[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?" +
+            "(?:\\.[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?)*",
+    )
 private val ASM_EDIT_DEFINITION_REGEX =
-    Regex("^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.[A-Za-z0-9_]+):|^\\s*(![A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\?=|#=|=)")
-private val ASM_LABEL_ONLY_REGEX = Regex("(?:[A-Za-z_][A-Za-z0-9_.]*|\\.[A-Za-z0-9_]+):")
+    Regex("^\\s*([A-Za-z_][A-Za-z0-9_]*|\\.+[A-Za-z0-9_]+):|^\\s*(![A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\?=|#=|=)")
+private val ASM_LABEL_ONLY_REGEX = Regex("(?:[A-Za-z_][A-Za-z0-9_.]*:|\\.+[A-Za-z0-9_]+:?)")
 
 private val ASM_SCROLLBAR_SIZE = 13.dp
 private val ASM_CONTROL_SHAPE = RoundedCornerShape(5.dp)

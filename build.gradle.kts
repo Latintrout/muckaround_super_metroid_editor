@@ -474,6 +474,7 @@ tasks.register<Exec>("parityReport") {
         "parityBackgrounds",
         "parityMinimap",
         "parityLoadStations",
+        ":desktopApp:asmSymbolCoverageTest",
         ":shared:parityTest",
         ":shared:communitySamusTest",
         ":desktopApp:communitySamusRomTest",

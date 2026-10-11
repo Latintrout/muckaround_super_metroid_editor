@@ -164,7 +164,10 @@ internal data class AsmSourceFile(
     val isBank: Boolean,
     val lines: List<String>,
     val sections: List<AsmSection>,
-    val scopeByLine: List<String?>,
+    /** Active Asar label hierarchy at each line. The first component is the
+     * global label; following components are the most recent `.local`,
+     * `..nested`, and deeper declarations. */
+    val scopePathByLine: List<List<String>>,
 )
 
 internal data class AsmAsset(
@@ -205,7 +208,8 @@ internal data class AsmReferenceIndex(
 
     fun definition(fileId: String, lineIndex: Int, token: String): AsmLabel? =
         labelsAt(fileId, lineIndex).firstOrNull { label ->
-            label.name == token || label.name.substringAfterLast('.') == token.removePrefix(".")
+            val canonical = asmCanonicalSymbolToken(token)
+            label.name == canonical || label.name.substringAfterLast('.') == canonical.removePrefix(".")
         }
 
     fun usagesFor(label: AsmLabel): List<AsmLabelUsage> =
@@ -222,13 +226,20 @@ internal data class AsmReferenceIndex(
     fun usagesFor(macro: AsmMacro): List<AsmMacroUsage> = macroUsagesById[macro.id].orEmpty()
 
     fun resolveLabel(fileId: String, lineIndex: Int, token: String): AsmLabel? {
-        val source = filesById[fileId] ?: return null
-        return if (token.startsWith('.')) {
-            val scope = source.scopeByLine.getOrNull(lineIndex) ?: return null
-            localLabels[Triple(fileId, scope, token)]
+        val canonical = asmCanonicalSymbolToken(token)
+        return if (canonical.startsWith('.')) {
+            val scope = localScopeAt(fileId, lineIndex, asmLocalLabelDepth(canonical)) ?: return null
+            localLabels[Triple(fileId, scope, canonical)]
         } else {
-            globalLabels[token]?.singleOrNull() ?: globalLabels[token]?.firstOrNull()
+            globalLabels[canonical]?.singleOrNull() ?: globalLabels[canonical]?.firstOrNull()
         }
+    }
+
+    fun localScopeAt(fileId: String, lineIndex: Int, depth: Int): String? {
+        if (depth <= 0) return null
+        val path = filesById[fileId]?.scopePathByLine?.getOrNull(lineIndex).orEmpty()
+        if (path.size < depth) return null
+        return path.take(depth).joinToString("_")
     }
 
     fun resolveAsset(reference: String): AsmAsset? {
@@ -249,6 +260,9 @@ internal data class AsmReferenceIndex(
         files.forEach { source ->
             source.lines.forEachIndexed { lineIndex, sourceLine ->
                 val code = asmCodeBeforeComment(sourceLine)
+                if (ASM_FILE_DIRECTIVE_REGEX.containsMatchIn(code)) {
+                    return@forEachIndexed
+                }
                 ASM_REFERENCE_TOKEN_REGEX.findAll(code).forEach tokenLoop@{ match ->
                     val token = match.value
                     if (token.startsWith('"')) return@tokenLoop
@@ -302,8 +316,80 @@ internal data class AsmReferenceIndex(
     }
 }
 
+private val ASM_FILE_DIRECTIVE_REGEX = Regex("^\\s*(?:incsrc|incbin)\\b", RegexOption.IGNORE_CASE)
+
 private val ASM_REFERENCE_TOKEN_REGEX =
-    Regex("\"(?:\\\\.|[^\"])*\"|[!%]?\\.?[A-Za-z_][A-Za-z0-9_.]*")
+    Regex(
+        "\"(?:\\\\.|[^\"])*\"|" +
+            "[!%]?(?:\\.+)?[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?" +
+            "(?:\\.[A-Za-z_][A-Za-z0-9_]*(?:\\[[^]\\r\\n]+])?)*",
+    )
+
+internal fun asmLocalLabelDepth(token: String): Int = token.indexOfFirst { it != '.' }
+    .let { firstNonDot -> if (firstNonDot < 0) token.length else firstNonDot }
+
+internal fun asmCanonicalSymbolToken(token: String): String =
+    token.replace(Regex("\\[[^]\\r\\n]+]"), "")
+
+internal data class AsmUnresolvedSourceReference(
+    val fileId: String,
+    val lineIndex: Int,
+    val column: Int,
+    val token: String,
+    val sourceLine: String,
+)
+
+internal data class AsmSourceReferenceCoverage(
+    val referenceCount: Int,
+    val unresolved: List<AsmUnresolvedSourceReference>,
+)
+
+/**
+ * Audits the source references that Asar proves are real emitted symbols, plus
+ * source-local and define references whose identities do not appear verbatim in
+ * WLA output. Macro-local labels are deliberately excluded: their concrete
+ * scope exists only at each expansion site.
+ */
+internal object AsmSourceReferenceAuditor {
+    fun audit(index: AsmReferenceIndex, compiled: AsmCompiledSymbols): AsmSourceReferenceCoverage {
+        var referenceCount = 0
+        val unresolved = mutableListOf<AsmUnresolvedSourceReference>()
+        index.files.forEach { source ->
+            var insideMacro = false
+            source.lines.forEachIndexed { lineIndex, sourceLine ->
+                if (parseAsmMacroDefinition(source.id, lineIndex, sourceLine) != null) insideMacro = true
+                val code = asmCodeBeforeComment(sourceLine)
+                if (ASM_FILE_DIRECTIVE_REGEX.containsMatchIn(code)) return@forEachIndexed
+                ASM_REFERENCE_TOKEN_REGEX.findAll(code).forEach tokenLoop@{ match ->
+                    val token = match.value
+                    if (token.startsWith('"') || token.startsWith('%')) return@tokenLoop
+                    if (isAsmDefinitionOccurrence(code, match.range)) return@tokenLoop
+                    if (insideMacro && token.startsWith('.')) return@tokenLoop
+                    val canonical = asmCanonicalSymbolToken(token)
+                    val navigable = token.startsWith('.') ||
+                        token.startsWith('!') ||
+                        canonical in compiled.labels
+                    if (!navigable) return@tokenLoop
+                    referenceCount++
+                    if (index.resolveLabel(source.id, lineIndex, token) == null) {
+                        unresolved += AsmUnresolvedSourceReference(
+                            fileId = source.id,
+                            lineIndex = lineIndex,
+                            column = match.range.first,
+                            token = token,
+                            sourceLine = sourceLine.trim(),
+                        )
+                    }
+                }
+                if (sourceLine.trimStart().startsWith("endmacro", ignoreCase = true)) insideMacro = false
+            }
+        }
+        return AsmSourceReferenceCoverage(
+            referenceCount = referenceCount,
+            unresolved = unresolved.distinctBy { Triple(it.fileId, it.lineIndex, it.column) },
+        )
+    }
+}
 
 internal fun asmCodeBeforeComment(line: String): String {
     var quoted = false
@@ -340,6 +426,10 @@ private fun isAsmDefinitionOccurrence(code: String, range: IntRange): Boolean {
         (suffix.startsWith('=') || suffix.startsWith("?=") || suffix.startsWith("#="))
     ) return true
     val prefix = code.substring(0, range.first).trimEnd()
+    if (
+        prefix.isEmpty() &&
+        (suffix.isEmpty() || suffix.matches(Regex("(?:skip|db|dw|dl|dd)\\b.*", RegexOption.IGNORE_CASE)))
+    ) return true
     return prefix.endsWith("struct", ignoreCase = true) &&
         prefix.dropLast("struct".length).lastOrNull()?.let { it.isLetterOrDigit() || it == '_' } != true
 }
@@ -364,7 +454,12 @@ internal class AsmSourceParser {
     private val includeRegex = Regex("""^\s*incsrc\s+\"?([^\";\s]+)\"?\s*(?:;\s*(.*))?$""", RegexOption.IGNORE_CASE)
     private val sectionRegex = Regex("""^\s*;;;\s*(.*?)\s*;;;\s*$""")
     private val sectionAddressRegex = Regex("""^\$([0-9A-Fa-f]{4,6}):\s*(.*)$""")
-    private val labelRegex = Regex("""^\s*([A-Za-z_][A-Za-z0-9_]*|\.[A-Za-z0-9_]+):""")
+    private val labelRegex = Regex("""^\s*([A-Za-z_][A-Za-z0-9_]*|\.+[A-Za-z0-9_]+):""")
+    private val bareLocalLabelRegex = Regex("""^\s*(\.+[A-Za-z0-9_]+)\s*(?:;.*)?$""")
+    private val structMemberRegex = Regex(
+        """^\s*(\.[A-Za-z0-9_]+)\s+(?:skip|db|dw|dl|dd)\b""",
+        RegexOption.IGNORE_CASE,
+    )
     private val defineRegex = Regex("""^\s*(![A-Za-z_][A-Za-z0-9_]*)\s*(?:\?=|#=|=)""")
     private val structRegex = Regex("""^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)\b""", RegexOption.IGNORE_CASE)
     private val endStructRegex = Regex("""^\s*endstruct\b""", RegexOption.IGNORE_CASE)
@@ -403,39 +498,69 @@ internal class AsmSourceParser {
             val source = relativeNames[relativeName] ?: return@mapNotNull null
             val lines = source.readLines()
             val sections = mutableListOf<AsmSection>()
-            val scopes = MutableList<String?>(lines.size) { null }
-            var globalScope: String? = null
+            val scopePaths = MutableList<List<String>>(lines.size) { emptyList() }
+            val scopePath = mutableListOf<String>()
             var structScope: String? = null
+            var insideMacro = false
             lines.forEachIndexed { lineIndex, line ->
-                parseAsmMacroDefinition(relativeName, lineIndex, line)?.let(macros::add)
-                structRegex.find(line)?.groupValues?.get(1)?.let { name ->
+                val macro = parseAsmMacroDefinition(relativeName, lineIndex, line)
+                macro?.let(macros::add)
+                if (macro != null) insideMacro = true
+                structRegex.find(line)?.groupValues?.get(1)?.takeUnless { insideMacro }?.let { name ->
                     structScope = name
-                    globalScope = name
+                    scopePath.clear()
+                    scopePath += name
                     labels += AsmLabel(name, relativeName, lineIndex)
                 }
-                val labelName = labelRegex.find(line)?.groupValues?.get(1)
+                val labelName = if (insideMacro) {
+                    null
+                } else {
+                    labelRegex.find(line)?.groupValues?.get(1)
+                        ?: bareLocalLabelRegex.matchEntire(line)?.groupValues?.get(1)
+                        ?: structScope?.let { structMemberRegex.find(line)?.groupValues?.get(1) }
+                }
                 if (labelName != null) {
-                    if (!labelName.startsWith('.')) globalScope = labelName
-                    val localScope = globalScope.takeIf { labelName.startsWith('.') }
-                    labels += AsmLabel(labelName, relativeName, lineIndex, localScope)
-                    if (labelName.startsWith('.') && structScope != null) {
-                        labels += AsmLabel("$structScope$labelName", relativeName, lineIndex)
-                    } else if (labelName.startsWith('.') && localScope != null) {
-                        // Asar publishes ordinary scoped labels in WLA symbols as
-                        // Parent_Local. Source may use that exported name from a
-                        // different scope/file even though the declaration is
-                        // written as `.Local:` beneath `Parent:`.
-                        labels += AsmLabel(
-                            "${localScope}_${labelName.removePrefix(".")}",
-                            relativeName,
-                            lineIndex,
-                        )
+                    if (!labelName.startsWith('.')) {
+                        scopePath.clear()
+                        scopePath += labelName
+                        labels += AsmLabel(labelName, relativeName, lineIndex)
+                    } else {
+                        val depth = asmLocalLabelDepth(labelName)
+                        val parent = scopePath.take(depth)
+                        val localScope = parent.takeIf { it.size == depth }?.joinToString("_")
+                        labels += AsmLabel(labelName, relativeName, lineIndex, localScope)
+                        val leaf = labelName.drop(depth)
+                        if (localScope != null) {
+                            val exportedName = if (structScope != null && depth == 1) {
+                                "$structScope.$leaf"
+                            } else {
+                                (parent + leaf).joinToString("_")
+                            }
+                            labels += AsmLabel(exportedName, relativeName, lineIndex)
+                            if (structScope == null && depth > 1) {
+                                // Asar also accepts a nested descendant flattened
+                                // relative to any ancestor: `.Table_row` names the
+                                // same declaration as `.Table:` / `..row:`.
+                                for (aliasDepth in 1 until depth) {
+                                    labels += AsmLabel(
+                                        name = ".".repeat(aliasDepth) +
+                                            (parent.drop(aliasDepth) + leaf).joinToString("_"),
+                                        fileId = relativeName,
+                                        lineIndex = lineIndex,
+                                        localScope = parent.take(aliasDepth).joinToString("_"),
+                                    )
+                                }
+                            }
+                            scopePath.clear()
+                            scopePath += parent
+                            scopePath += leaf
+                        }
                     }
                 }
                 defineRegex.find(line)?.groupValues?.get(1)?.let { name ->
                     labels += AsmLabel(name, relativeName, lineIndex)
                 }
-                scopes[lineIndex] = globalScope
+                scopePaths[lineIndex] = scopePath.toList()
                 sectionRegex.matchEntire(line)?.groupValues?.get(1)?.trim()?.let { heading ->
                     val addressed = sectionAddressRegex.matchEntire(heading)
                     val title = addressed?.groupValues?.get(2)?.trim().orEmpty().ifEmpty { heading }
@@ -447,8 +572,9 @@ internal class AsmSourceParser {
                 }
                 if (endStructRegex.containsMatchIn(line)) {
                     structScope = null
-                    globalScope = null
+                    scopePath.clear()
                 }
+                if (line.trimStart().startsWith("endmacro", ignoreCase = true)) insideMacro = false
             }
             if (sections.firstOrNull()?.lineIndex != 0) {
                 sections.add(0, AsmSection("Overview", 0))
@@ -473,7 +599,7 @@ internal class AsmSourceParser {
                 isBank = relativeName.substringAfterLast('/').startsWith("bank_", ignoreCase = true),
                 lines = lines,
                 sections = sections,
-                scopeByLine = scopes,
+                scopePathByLine = scopePaths,
             )
         }
         val assets = ranges.map { range -> AsmAsset(range, File(dataDirectory, range.path)) }

@@ -539,12 +539,18 @@ once conversion.
   executable, then the release-bundled native compiler, and only then using or
   provisioning a managed developer compiler.
 - `AsmSourceParser` reads `main.asm` include order and descriptions, then indexes
-  every source file, authored section, global label, scoped local label,
-  Asar/WLA `Parent_Local` alias, cross-reference, and extracted asset. This lets
+  every source file, authored section, global label, arbitrarily nested dotted
+  label, flattened local alias, struct member (including indexed forms such as
+  `Enemy[1].properties`), Asar/WLA `Parent_Local` alias, cross-reference, and
+  extracted asset. This lets
   a reference such as `DebugConst_DisableAudio` navigate to the `.DisableAudio:`
   declaration beneath `DebugConst:`. Reference resolution uses the same
   local-scope rules as label navigation and ignores comments and quoted strings;
   it is not a raw text search.
+- `AsmSourceReferenceAuditor` compares every navigable reference in the pinned
+  source with Asar's emitted WLA symbols. `:desktopApp:asmSymbolCoverageTest`
+  fails if any emitted symbol used by source cannot reach a SMEDIT definition;
+  the strict parity report runs that audit after rebuilding the reference.
 - `AsmAddressAtlas` is the shared bidirectional address layer. It converts
   canonical LoROM SNES/PC coordinates and resolves exact source anchors,
   contextual anchors, and extracted asset ownership without decoding assembler

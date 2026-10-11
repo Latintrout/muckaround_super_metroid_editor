@@ -103,6 +103,17 @@ class AsmSourceEditPageTest {
     }
 
     @Test
+    fun `editable indexed struct members remain one navigation token`() {
+        val text = "    LDA.W Enemy[1].properties"
+        val offset = text.indexOf("properties") + 3
+
+        assertEquals(
+            AsmEditableSymbolReference(lineIndex = 90, token = "Enemy[1].properties"),
+            asmEditableSymbolAt(text, offset, pageStartLine = 90),
+        )
+    }
+
+    @Test
     fun `editable symbols in comments are not navigation targets`() {
         val text = "    RTS ; !SPF is only commentary"
 

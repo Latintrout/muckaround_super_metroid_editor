@@ -61,6 +61,29 @@ class AsmCompletionTest {
     }
 
     @Test
+    fun `operand completion follows nested Asar label scope and flattened aliases`() {
+        val index = index()
+        val nestedText = "    LDA ..gr"
+        val nested = assertNotNull(
+            AsmCompletionEngine.complete(index, "bank_80.asm", 10, nestedText, nestedText.length, explicit = false),
+        )
+        val flattenedText = "    LDA .Table_gr"
+        val flattened = assertNotNull(
+            AsmCompletionEngine.complete(
+                index,
+                "bank_80.asm",
+                10,
+                flattenedText,
+                flattenedText.length,
+                explicit = false,
+            ),
+        )
+
+        assertTrue(nested.items.any { it.text == "..gravity" })
+        assertTrue(flattened.items.any { it.text == ".Table_gravity" })
+    }
+
+    @Test
     fun `explicit completion after an opcode offers symbols with an empty prefix`() {
         val index = index()
         val text = "    JSR "
@@ -188,6 +211,9 @@ class AsmCompletionTest {
                   .Loop:
                     BNE .Loop
                     JSR GlobalRoutine
+                  .Table:
+                  ..gravity:
+                    dw ${'$'}0001
             """.trimIndent(),
         )
         return AsmSourceParser().parse(source, data, emptyList())

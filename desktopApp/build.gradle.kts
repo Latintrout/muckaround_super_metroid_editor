@@ -61,7 +61,9 @@ kotlin {
         jvmToolchain(17)
         withJava()
         testRuns["test"].executionTask.configure {
-            useJUnitPlatform { excludeTags("community-samus-rom", "asm-reference-network", "asm-toolchain") }
+            useJUnitPlatform {
+                excludeTags("community-samus-rom", "asm-reference-network", "asm-toolchain", "asm-symbol-coverage")
+            }
             systemProperty("smedit.realItFixture", System.getProperty("smedit.realItFixture", ""))
         }
     }
@@ -114,6 +116,17 @@ tasks.register<org.gradle.api.tasks.testing.Test>("asmReferenceIntegrationTest")
     testClassesDirs = regularJvmTest.get().testClassesDirs
     classpath = regularJvmTest.get().classpath
     useJUnitPlatform { includeTags("asm-reference-network") }
+    systemProperty("smedit.requireParityFixtures", "true")
+    outputs.upToDateWhen { false }
+}
+
+tasks.register<org.gradle.api.tasks.testing.Test>("asmSymbolCoverageTest") {
+    group = "verification"
+    description = "Prove every emitted symbol referenced by the pinned ASM source resolves in SMEDIT"
+    dependsOn(tasks.named("jvmTestClasses"), rootProject.tasks.named("parityBuildReference"))
+    testClassesDirs = regularJvmTest.get().testClassesDirs
+    classpath = regularJvmTest.get().classpath
+    useJUnitPlatform { includeTags("asm-symbol-coverage") }
     systemProperty("smedit.requireParityFixtures", "true")
     outputs.upToDateWhen { false }
 }

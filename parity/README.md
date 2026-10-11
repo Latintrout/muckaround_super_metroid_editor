@@ -114,7 +114,8 @@ tagged tests. The individual `parityBootstrap`, `parityCheck`,
 `parityPhantoon`, `parityDraygon`, `parityRidley`, `parityMotherBrain`,
 `parityCrocomire`, `paritySporeSpawn`, `parityBotwoon`, `parityTorizo`,
 `parityMetroid`, `paritySamus`, `parityRooms`, `parityScrollRuntime`,
-`parityBackgrounds`, `parityMinimap`, and `parityLoadStations` tasks remain
+`parityBackgrounds`, `parityMinimap`, `parityLoadStations`, and
+`:desktopApp:asmSymbolCoverageTest` tasks remain
 available for focused investigation.
 
 `parityBootstrap` clones/fetches
