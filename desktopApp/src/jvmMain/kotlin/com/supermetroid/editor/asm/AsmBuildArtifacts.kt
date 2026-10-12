@@ -413,8 +413,22 @@ internal class AsmBuildArtifactRepository(
      * explicitly a snapshot of a successful compilation, never live GUI data
      * or proof that the final ROM export succeeded. Empty compilations clear it. */
     fun loadGeneratedRooms(projectFilePath: String): AsmGeneratedRoomSource? {
+        return loadRoomDocument(projectFilePath, AsmGeneratedRoomSource.FILE_NAME)
+    }
+
+    /** Published only after the complete ROM transaction succeeds, even with no GUI edits. */
+    fun publishRoomData(projectFilePath: String, source: String) {
+        val directory = writableBuildDirectory(projectFilePath) ?: return
+        directory.mkdirs()
+        writeTextAtomically(File(directory, AsmRoomDataSnapshot.FILE_NAME), source)
+    }
+
+    fun loadRoomData(projectFilePath: String): AsmGeneratedRoomSource? =
+        loadRoomDocument(projectFilePath, AsmRoomDataSnapshot.FILE_NAME)
+
+    private fun loadRoomDocument(projectFilePath: String, fileName: String): AsmGeneratedRoomSource? {
         val directory = buildDirectory(projectFilePath) ?: return null
-        val file = File(directory, AsmGeneratedRoomSource.FILE_NAME)
+        val file = File(directory, fileName)
         return runCatching {
             if (!file.isFile) return@runCatching null
             AsmGeneratedRoomSource.parse(file.readText(), Instant.ofEpochMilli(file.lastModified()).toString())

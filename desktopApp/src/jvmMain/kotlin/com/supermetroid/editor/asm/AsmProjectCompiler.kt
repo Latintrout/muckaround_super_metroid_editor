@@ -54,6 +54,9 @@ internal data class AsmCompiledBuildBase(
     val expectedFinalParitySha256: String? = null,
     /** Retained only for generated-input parity diagnostics in the prepared build cache. */
     val expectedFinalRomBytes: ByteArray? = null,
+    /** Source-built input before GUI room materialization. State source identities
+     * must be validated here, never against the already-rewritten selector graph. */
+    val roomValidationRomBytes: ByteArray? = null,
 )
 
 internal fun AsmCompiledBuildBase.copyForReuse(): AsmCompiledBuildBase = copy(
@@ -67,6 +70,7 @@ internal fun AsmCompiledBuildBase.copyForReuse(): AsmCompiledBuildBase = copy(
     compilerOutput = compilerOutput.toList(),
     compilerSymbols = compilerSymbols.copyOf(),
     expectedFinalRomBytes = expectedFinalRomBytes?.copyOf(),
+    roomValidationRomBytes = roomValidationRomBytes?.copyOf(),
 )
 
 internal class AsmCompilationException(

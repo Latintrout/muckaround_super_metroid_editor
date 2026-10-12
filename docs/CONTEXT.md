@@ -97,7 +97,7 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 | File | Contents |
 |------|----------|
-| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, Library, pinned cross-platform Asar builds, GUI/source ownership, generated asset/room/patch inputs, read-only generated-room browsing and format-check limits, parity checks, and the remaining path to symbolic room relocation and runtime debugging. |
+| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, GUI/source ownership, generated asset/room/patch inputs, collapsible Room Data/build-write snapshots with stable room identities, format-check limits, pre-materialization identity validation, parity checks, and the remaining path to symbolic room relocation and runtime debugging. |
 
 ### Project Planning (`docs/project/`)
 

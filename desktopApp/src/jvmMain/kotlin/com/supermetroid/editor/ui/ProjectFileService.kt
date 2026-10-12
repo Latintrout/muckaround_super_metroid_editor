@@ -114,7 +114,11 @@ internal object ProjectFileService {
         projectFilePath: String = "",
     ): String? = withBuildFailureReport(project, projectFilePath, onLog, onStatus, "Export failed safely") { status ->
         val compiledAsmBase = prepareBuildBase(project, projectFilePath, romParser, onLog, status)
-        RomExporter(project, romParser, onLog, status, compiledAsmBase = compiledAsmBase, projectFilePath = projectFilePath).export()
+        val exporter = RomExporter(project, romParser, onLog, status, compiledAsmBase = compiledAsmBase, projectFilePath = projectFilePath)
+        val built = exporter.build()
+        exporter.export(built).also { path ->
+            if (path != null && built != null) publishRoomData(project, projectFilePath, romParser, built, onLog)
+        }
     }
 
     fun buildRom(
@@ -132,7 +136,20 @@ internal object ProjectFileService {
             onStatus = status,
             logWritePlanDetails = false,
             compiledAsmBase = compiledAsmBase,
-        ).build()
+        ).build()?.also { publishRoomData(project, projectFilePath, romParser, it, onLog) }
+    }
+
+    private fun publishRoomData(project: SmEditProject, projectFilePath: String, inputParser: RomParser, build: RomBuildResult, onLog: (String) -> Unit) {
+        if (project.asmWorkspace.buildMode != ProjectRomBuildMode.ASM_SOURCE || projectFilePath.isBlank()) return
+        runCatching {
+            // Keep new-room builds explicit until stable source identities are supported.
+            val source = if (project.newRooms.isEmpty()) {
+                // Headers retain their input identities. Rediscovering the built ROM can
+                // drop rooms with generated selector redirects from the heuristic scanner.
+                com.supermetroid.editor.asm.AsmRoomDataSnapshot.render(build.resultRom, inputParser.roomCatalog.rooms)
+            } else "; Room Data is not available for projects with added rooms yet. Room edits still use the ROM backend.\n"
+            AsmBuildArtifactRepository().publishRoomData(projectFilePath, source)
+        }.onFailure { onLog("Could not retain Room Data snapshot: ${it.message}") }
     }
 
     /** Retain failures from planning/final export as well as from Asar itself.
@@ -325,6 +342,7 @@ internal object ProjectFileService {
                 compilerOutput = (initial.compilerOutput + materializedCompile.compilerOutput).distinct(),
                 expectedFinalParitySha256 = asmGeneratedParitySha256(planned.resultRom),
                 expectedFinalRomBytes = planned.resultRom.copyOf(),
+                roomValidationRomBytes = if (roomMaterialization.isEmpty) null else initial.romBytes.copyOf(),
             )
         }
         compiled.compilerOutput

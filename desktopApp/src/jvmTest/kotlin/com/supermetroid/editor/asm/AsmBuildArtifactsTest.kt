@@ -58,6 +58,24 @@ class AsmBuildArtifactsTest {
     }
 
     @Test
+    fun `validated room data survives preliminary compilation and failure but can be explicitly cleared`() {
+        val directory = createTempDirectory("smedit-room-data-report-").toFile()
+        try {
+            val file = File(directory, "Example.smedit").apply { writeText("{}") }
+            val repository = AsmBuildArtifactRepository(sourceFingerprintProvider = { "fixture" })
+            val text = "${AsmRoomDataSnapshot.MARKER}\nSmeditRoom_91F8_Header:\ndb ${'$'}00\n"
+            repository.publishRoomData(file.path, text)
+            val snapshot = requireNotNull(repository.loadRoomData(file.path))
+            repository.publishSuccess(file.path, ByteArray(0), emptyList(), "fixture")
+            assertEquals(snapshot, repository.loadRoomData(file.path))
+            repository.publishPipelineFailure(file.path, "Failed after compilation")
+            assertEquals(snapshot, repository.loadRoomData(file.path))
+            repository.publishRoomData(file.path, "; Unsupported new-room project\n")
+            assertNull(repository.loadRoomData(file.path))
+        } finally { directory.deleteRecursively() }
+    }
+
+    @Test
     fun `WLA symbols retain labels and exact source line addresses`() {
         val symbols = AsmWlaSymbolParser.parse(
             """

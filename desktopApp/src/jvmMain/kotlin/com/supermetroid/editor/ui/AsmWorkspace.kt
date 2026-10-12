@@ -104,6 +104,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -123,6 +124,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
+import com.supermetroid.editor.asm.AsmDocumentFindState
+import com.supermetroid.editor.asm.asmDocumentLineOffsets
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -426,7 +429,13 @@ internal fun AsmWorkspaceSidebar(
         }
     }
 
-    Column(modifier = modifier.padding(8.dp)) {
+    Column(modifier = modifier.asmHistoryShortcuts(state).padding(8.dp).onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.key == Key.F &&
+            (if (ASM_IS_MAC) event.isMetaPressed else event.isCtrlPressed)) {
+            state.requestSearchFocus()
+            true
+        } else false
+    }) {
         Row(Modifier.fillMaxWidth()) {
             AsmModeButton("Source", state.browserMode in setOf(AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS)) {
                 state.showSourceBrowser()
@@ -473,7 +482,7 @@ internal fun AsmWorkspaceSidebar(
                 label = {
                     Text(
                         when (state.browserMode) {
-                            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS -> "Find source, label, or address"
+                            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS -> "Find room, source, label, or address"
                             AsmBrowserMode.ASSETS -> "Find extracted asset"
                             AsmBrowserMode.LIBRARY -> "Find lesson or instruction"
                             AsmBrowserMode.ROM -> ""
@@ -502,6 +511,7 @@ internal fun AsmWorkspaceSidebar(
                 AsmSourceTree(
                     state = state,
                     index = it.index,
+                    roomNames = romParser?.roomCatalog?.rooms.orEmpty().associate { room -> room.getRoomIdAsInt() to room.name },
                     onCreateModule = { showCreateModuleDialog = true },
                     onMoveModule = { fileId, offset ->
                         scope.launch {
@@ -1368,6 +1378,7 @@ private fun librarySidebarIndex(
 private fun AsmSourceTree(
     state: AsmWorkspaceState,
     index: AsmReferenceIndex,
+    roomNames: Map<Int, String>,
     onCreateModule: () -> Unit,
     onMoveModule: (String, Int) -> Unit,
     onSetModuleEnabled: (String, Boolean) -> Unit,
@@ -1378,43 +1389,73 @@ private fun AsmSourceTree(
     val results = remember(index, query) {
         if (query.isEmpty()) emptyList() else sourceSearch(index, state.sourceTexts(), query)
     }
-    val generated = state.generatedRoomSource
-    val generatedSections = generated?.sections.orEmpty().filter {
-        query.isEmpty() || it.title.contains(query, ignoreCase = true) || it.label.contains(query, ignoreCase = true)
-    }
+    val roomGroups = remember(state.roomDataSnapshot, roomNames, query) { state.roomDataSnapshot?.groups(roomNames, query).orEmpty() }
+    val writeGroups = remember(state.generatedRoomInput, roomNames, query) { state.generatedRoomInput?.groups(roomNames, query).orEmpty() }
     val showGenerated = state.workspaceKind == AsmWorkspaceKind.PROJECT &&
-        (query.isEmpty() || generatedSections.isNotEmpty() || "generated rooms".contains(query, ignoreCase = true))
+        (query.isEmpty() || roomGroups.isNotEmpty() || writeGroups.isNotEmpty() || "room data".contains(query, ignoreCase = true))
     AsmSidebarScrollPane(modifier) {
-        if (showGenerated) {
+        fun LazyListScope.roomDataSection() {
+            if (!showGenerated) return
             item(key = "generated-rooms") {
                 val selected = state.browserMode == AsmBrowserMode.GENERATED_ROOMS
-                Column(
+                Row(
                     Modifier.fillMaxWidth()
                         .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
-                        .clickable { state.openGeneratedRooms() }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Generated rooms", fontSize = fs.body, fontWeight = FontWeight.SemiBold)
-                    Text("Read-only · build snapshot", fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("ROOM DATA", fontSize = fs.detail, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            if (selected && !state.showRoomBuildWrites && state.roomDataExpanded) state.toggleRoomDataExpanded()
+                            else state.openGeneratedRooms(buildWrites = false)
+                        }.padding(vertical = 7.dp))
+                    Text(if (state.roomDataExpanded) "▾" else "▸", fontSize = fs.detail,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 6.dp).width(18.dp)
+                            .clickable { state.toggleRoomDataExpanded() }.padding(vertical = 7.dp))
                 }
             }
-            if (state.browserMode == AsmBrowserMode.GENERATED_ROOMS || query.isNotEmpty()) {
-                generatedSections.forEach { section ->
-                    item(key = "generated:${section.label}") {
-                        val selected = state.browserMode == AsmBrowserMode.GENERATED_ROOMS &&
-                            generated?.sectionAt(state.generatedRoomLineIndex) == section
-                        Text(
-                            section.title, fontSize = fs.detail,
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.fillMaxWidth()
-                                .clickable { state.openGeneratedRooms(section.lineIndex) }
-                                .padding(start = 20.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
-                        )
+            if (state.roomDataExpanded || query.isNotEmpty()) {
+                fun androidx.compose.foundation.lazy.LazyListScope.groups(
+                    groups: List<com.supermetroid.editor.asm.AsmRoomDataGroup>, buildWrites: Boolean,
+                ) {
+                    groups.forEach { group ->
+                        val groupKey = com.supermetroid.editor.asm.roomDataGroupKey(group.roomId, buildWrites)
+                        val expanded = state.expandedRoomDataGroups[groupKey] == true || query.isNotEmpty()
+                        item(key = "room-data:$groupKey") {
+                            Text("${if (expanded) "▾" else "▸"} ${group.title}", fontSize = fs.body,
+                                modifier = Modifier.fillMaxWidth().clickable { state.toggleRoomDataGroup(groupKey) }
+                                    .padding(start = if (buildWrites) 32.dp else 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp))
+                        }
+                        if (expanded) items(group.sections, key = { "room-data:$buildWrites:${it.label}" }) { section ->
+                            val selected = state.browserMode == AsmBrowserMode.GENERATED_ROOMS &&
+                                state.showRoomBuildWrites == buildWrites && state.generatedRoomSource?.sectionAt(state.generatedRoomLineIndex) == section
+                            Text(
+                                section.title, fontSize = fs.detail,
+                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth()
+                                    .clickable { state.openGeneratedRooms(section.lineIndex, buildWrites = buildWrites) }
+                                    .padding(start = if (buildWrites) 56.dp else 32.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+                            )
+                        }
                     }
+                }
+                groups(roomGroups, false)
+                if (state.generatedRoomInput != null) {
+                    val expanded = state.expandedRoomDataGroups["build-writes"] == true || query.isNotEmpty()
+                    item(key = "room-data:build-writes") {
+                        Text("${if (expanded) "▾" else "▸"} Build writes", fontSize = fs.body,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().clickable { state.toggleRoomDataGroup("build-writes") }
+                                .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp))
+                    }
+                    if (expanded) groups(writeGroups, true)
                 }
             }
         }
         if (query.isNotEmpty()) {
+            roomDataSection()
             items(results, key = { "${it.fileId}:${it.assetPath}:${it.lineIndex}:${it.columnIndex}:${it.title}" }) { result ->
                 val splitFileId = result.fileId?.takeIf {
                     state.workspaceKind == AsmWorkspaceKind.PROJECT && !state.isProjectModule(it)
@@ -1451,7 +1492,7 @@ private fun AsmSourceTree(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "PROJECT MODULES",
+                            "CUSTOM ASM",
                             fontSize = fs.detail,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
@@ -1501,6 +1542,7 @@ private fun AsmSourceTree(
                     }
                 }
             }
+            roomDataSection()
             item { TreeHeading("Banks · select a chapter to expand") }
             banks.forEach { source ->
                 val expanded = state.expandedSourceFileId == source.id
@@ -1760,6 +1802,26 @@ internal fun AsmWorkspaceCanvas(
     problemsPaneHeightDp: Float = DEFAULT_ASM_PROBLEMS_HEIGHT_DP,
     onProblemsPaneHeightChange: (Float) -> Unit = {},
     modifier: Modifier = Modifier,
+) {
+    Box(modifier.asmHistoryShortcuts(state)) {
+        AsmWorkspaceCanvasContent(
+            state, romParser, onOpenInEditor, onSaveProject, onBuildProject, onRunInEmulator,
+            problemsPaneHeightDp, onProblemsPaneHeightChange, Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun AsmWorkspaceCanvasContent(
+    state: AsmWorkspaceState,
+    romParser: RomParser?,
+    onOpenInEditor: (AsmEditorTarget) -> Unit,
+    onSaveProject: () -> Boolean,
+    onBuildProject: (() -> Unit)?,
+    onRunInEmulator: (() -> Unit)?,
+    problemsPaneHeightDp: Float,
+    onProblemsPaneHeightChange: (Float) -> Unit,
+    modifier: Modifier,
 ) {
     val workspace = state.workspace
     val semanticIndex = remember(romParser) { romParser?.let(AsmSemanticBridge::buildIndex) }
@@ -2428,6 +2490,13 @@ private fun AsmGeneratedRoomsCanvas(
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val source = state.generatedRoomSource
+    val find = remember(state.showRoomBuildWrites) { AsmDocumentFindState() }
+    val textFocus = remember { FocusRequester() }
+    val documentText = remember(source) { source?.lines?.joinToString("\n").orEmpty() }
+    val scope = rememberCoroutineScope()
+    val characterWidthPx = with(LocalDensity.current) { fs.body.toPx() * MONOSPACE_CHARACTER_WIDTH }
+    val lineOffsets = remember(source) { asmDocumentLineOffsets(source?.lines.orEmpty()) }
+    val closeFind = { find.close(); runCatching { textFocus.requestFocus() }; Unit }
     val listState = rememberLazyListState()
     val horizontal = rememberScrollState()
     var showFormatHelp by remember { mutableStateOf(false) }
@@ -2439,8 +2508,15 @@ private fun AsmGeneratedRoomsCanvas(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Edit rooms in the room editor, then Build to refresh this snapshot. " +
-                            "This is generated input from a successful source compilation, not proof that the final ROM export succeeded.",
+                        "Room Data explains the last successfully built ROM, including rooms you have not edited. " +
+                            "Edit in the room editor, then Build to refresh. These decoded listings are read-only references, not editable assembler inputs.",
+                        fontSize = fs.body,
+                    )
+                    Text(
+                        "Build writes is the advanced view of actual generated assembler input. org selects a SNES address; " +
+                            "db, dw and dl write one-, two- and three-byte values. Raw \$00/\$FF bytes are data, not error markers; " +
+                            "their meaning depends on the containing resource. Unmapped or shared writes are not guessed to belong to a room. " +
+                            "A source compilation can succeed even when final ROM validation fails.",
                         fontSize = fs.body,
                     )
                     Text(
@@ -2459,25 +2535,38 @@ private fun AsmGeneratedRoomsCanvas(
             confirmButton = { TextButton(onClick = { showFormatHelp = false }) { Text("Done", fontSize = fs.body) } },
         )
     }
-    LaunchedEffect(source, state.generatedRoomNavigationSerial) {
-        if (source != null) listState.scrollToItem(state.generatedRoomLineIndex.coerceIn(source.lines.indices))
+    val lineHeightPx = with(LocalDensity.current) { (fs.body * 1.4f).toPx() }
+    LaunchedEffect(source, state.generatedRoomNavigationSerial, lineHeightPx) {
+        if (source != null) {
+            val target = state.generatedRoomLineIndex.coerceIn(source.lines.indices)
+            listState.scrollToItem(target / ROOM_DATA_LINES_PER_BLOCK,
+                ((target % ROOM_DATA_LINES_PER_BLOCK - 3).coerceAtLeast(0) * lineHeightPx).toInt())
+        }
     }
-    Column(modifier) {
+    Column(modifier.asmDocumentFindShortcuts(find, state::requestSearchFocus, closeFind)) {
         AsmNavigationHeader(
-            state, "Generated rooms", "Read-only · last compilation", "",
+            state, "Room Data", if (state.showRoomBuildWrites) "Build writes · last source compilation" else "Read-only · last successful build", "",
             actions = {
+                AsmDocumentFindButton(find::show)
                 section?.roomId?.let { roomId ->
                     TextButton(onClick = { onOpenInEditor(AsmEditorTarget.Room(roomId)) }) {
-                        Text("Edit room $${roomId.hex(4)}", fontSize = fs.body)
+                        Text("Edit room", fontSize = fs.body)
                     }
                 }
                 TextButton(onClick = { showFormatHelp = true }) { Text("Format checks", fontSize = fs.body) }
             },
         )
+        AsmDocumentFindBar(find, documentText, { match ->
+            state.openGeneratedRooms(match.line, addToHistory = false)
+            // Reveal matches past the right edge without disturbing ordinary navigation.
+            scope.launch { horizontal.scrollTo(((match.column - 8).coerceAtLeast(0) * characterWidthPx).toInt()) }
+        }, closeFind)
         if (source == null) {
             Text(
-                "No generated room input for the latest compilation. Edit an existing room and Build in ASM mode. " +
-                    "Projects with new rooms currently use the ROM-patch backend for room data.",
+                if (state.showRoomBuildWrites) "No generated room writes in the latest source compilation. " +
+                    "An unchanged room graph needs no writes."
+                else "Build in ASM mode to browse room headers, states and objects—even without room edits. " +
+                    "Room Data currently excludes projects with added rooms. If the build failed, resolve the errors below first.",
                 fontSize = fs.body,
                 modifier = Modifier.padding(16.dp),
             )
@@ -2488,39 +2577,29 @@ private fun AsmGeneratedRoomsCanvas(
             }
             AsmScrollableTextPane(
                 listState, horizontal, width, source.generatedAt,
-                state::requestSearchFocus, state::goBack, state::goForward,
+                find::show, state::goBack, state::goForward,
                 Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
+                externalFocusRequester = textFocus,
             ) {
-                items(source.lines.size, key = { it }) { lineIndex ->
-                    val line = source.lines[lineIndex]
-                    val styled = asmAnnotatedLine(line, knownLabels = source.definitions.keys)
-                    val annotated = remember(styled, source) {
-                        buildAnnotatedString {
-                            append(styled)
-                            Regex("[A-Za-z_][A-Za-z0-9_]*").findAll(line.substringBefore(';')).forEach { token ->
-                                if (token.value in source.definitions) {
-                                    addStringAnnotation("generated", token.value, token.range.first, token.range.last + 1)
-                                    addStyle(SpanStyle(textDecoration = TextDecoration.Underline), token.range.first, token.range.last + 1)
-                                }
-                            }
-                        }
+                items((source.lines.size + ROOM_DATA_LINES_PER_BLOCK - 1) / ROOM_DATA_LINES_PER_BLOCK, key = { it }) { block ->
+                    val first = block * ROOM_DATA_LINES_PER_BLOCK
+                    val end = minOf(first + ROOM_DATA_LINES_PER_BLOCK, source.lines.size)
+                    val styledLines = (first until end).map { asmAnnotatedLine(source.lines[it], knownLabels = source.definitions.keys) }
+                    val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.11f)
+                    val annotated = remember(styledLines, source, state.generatedRoomLineIndex, highlight) {
+                        asmRoomDataTextBlock(source, first, styledLines, state.generatedRoomLineIndex, highlight)
                     }
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .background(if (lineIndex == state.generatedRoomLineIndex) MaterialTheme.colorScheme.primary.copy(alpha = 0.11f) else Color.Transparent)
-                            .padding(vertical = 1.dp),
-                    ) {
+                    val lineStyle = TextStyle(fontSize = fs.body, lineHeight = fs.body * 1.4f, fontFamily = FontFamily.Monospace, color = codeForeground())
+                    Row(Modifier.fillMaxWidth()) {
                         DisableSelection {
                             Text(
-                                (lineIndex + 1).toString(), fontSize = fs.detail, fontFamily = FontFamily.Monospace,
+                                (first until end).joinToString("\n", postfix = if (end < source.lines.size) "\n" else "") { (it + 1).toString() },
+                                style = lineStyle,
                                 color = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp)
-                                    .clickable { state.openGeneratedRooms(lineIndex) },
+                                modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp),
                             )
                         }
-                        AsmSelectableLinkedText(
-                            annotated, TextStyle(fontSize = fs.body, fontFamily = FontFamily.Monospace, color = codeForeground()),
-                        ) { annotation ->
+                        AsmSelectableLinkedText(asmHighlightDocumentMatches(annotated, lineOffsets[first], find, Color(0xFFFFC857)), lineStyle) { annotation ->
                             when (annotation.tag) {
                                 "generated" -> source.definitions[annotation.item]?.let { state.openGeneratedRooms(it) }
                                 "instruction" -> state.showInstruction(annotation.item)
@@ -2530,6 +2609,52 @@ private fun AsmGeneratedRoomsCanvas(
                 }
             }
         }
+    }
+}
+
+private const val ROOM_DATA_LINES_PER_BLOCK = 64
+
+private fun Modifier.asmDocumentFindShortcuts(
+    find: AsmDocumentFindState,
+    onWorkspaceFind: () -> Unit,
+    onClose: () -> Unit,
+): Modifier = onPreviewKeyEvent { event ->
+    if (event.type != KeyEventType.KeyDown) false
+    else when {
+        event.key == Key.F && (if (ASM_IS_MAC) event.isMetaPressed else event.isCtrlPressed) -> {
+            if (event.isShiftPressed) onWorkspaceFind() else find.show()
+            true
+        }
+        else -> false
+    }
+}.onKeyEvent { event ->
+    if (event.type == KeyEventType.KeyDown && event.key == Key.Escape && find.open) {
+        onClose()
+        true
+    } else false
+}
+
+/** Keep selection text and link offsets correct within and across virtualized blocks. */
+internal fun asmRoomDataTextBlock(
+    source: com.supermetroid.editor.asm.AsmGeneratedRoomSource,
+    firstLine: Int,
+    styledLines: List<AnnotatedString>,
+    selectedLine: Int = -1,
+    highlight: Color = Color.Transparent,
+): AnnotatedString = buildAnnotatedString {
+    styledLines.forEachIndexed { index, styled ->
+        val lineIndex = firstLine + index
+        val line = source.lines[lineIndex]
+        val offset = length
+        append(styled)
+        if (lineIndex == selectedLine) addStyle(SpanStyle(background = highlight), offset, length)
+        Regex("[A-Za-z_][A-Za-z0-9_]*").findAll(line.substringBefore(';')).forEach { token ->
+            if (token.value in source.definitions) {
+                addStringAnnotation("generated", token.value, offset + token.range.first, offset + token.range.last + 1)
+                addStyle(SpanStyle(textDecoration = TextDecoration.Underline), offset + token.range.first, offset + token.range.last + 1)
+            }
+        }
+        if (lineIndex != source.lines.lastIndex) append('\n')
     }
 }
 
@@ -2550,6 +2675,15 @@ private fun AsmSourceCanvas(
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val scope = rememberCoroutineScope()
+    val find = remember(pane.id, source.id, state.workspaceKind) { AsmDocumentFindState() }
+    val textFocus = remember(pane.id) { FocusRequester() }
+    val closeFind = { find.close(); runCatching { textFocus.requestFocus() }; Unit }
+    val documentText = remember(source, state.sourceBufferRevision, find.open, state.workspaceKind) {
+        if (!find.open) "" else if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditText(source.id)
+        else source.lines.joinToString("\n")
+    }
+    val lineOffsets = remember(source) { asmDocumentLineOffsets(source.lines) }
+    val characterWidthPx = with(LocalDensity.current) { fs.body.toPx() * MONOSPACE_CHARACTER_WIDTH }
     val listState = rememberLazyListState()
     val horizontal = rememberScrollState()
     val addressAnchorsByLine = remember(index, source.id) {
@@ -2699,7 +2833,7 @@ private fun AsmSourceCanvas(
         }
     }
     Column(
-        modifier.fillMaxSize()
+        modifier.fillMaxSize().asmDocumentFindShortcuts(find, state::requestSearchFocus, closeFind)
             .background(
                 if (isActivePane) MaterialTheme.colorScheme.primary.copy(alpha = 0.035f)
                 else Color.Transparent,
@@ -2714,8 +2848,9 @@ private fun AsmSourceCanvas(
             source.description,
             trailing = "",
             active = isActivePane,
-            actions = if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
-                {
+            actions = {
+                AsmDocumentFindButton(find::show)
+                if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
                     AsmSourceToolbarActions(
                         state = state,
                         source = source,
@@ -2725,8 +2860,13 @@ private fun AsmSourceCanvas(
                         onClosePane = if (state.hasSourceSplit) ({ state.closeSourcePane(pane.id) }) else null,
                     )
                 }
-            } else null,
+            },
         )
+        AsmDocumentFindBar(find, documentText, { match ->
+            state.activateSourcePane(pane.id)
+            state.openSource(source.id, match.line, addToHistory = false, columnIndex = match.column)
+            scope.launch { horizontal.scrollTo(((match.column - 8).coerceAtLeast(0) * characterWidthPx).toInt()) }
+        }, closeFind)
         if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
             AsmEditorLinkBar(editorLinks, onOpenInEditor)
             when {
@@ -2739,6 +2879,8 @@ private fun AsmSourceCanvas(
                 source = source,
                 onBuild = onBuildProject,
                 onRun = onRunInEmulator,
+                find = find,
+                editorFocusRequester = textFocus,
                 modifier = Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
             )
         } else {
@@ -2755,10 +2897,11 @@ private fun AsmSourceCanvas(
                 horizontalState = horizontal,
                 minimumContentWidth = minimumContentWidth,
                 focusKey = source.id,
-                onFind = state::requestSearchFocus,
+                onFind = find::show,
                 onBack = state::goBack,
                 onForward = state::goForward,
                 modifier = Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
+                externalFocusRequester = textFocus,
             ) {
                 items(source.lines.size, key = { it }) { lineIndex ->
                     val selected = lineIndex == pane.lineIndex
@@ -2789,7 +2932,7 @@ private fun AsmSourceCanvas(
                         val annotated = asmAnnotatedLine(source.lines[lineIndex], source.id, lineIndex, index)
                         Box(Modifier.weight(1f)) {
                             AsmSelectableLinkedText(
-                                text = annotated,
+                                text = asmHighlightDocumentMatches(annotated, lineOffsets[lineIndex], find, Color(0xFFFFC857)),
                                 style = TextStyle(
                                     fontSize = fs.body,
                                     fontFamily = FontFamily.Monospace,
@@ -3039,6 +3182,8 @@ private fun AsmEditableSourcePane(
     source: AsmSourceFile,
     onBuild: (() -> Unit)?,
     onRun: (() -> Unit)?,
+    find: AsmDocumentFindState,
+    editorFocusRequester: FocusRequester,
     modifier: Modifier,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
@@ -3065,7 +3210,8 @@ private fun AsmEditableSourcePane(
         val lineStart = asmLineStartOffset(page.text, initialCursorLine)
         val lineEnd = page.text.indexOf('\n', lineStart).let { if (it < 0) page.text.length else it }
         val cursor = lineStart + pane.columnIndex.coerceIn(0, lineEnd - lineStart)
-        mutableStateOf(TextFieldValue(page.text, selection = TextRange(cursor)))
+        val match = find.selected?.takeIf { it.line == pane.lineIndex && it.column == pane.columnIndex }
+        mutableStateOf(TextFieldValue(page.text, selection = TextRange(cursor, (cursor + (match?.length ?: 0)).coerceAtMost(page.text.length))))
     }
     // Navigation within the same page changes pageKey so the caret can move to
     // the destination, but it does not necessarily make Compose lay identical
@@ -3074,7 +3220,6 @@ private fun AsmEditableSourcePane(
     // selection event and silently drop the first pointer navigation gesture.
     var fieldLayout by remember(source.id, page.startLine) { mutableStateOf<TextLayoutResult?>(null) }
     var pendingDefinitionPosition by remember(source.id, page.startLine) { mutableStateOf<Offset?>(null) }
-    val editorFocusRequester = remember(source.id, page.startLine) { FocusRequester() }
     var hoveredEditableLink by remember(pageKey) { mutableStateOf(false) }
     var contextMenuOffset by remember(pageKey) { mutableStateOf<Int?>(null) }
     var completionExplicit by remember(pageKey) { mutableStateOf(false) }
@@ -3260,7 +3405,18 @@ private fun AsmEditableSourcePane(
             // and also removes useful context around the target.
             val contextualTarget = (targetWithinPage - ASM_EDIT_TARGET_CONTEXT_LINES).coerceAtLeast(0)
             vertical.scrollTo((contextualTarget * lineHeightPx).toInt().coerceAtMost(vertical.maxValue))
-        }
+        } else vertical.scrollTo(0)
+    }
+    var revealedFindNavigation by remember(source.id, page.startLine) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(pageKey, fieldLayout, find.selected) {
+        val match = find.selected ?: return@LaunchedEffect
+        if (revealedFindNavigation == pane.navigationSerial) return@LaunchedEffect
+        if (!find.open || match.line != pane.lineIndex || match.column != pane.columnIndex) return@LaunchedEffect
+        val layout = fieldLayout?.takeIf { it.layoutInput.text.text == fieldValue.text } ?: return@LaunchedEffect
+        val offset = (match.offset - page.prefix.length).coerceIn(0, fieldValue.text.length)
+        val cursor = layout.getCursorRect(offset)
+        horizontal.scrollTo((cursor.left - 40f).toInt().coerceAtLeast(0))
+        revealedFindNavigation = pane.navigationSerial
     }
     val currentPageStart = rememberUpdatedState(page.startLine)
     val currentTotalLines = rememberUpdatedState(totalLineCount)
@@ -3292,16 +3448,16 @@ private fun AsmEditableSourcePane(
         definition = if (isDarkCodeTheme()) Color(0xFFFFCB6B) else Color(0xFF8A6100),
         symbol = if (isDarkCodeTheme()) Color(0xFF82AAFF) else Color(0xFF1455A0),
     )
-    val transformation = remember(syntaxColors, state.workspace?.index, source.id, page.startLine) {
+    val transformation = remember(syntaxColors, state.workspace?.index, source.id, page.startLine, page.prefix.length, find.open, find.matches, find.selectedIndex) {
         VisualTransformation { input ->
             TransformedText(
-                asmEditableHighlight(
+                asmHighlightDocumentMatches(asmEditableHighlight(
                     text = input.text,
                     colors = syntaxColors,
                     index = state.workspace?.index,
                     fileId = source.id,
                     pageStartLine = page.startLine,
-                ),
+                ), page.prefix.length, find, Color(0xFFFFC857)),
                 OffsetMapping.Identity,
             )
         }
@@ -3415,6 +3571,7 @@ private fun AsmEditableSourcePane(
                                     state.activateSourcePane(pane.id)
                                     state.redoSourceEdit(source.id)
                                 })
+                                add(ContextMenuItem("Find in this file\t$ASM_MODIFIER_LABEL+F") { find.show() })
                                 add(
                                 ContextMenuItem("Go to Definition\t$ASM_MODIFIER_LABEL+D") {
                                     asmOpenEditableReference(
@@ -3525,14 +3682,6 @@ private fun AsmEditableSourcePane(
                                 }
                                 commandDown && event.key == Key.R -> {
                                     if (!state.busy && !state.previewBusy) onRun?.invoke()
-                                    true
-                                }
-                                commandDown && event.key == Key.DirectionLeft -> {
-                                    state.goBack()
-                                    true
-                                }
-                                commandDown && event.key == Key.DirectionRight -> {
-                                    state.goForward()
                                     true
                                 }
                                 completionVisible && event.key == Key.DirectionDown -> {
@@ -4437,9 +4586,11 @@ private fun AsmScrollableTextPane(
     onBack: () -> Unit,
     onForward: () -> Unit,
     modifier: Modifier = Modifier,
+    externalFocusRequester: FocusRequester? = null,
     content: LazyListScope.() -> Unit,
 ) {
-    val focusRequester = remember { FocusRequester() }
+    val localFocusRequester = remember { FocusRequester() }
+    val focusRequester = externalFocusRequester ?: localFocusRequester
     var isPanning by remember { mutableStateOf(false) }
     var lastPanX by remember { mutableStateOf(0f) }
     var lastPanY by remember { mutableStateOf(0f) }
@@ -4461,14 +4612,6 @@ private fun AsmScrollableTextPane(
                     when {
                         command && event.key == Key.F -> {
                             onFind()
-                            true
-                        }
-                        command && event.key == Key.DirectionLeft -> {
-                            onBack()
-                            true
-                        }
-                        command && event.key == Key.DirectionRight -> {
-                            onForward()
                             true
                         }
                         else -> false

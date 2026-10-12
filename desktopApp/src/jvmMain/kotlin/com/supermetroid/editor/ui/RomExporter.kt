@@ -295,7 +295,16 @@ internal class RomExporter(
             )
         }
         val romData = writePlan.romData
-        val buildBaseParser = RomParser(buildBase)
+        // The generated room backend has already applied GUI conditions/pointers.
+        // Validate the authored manifest against the same source input used by
+        // planning, retaining real source mismatches instead of comparing an edit
+        // with its own output. Final bytes still undergo parity/postflight checks.
+        val validationBase = if (compiledAsmBase?.generatedRoomClaims.orEmpty().isNotEmpty()) {
+            requireNotNull(compiledAsmBase?.roomValidationRomBytes) {
+                "Generated room source is missing its pre-materialization validation input"
+            }
+        } else buildBase
+        val buildBaseParser = RomParser(validationBase)
         val allocationParser = RomParser(romData)
         val freeSpaceAllocator = RomFreeSpaceAllocator(
             romData = romData,
@@ -330,7 +339,8 @@ internal class RomExporter(
         }
         if (preflightErrors.isNotEmpty()) {
             val first = preflightErrors.first()
-            val message = "Export blocked by ${preflightErrors.size} preflight error(s): ${first.message}"
+            val context = first.roomId?.let { "${first.roomName} [\$${it.toString(16).uppercase()}]: " }.orEmpty()
+            val message = "Export blocked by ${preflightErrors.size} preflight error(s): $context${first.message}"
             onLog("ERROR: $message")
             onStatus(message)
             return null
@@ -585,10 +595,10 @@ internal class RomExporter(
         )
     }
 
-    fun export(): String? {
+    fun export(preparedBuild: RomBuildResult? = build()): String? {
         val path = projectFilePath.ifBlank { File(project.romPath).resolveSibling("${File(project.romPath).nameWithoutExtension}.smedit").path }
         val out = com.supermetroid.editor.data.ProjectPaths.forProject(path).romOutput(project)
-        val build = build() ?: return null
+        val build = preparedBuild ?: return null
         try {
             writeBytesAtomically(out, build.resultRom)
         } catch (e: Exception) {

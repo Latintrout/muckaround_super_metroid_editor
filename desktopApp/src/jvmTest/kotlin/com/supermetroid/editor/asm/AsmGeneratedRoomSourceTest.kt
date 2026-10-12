@@ -17,7 +17,7 @@ class AsmGeneratedRoomSourceTest {
         val document = assertNotNull(AsmGeneratedRoomSource.parse(table.renderSource(), "fixture-time"))
         val section = document.sections.single()
         assertEquals(0x91F8, section.roomId)
-        assertEquals("Room $91F8 · source state 2 · PLMs", section.title)
+        assertEquals("Source state 2 · Objects (PLMs)", section.title)
         assertEquals(section.lineIndex, document.definitions[table.label])
         assertTrue(document.definitions.containsKey("${table.label}_End"))
         val pointerLine = document.lines.indexOfLast { it.contains("dw ${table.label}&") }
@@ -31,8 +31,28 @@ class AsmGeneratedRoomSourceTest {
         val document = assertNotNull(AsmGeneratedRoomSource.parse(source, "fixture-time"))
         assertEquals(2, document.sections.size)
         assertTrue(document.sections.all { it.roomId == null })
-        assertEquals("Room bytes 002", document.sectionAt(3)?.title)
+        assertEquals("Unmapped build write", document.sectionAt(3)?.title)
         assertNull(AsmGeneratedRoomSource.parse("; This compilation has no generated room source.\n", "time"))
         assertNull(AsmGeneratedRoomSource.parse("", "time"))
+    }
+
+    @Test
+    fun `room names group sections and raw writes retain addresses without guessing owners`() {
+        val document = assertNotNull(AsmGeneratedRoomSource.parse("""
+            ; @room 91F8 Landing Site
+            ; @section SmeditRoom_91F8_State2_Plms Default · Objects (PLMs)
+            org ${'$'}8F9000
+            SmeditRoom_91F8_State2_Plms:
+                dw ${'$'}0000
+            org ${'$'}83AD68
+            SmeditRoomGraph_018:
+                db ${'$'}FF
+        """.trimIndent(), "test"))
+        assertEquals(listOf("Landing Site", "Other build writes"), document.groups().map { it.title })
+        assertEquals("Bytes at ${'$'}83:AD68", document.sections.last().title)
+        assertNull(document.sections.last().roomId)
+        assertEquals(1, document.groups(query = "landing").size)
+        assertEquals(1, document.groups(query = "Default").single().sections.size)
+        assertTrue(document.groups(query = "missing").isEmpty())
     }
 }

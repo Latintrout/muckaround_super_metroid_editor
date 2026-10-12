@@ -25,7 +25,7 @@ internal sealed interface AsmWorkspaceLocation {
     ) : AsmWorkspaceLocation
     data class Library(val pageId: String, val instructionToken: String?) : AsmWorkspaceLocation
     data class Rom(val view: AsmRomPreviewView) : AsmWorkspaceLocation
-    data class GeneratedRooms(val lineIndex: Int) : AsmWorkspaceLocation
+    data class GeneratedRooms(val lineIndex: Int, val buildWrites: Boolean = false) : AsmWorkspaceLocation
 }
 
 internal sealed interface AsmReferenceExpansionTarget {
@@ -177,8 +177,20 @@ internal class AsmWorkspaceState(
         private set
     var buildReport by mutableStateOf<AsmBuildReport?>(null)
         private set
-    var generatedRoomSource by mutableStateOf<AsmGeneratedRoomSource?>(null)
+    var roomDataSnapshot by mutableStateOf<AsmGeneratedRoomSource?>(null)
         private set
+    var generatedRoomInput by mutableStateOf<AsmGeneratedRoomSource?>(null)
+        private set
+    var showRoomBuildWrites by mutableStateOf(false)
+        private set
+    val generatedRoomSource: AsmGeneratedRoomSource?
+        get() = if (showRoomBuildWrites) generatedRoomInput else roomDataSnapshot
+    var roomDataExpanded by mutableStateOf(false)
+        private set
+    val expandedRoomDataGroups = mutableStateMapOf<String, Boolean>()
+
+    fun toggleRoomDataExpanded() { roomDataExpanded = !roomDataExpanded }
+    fun toggleRoomDataGroup(key: String) { expandedRoomDataGroups[key] = expandedRoomDataGroups[key] != true }
     var generatedRoomLineIndex by mutableStateOf(0)
         private set
     var generatedRoomNavigationSerial by mutableStateOf(0L)
@@ -247,7 +259,7 @@ internal class AsmWorkspaceState(
     val sourceStatusSummary: String
         get() {
             if (browserMode == AsmBrowserMode.GENERATED_ROOMS) {
-                return "Generated rooms · read-only compilation snapshot"
+                return if (showRoomBuildWrites) "Room Data · build writes · last compilation" else "Room Data · last successful build"
             }
             if (browserMode != AsmBrowserMode.SOURCE) return ""
             val index = workspace?.index ?: return ""
@@ -396,11 +408,17 @@ internal class AsmWorkspaceState(
         val changedProject = boundProjectFilePath != projectFilePath
         boundProjectFilePath = projectFilePath
         boundProjectEnabled = enabled
-        if (changedProject) clearEditSessions()
+        if (changedProject) {
+            clearEditSessions()
+            roomDataExpanded = false
+            expandedRoomDataGroups.clear()
+            showRoomBuildWrites = false
+        }
         if (!enabled || projectFilePath.isBlank()) {
             projectWorkspace = null
             buildReport = null
-            generatedRoomSource = null
+            roomDataSnapshot = null
+            generatedRoomInput = null
             if (browserMode == AsmBrowserMode.GENERATED_ROOMS) showSourceBrowser()
             if (workspaceKind == AsmWorkspaceKind.PROJECT) showReferenceWorkspace()
             return
@@ -411,8 +429,11 @@ internal class AsmWorkspaceState(
 
     suspend fun refreshBuildReport() {
         val projectFilePath = boundProjectFilePath
-        generatedRoomSource = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
+        generatedRoomInput = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
             withContext(Dispatchers.IO) { buildArtifactRepository.loadGeneratedRooms(projectFilePath) }
+        }
+        roomDataSnapshot = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
+            withContext(Dispatchers.IO) { buildArtifactRepository.loadRoomData(projectFilePath) }
         }
         buildReport = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
             withContext(Dispatchers.IO) {
@@ -486,12 +507,18 @@ internal class AsmWorkspaceState(
         navigationSerial++
     }
 
-    fun openGeneratedRooms(lineIndex: Int = 0, addToHistory: Boolean = true) {
+    fun openGeneratedRooms(lineIndex: Int = 0, addToHistory: Boolean = true, buildWrites: Boolean = showRoomBuildWrites) {
         if (!hasProjectWorkspace) return
         if (addToHistory) rememberCurrentLocation()
         restoreWorkspaceKind(AsmWorkspaceKind.PROJECT)
         browserMode = AsmBrowserMode.GENERATED_ROOMS
+        showRoomBuildWrites = buildWrites
+        roomDataExpanded = true
+        if (buildWrites) expandedRoomDataGroups["build-writes"] = true
         generatedRoomLineIndex = lineIndex.coerceIn(0, (generatedRoomSource?.lines?.lastIndex ?: 0).coerceAtLeast(0))
+        generatedRoomSource?.sectionAt(generatedRoomLineIndex)?.let { section ->
+            expandedRoomDataGroups[roomDataGroupKey(section.roomId, buildWrites)] = true
+        }
         generatedRoomNavigationSerial++
         if (addToHistory) forwardStack.clear()
     }
@@ -1352,7 +1379,7 @@ internal class AsmWorkspaceState(
         AsmBrowserMode.ASSETS -> selectedAssetPath?.let { AsmWorkspaceLocation.Asset(it, workspaceKind) }
         AsmBrowserMode.LIBRARY -> AsmWorkspaceLocation.Library(selectedLibraryPageId, selectedInstructionToken)
         AsmBrowserMode.ROM -> AsmWorkspaceLocation.Rom(romPreviewView)
-        AsmBrowserMode.GENERATED_ROOMS -> AsmWorkspaceLocation.GeneratedRooms(generatedRoomLineIndex)
+        AsmBrowserMode.GENERATED_ROOMS -> AsmWorkspaceLocation.GeneratedRooms(generatedRoomLineIndex, showRoomBuildWrites)
     }
 
     private fun rememberCurrentLocation() {
@@ -1385,7 +1412,7 @@ internal class AsmWorkspaceState(
                 else openLibraryGuide(location.pageId, addToHistory = false)
             }
             is AsmWorkspaceLocation.Rom -> selectRomPreviewView(location.view, addToHistory = false)
-            is AsmWorkspaceLocation.GeneratedRooms -> openGeneratedRooms(location.lineIndex, addToHistory = false)
+            is AsmWorkspaceLocation.GeneratedRooms -> openGeneratedRooms(location.lineIndex, addToHistory = false, buildWrites = location.buildWrites)
         }
     }
 

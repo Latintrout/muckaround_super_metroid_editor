@@ -30,6 +30,36 @@ class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
     @Test
+    fun `changed selectors and reordered states keep source validation and final room data consistent`() {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        for (reorder in listOf(false, true)) {
+            val project = sourceProject(fixture)
+            val edits = project.getOrCreateRoom(0x91F8)
+            val states = edits.ensureStateManifest(parser)
+            if (reorder) {
+                val first = edits.states.removeAt(0)
+                edits.states.add(1, first)
+                edits.stateGraphChanged = true
+            } else {
+                states[2].condition = states[2].condition.copy(argument = 2)
+                states[2].conditionChanged = true
+            }
+            val oracle = assertNotNull(RomExporter(ProjectFileService.snapshotProject(project), parser).build())
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path),
+                logs.joinToString("\n"))
+            assertTrue(result.sourceRoomPatched > 0)
+            assertEquals(asmGeneratedParitySha256(oracle.resultRom), asmGeneratedParitySha256(result.resultRom))
+            val data = assertNotNull(AsmBuildArtifactRepository().loadRoomData(fixture.projectFile.path))
+            assertTrue(data.isRoomDataSnapshot)
+            assertEquals(parser.roomCatalog.rooms.size, data.groups().size)
+            assertEquals("Landing Site", data.groups().single { it.roomId == 0x91F8 }.title)
+        }
+    }
+
+    @Test
     fun `PLM growth sharing selected-state shrink and empty lists compile with symbolic pointers`() {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)
@@ -171,6 +201,8 @@ class AsmBuildPipelineIntegrationTest {
         assertContentEquals(fixture.rom, fixture.romFile.readBytes())
         assertContentEquals(fixture.rom, File(output).readBytes())
         assertTrue(File(paths.asmBuild, "symbols.sym").isFile)
+        val roomData = assertNotNull(AsmBuildArtifactRepository().loadRoomData(renamedProject.path))
+        assertEquals(parser.roomCatalog.rooms.size, roomData.groups().size, "unchanged builds must also publish all room data")
         val reopened = ProjectFileService.loadProject(renamedProject)
         assertEquals(fixture.romFile.absolutePath, reopened.romPath)
         ProjectLifecycle.verify(reopened, fixture.romFile)

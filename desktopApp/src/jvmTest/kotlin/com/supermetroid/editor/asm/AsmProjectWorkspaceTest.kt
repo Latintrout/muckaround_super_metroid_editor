@@ -431,6 +431,8 @@ class AsmProjectWorkspaceTest {
             projectFile.path, ByteArray(0), emptyList(), "fixture",
             "; Generated room\nSmeditRoom_91F8_State0_Plms:\n    dw ${'$'}0000\n",
         )
+        artifacts.publishRoomData(projectFile.path,
+            "${AsmRoomDataSnapshot.MARKER}\nSmeditRoom_91F8_State0_Plms:\n    dw ${'$'}0000\n")
         val state = AsmWorkspaceState(projectRepository = repository, buildArtifactRepository = artifacts)
         state.bindProject(projectFile.path, enabled = true)
         state.openSource("bank_80.asm", 3)
@@ -438,6 +440,10 @@ class AsmProjectWorkspaceTest {
         val original = state.sourceEditText("bank_80.asm")
         state.updateSourceEditText("bank_80.asm", "$original\n; unsaved bank work")
         state.openGeneratedRooms(1)
+        assertTrue(state.roomDataExpanded)
+        assertTrue(state.expandedRoomDataGroups[roomDataGroupKey(0x91F8, false)] == true)
+        state.toggleRoomDataExpanded()
+        assertFalse(state.roomDataExpanded, "selection must not force a collapsed tree open on every recomposition")
         assertEquals(AsmBrowserMode.GENERATED_ROOMS, state.browserMode)
         assertFalse(state.isProjectSourceEditable)
         assertEquals(AsmWorkspaceLocation.GeneratedRooms(1), state.locationSnapshot())
@@ -450,10 +456,18 @@ class AsmProjectWorkspaceTest {
         assertTrue(state.sourceEditText("bank_80.asm").endsWith("; unsaved bank work"))
         state.goForward()
         assertEquals(AsmWorkspaceLocation.GeneratedRooms(1), state.locationSnapshot())
+        state.openGeneratedRooms(2, buildWrites = true)
+        assertTrue(state.showRoomBuildWrites)
+        assertEquals(AsmWorkspaceLocation.GeneratedRooms(2, true), state.locationSnapshot())
+        state.goBack()
+        assertFalse(state.showRoomBuildWrites)
+        assertEquals(AsmWorkspaceLocation.GeneratedRooms(1), state.locationSnapshot())
         state.openGeneratedRooms(Int.MAX_VALUE)
         assertEquals(state.generatedRoomSource?.lines?.lastIndex, state.generatedRoomLineIndex)
         state.bindProject(File(tempDirectory, "Other.smedit").path, enabled = false)
         assertTrue(state.generatedRoomSource == null, "snapshots must not leak between projects")
+        assertTrue(state.generatedRoomInput == null)
+        assertFalse(state.roomDataExpanded)
         assertEquals(AsmBrowserMode.SOURCE, state.browserMode)
     }
 

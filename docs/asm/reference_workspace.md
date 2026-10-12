@@ -230,8 +230,21 @@ two-axis trackpads scroll normally; **Shift + mouse wheel** scrolls editable
 source horizontally, and holding the middle mouse button and dragging pans both
 axes in read-only canvases. Mouse back/forward buttons, `Alt+Left` / `Alt+Right`, and
 `Cmd/Ctrl+[` / `Cmd/Ctrl+]` follow navigation history, including transitions
-between source and Library pages. `Cmd/Ctrl+F` moves focus to the current
-Source/Assets/Library search field.
+between source and Library pages. **Cmd/Ctrl+F** in a source pane opens its compact
+**Find in this file** control; the magnifying glass in that pane's header does the
+same. Search covers the whole document (including unsaved edits, comments, and
+off-screen pages), highlights literal matches, and shows a match count.
+**Enter / Shift+Enter** or the arrow buttons cycle matches with wraparound;
+**Aa** toggles case sensitivity and **Escape** closes Find and returns focus to
+the text. Each split pane keeps its own find session. Original source and Room
+Data support the same control. **Cmd/Ctrl+Shift+F** from a source pane focuses the
+broader sidebar search; **Cmd/Ctrl+F** while the sidebar is focused stays there.
+Sidebar search includes room names/IDs as well as sources, labels, and addresses.
+**Cmd+Left/Right** on macOS (**Ctrl+Left/Right** on Windows/Linux) follows ASM
+Back/Forward history throughout the sidebar and canvas, including while Find,
+sidebar search, or a Library/header control has focus. Shift-modified arrows
+remain native text-selection commands. History handling sits above individual
+text fields so adding a focused control cannot silently disable navigation.
 
 The Library is bundled and remains available before the external disassembly is
 downloaded. Its ten SMEDIT-authored lessons are intentionally a field guide,
@@ -475,13 +488,40 @@ not unsaved/current GUI edits; rebuild to refresh it. It is a disposable build
 artifact, not an editable project module. Cached prepared builds restore their
 matching source and symbol report.
 
-In **ASM → Source → Project → Generated rooms**, a read-only snapshot now shows
-the emitted source with the same syntax colors, selectable text, scrollbars and
-navigation history as the source browser. Select a PLM section to follow its
-symbolic references or use **Edit room** to return to its GUI owner. The state
-number is explicitly the original **source state** identity, not a new display
-ordinal. Raw byte-overlay sections do not guess an individual room owner.
-Generated text never enters editable buffers, source replacement or modules.
+The project source sidebar lists **Custom ASM** (your modules, with **+ Module**),
+then **Room Data**, followed by **Banks** and **Build & symbols**. Room Data uses
+the same theme-colored section heading and retains its expand/collapse control.
+
+In **ASM → Source → Project (editable) → Room Data**, a collapsible tree groups
+read-only listings by the same room names used in the room list. Each room exposes
+its annotated header, runtime-state fields and objects (PLMs), including object
+names, tile coordinates, parameters, shared-list notes and terminators. These
+listings are decoded from the **last successfully validated ROM build**, not
+editable assembler inputs. They are published automatically to
+`smedit/asm/build/room-data.asm` on Build/Run/export in ASM mode, even without GUI
+room edits. Project-created-room support remains deferred; a successful build of
+a project with added rooms clears this catalog rather than presenting old data
+as that build's room list. A failed build retains the prior successful snapshot.
+The room inventory comes from the loaded project's input catalog, while all
+displayed values are decoded from the build. This retains stable room names and
+IDs even when generated state redirects would hide a room from heuristic ROM
+discovery (notably Landing Site). Build again to refresh older incomplete snapshots.
+The hierarchy uses distinct indentation for Room Data, rooms, and state/object
+sections; typing **Landing Site** or **91F8** in the sidebar narrows to that room.
+
+**Build writes**, collapsed separately beneath Room Data, retains the actual
+`generated-rooms.asm` input from the last successful source compilation. Typed PLM
+sections group under their room names; unmapped raw writes appear under **Other
+build writes** with SNES addresses, not meaningless numbered "Room bytes" entries.
+No room ownership is inferred from proximity or a shared byte value. Source-state
+numbers in generated PLM labels remain original source identities; runtime-state
+order in the decoded catalog reflects the built ROM instead.
+
+Both views have syntax colors, selectable multi-line text with real newline
+characters for copy/paste, scrollbars, symbolic navigation and Back/Forward.
+**Edit room** returns to the owning GUI room. Search includes room names, section
+titles and generated labels. Generated text never enters editable buffers, source
+replacement or modules. Expanding/collapsing the room tree does not modify source.
 
 The compact **Format checks** action explains the supported six-byte PLM format
 and validation limits. Structural/ownership failures still appear in the build
@@ -489,10 +529,22 @@ panel, including failures after Asar succeeds: planning/export failures retain
 their actual reason instead of only a generic build-failed message. Existing
 Asar errors keep their clickable source locations. No claim is made that
 arbitrary engine-layout edits can be detected.
-The snapshot belongs to a successful *source compilation*, not necessarily a
-successful final export, and is not live GUI data. It remains inspectable after
-source edits or a later failed compilation. A successful compilation with no
-generated input clears it, including a preliminary pass or ROM-backend fallback.
+The **Build writes** snapshot belongs to a successful *source compilation*, not
+necessarily a successful final export, and is not live GUI data. It remains
+inspectable after source edits or a later failed compilation. A successful
+compilation with no generated input clears it, including a preliminary pass or
+ROM-backend fallback. Such a preliminary compilation does not clear the separate
+last-successful-build **Room Data** catalog. `$00`/`$FF` in raw writes are data,
+not error indicators; their meaning depends on the specific resource.
+
+After GUI room data has been compiled, manifest preflight uses the retained
+**pre-materialization source-built ROM**. Revalidating original state identities
+against an already-rewritten selector graph falsely rejected condition edits and
+reordered states. The initial planning pass, genuine source-identity checks,
+ownership conflicts, exact final-ROM parity and postflight structural checks
+remain in force; this is not a blanket validation bypass. Prepared cache copies
+retain their own immutable validation input. Room-specific preflight errors also
+include the room name/address for context.
 
 The real-ROM tests create disposable projects from the explicit fixture contract;
 they never read or modify a user's Sandbox. They cover all-state list growth,
