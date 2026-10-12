@@ -162,20 +162,15 @@ class AsmProjectCompilerTest {
     }
 
     @Test
-    fun `saved Sandbox jump edit compiles to owned bank 90 bytes when local fixtures exist`() {
-        val projectFile = findWorkspaceFile(
-            "projects/Super Metroid Sandbox/Super Metroid Sandbox.smedit"
-        ) ?: return
-        val rom = File(projectFile.parentFile, "Super Metroid Sandbox.smc").takeIf(File::isFile) ?: return
-        val sidecar = File(projectFile.parentFile, "Super Metroid Sandbox_smedit/asm")
-        val sourceRoot = File(sidecar, "workspace/src")
-        if (!File(sourceRoot, "bank_90.asm").isFile) return
-        if ("bank_90.asm" !in AsmProjectWorkspaceRepository().sourceOverrideFileIds(projectFile.absolutePath)) return
-        // This is an optional developer-owned live project, not a checked-in
-        // immutable fixture. Deliberately malformed source used to exercise the
-        // editor diagnostics does not satisfy this compilation test's premise.
-        if (AsmSourceLinter.lintTree(sourceRoot).any { it.severity == AsmDiagnosticSeverity.ERROR }) return
-        val loadedRom = rom.readBytes()
+    fun `saved jump edit compiles with separate authored asset room and patch ownership`() {
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val projectFile = fixture.projectFile
+        val sourceRoot = File(fixture.workspace.workingDirectory, "src")
+        val originalSource = File(sourceRoot, "bank_90.asm").readText()
+        val editedSource = originalSource.replace("dw \$04E0*!SPF", "dw \$0600*!SPF")
+        assertTrue(editedSource != originalSource)
+        AsmProjectWorkspaceRepository().saveSource(projectFile.absolutePath, "bank_90.asm", editedSource)
+        val loadedRom = fixture.rom
         val headerSize = if (loadedRom.size % 0x8000 == 0x200) 0x200 else 0
 
         val compiled = AsmProjectCompiler().compile(projectFile.absolutePath, loadedRom)
@@ -187,10 +182,10 @@ class AsmProjectCompilerTest {
         assertTrue(0x081EC0 in ownedOffsets, "normal jump sub-speed high byte must be source-owned")
         assertTrue(compiled.assemblerVersion.contains("Asar 1.81"))
 
-        val workspace = AsmProjectWorkspaceRepository().load(projectFile.absolutePath) ?: return
+        val workspace = requireNotNull(AsmProjectWorkspaceRepository().loadForBuild(projectFile.absolutePath))
         val asset = AsmAssetManifest.loadBundled().firstOrNull { range ->
             range.length > 0 && File(workspace.workingDirectory, "data/${range.path}").isFile
-        } ?: return
+        } ?: error("Fixture has no source assets")
         val assetFile = File(workspace.workingDirectory, "data/${asset.path}")
         val override = assetFile.readBytes()
         override[0] = (override[0].toInt() xor 1).toByte()
@@ -201,6 +196,15 @@ class AsmProjectCompilerTest {
             pcOffset = asset.pcOffset,
             bytes = byteArrayOf(override[0]),
         )
+        val roomPc = 0x2FFFF0
+        val roomByte = 0x5A.toByte()
+        val roomClaim = AsmGeneratedRoomClaim(
+            owner = ASM_ROOM_GRAPH_OWNER,
+            label = "Compiler integration room graph",
+            pcOffset = roomPc,
+            bytes = byteArrayOf(roomByte),
+        )
+        val roomSnes = checkNotNull(pcToSnesLoRom(roomPc))
         val materialized = AsmProjectCompiler().compile(
             projectFile.absolutePath,
             loadedRom,
@@ -227,6 +231,13 @@ class AsmProjectCompilerTest {
                     skippedWrites = 0,
                 )
             },
+            roomMaterialization = AsmRoomMaterialization(
+                source = "org \$${roomSnes.toString(16).uppercase()}\ndb \$5A\n",
+                claims = listOf(roomClaim),
+                roomIds = setOf("91F8"),
+                eligibleWrites = 1,
+                skippedWrites = 0,
+            ),
             referenceRomBody = compiled.referenceRomBody,
         )
         assertEquals(compiled.referenceRomSha256, materialized.referenceRomSha256)
@@ -239,15 +250,12 @@ class AsmProjectCompilerTest {
         assertTrue(materialized.sourceOwnedRanges.none {
             patchClaim.pcOffset in it.pcOffset until it.pcOffset + it.length
         })
+        assertEquals(roomByte, materialized.romBytes[headerSize + roomPc])
+        assertEquals(listOf(roomClaim), materialized.generatedRoomClaims)
+        assertEquals(setOf("91F8"), materialized.generatedRoomIds)
+        assertTrue(materialized.sourceOwnedRanges.none {
+            roomPc in it.pcOffset until it.pcOffset + it.length
+        })
     }
 
-    private fun findWorkspaceFile(relativePath: String): File? {
-        var cursor: File? = File(System.getProperty("user.dir")).absoluteFile
-        repeat(5) {
-            val candidate = cursor?.resolve(relativePath)
-            if (candidate?.isFile == true) return candidate
-            cursor = cursor?.parentFile
-        }
-        return null
-    }
 }

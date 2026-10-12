@@ -38,8 +38,10 @@ class AsmProjectWorkspaceTest {
 
         val created = repository.initialize(projectFile.absolutePath, reference)
 
-        assertTrue(File(created.root, "original/src/bank_80.asm").isFile)
-        assertTrue(File(created.root, "workspace/src/bank_80.asm").isFile)
+        assertTrue(File(created.originalDirectory, "src/bank_80.asm").isFile)
+        assertTrue(File(created.workingDirectory, "src/bank_80.asm").isFile)
+        assertEquals(File(tempDirectory, "asm"), created.root)
+        assertEquals(File(tempDirectory, "smedit/asm/workspace"), created.workingDirectory)
         assertEquals(emptySet<String>(), created.modifiedFileIds)
 
         val editedText = originalText.replace("RTS", "NOP\n    RTS")
@@ -48,7 +50,7 @@ class AsmProjectWorkspaceTest {
         assertEquals(originalText, referenceSource.readText(), "project edits must never mutate the global reference")
         assertEquals(editedText, File(saved.workingDirectory, "src/bank_80.asm").readText())
         assertEquals(editedText, File(saved.root, "overrides/src/bank_80.asm").readText())
-        assertTrue(File(saved.root, ".gitignore").readText().contains("/workspace/"))
+        assertEquals("*\n", File(tempDirectory, "smedit/.gitignore").readText())
         assertEquals(setOf("bank_80.asm"), saved.modifiedFileIds)
         assertEquals(setOf("bank_80.asm"), repository.sourceOverrideFileIds(projectFile.absolutePath))
         val reopened = requireNotNull(repository.load(projectFile.absolutePath))
@@ -75,7 +77,7 @@ class AsmProjectWorkspaceTest {
         assertThrows<IllegalArgumentException> {
             repository.saveSource(projectFile.absolutePath, "../escaped.asm", "nope")
         }
-        assertFalse(File(tempDirectory, "Safe_smedit/asm/workspace/escaped.asm").exists())
+        assertFalse(File(tempDirectory, "smedit/asm/workspace/escaped.asm").exists())
     }
 
     @Test
@@ -88,8 +90,8 @@ class AsmProjectWorkspaceTest {
         assertThrows<IllegalArgumentException> {
             repository.initialize(projectFile.absolutePath, reference)
         }
-        assertFalse(File(tempDirectory, "Broken_smedit/asm").exists())
-        assertTrue(File(tempDirectory, "Broken_smedit").listFiles().orEmpty().none { it.name.startsWith(".asm.installing-") })
+        assertFalse(File(tempDirectory, "smedit/asm").exists())
+        assertTrue(File(tempDirectory, "smedit").listFiles().orEmpty().none { it.name.startsWith(".asm.installing-") })
     }
 
     @Test
@@ -114,13 +116,13 @@ class AsmProjectWorkspaceTest {
         val reference = fakeReference(listOf(range))
         val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Repair.smedit").apply { writeText("{}") }
-        val incomplete = File(tempDirectory, "Repair_smedit/asm").apply { mkdirs() }
+        val incomplete = File(tempDirectory, "smedit/asm").apply { mkdirs() }
         File(incomplete, "user-notes.txt").writeText("preserve me")
 
         val repaired = repository.initialize(projectFile.absolutePath, reference)
 
         assertTrue(File(repaired.workingDirectory, "src/main.asm").isFile)
-        val backup = File(tempDirectory, "Repair_smedit").listFiles().orEmpty()
+        val backup = File(tempDirectory, "smedit").listFiles().orEmpty()
             .single { it.name.startsWith(".asm.incomplete-backup-") }
         assertEquals("preserve me", File(backup, "user-notes.txt").readText())
     }
@@ -131,7 +133,7 @@ class AsmProjectWorkspaceTest {
         val reference = fakeReference(listOf(range))
         val repository = AsmProjectWorkspaceRepository(listOf(range), starterModules = emptyList())
         val projectFile = File(tempDirectory, "Portable.smedit").apply { writeText("{}") }
-        val root = File(tempDirectory, "Portable_smedit/asm")
+        val root = File(tempDirectory, "asm")
         File(root, "overrides/src").mkdirs()
         val overrideText = "org ${'$'}808000\nBoot:\n    NOP\n    RTS\n"
         File(root, "overrides/src/bank_80.asm").writeText(overrideText)
@@ -191,6 +193,43 @@ class AsmProjectWorkspaceTest {
         assertFalse(File(deleted.root, "modules/.disabled").exists())
         assertEquals(listOf(renamedId), requireNotNull(repository.load(projectFile.absolutePath)).projectModuleFileIds)
         assertEquals(setOf(renamedId), repository.sourceOverrideFileIds(projectFile.absolutePath))
+    }
+
+    @Test
+    fun `cache repair preserves authored overrides modules order and disabled state`() {
+        val reference = fakeReference(emptyList())
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val projectFile = File(tempDirectory, "Repair authored.smedit").apply { writeText("{}") }
+        val initial = repository.initialize(projectFile.path, reference)
+        val (created, moduleId) = repository.createModule(projectFile.path, "keep_me")
+        repository.setModuleEnabled(projectFile.path, moduleId, enabled = false)
+        val override = File(initial.originalDirectory, "src/bank_80.asm").readText().replace("RTS", "NOP\n    RTS")
+        repository.saveSource(projectFile.path, "bank_80.asm", override)
+        val authored = created.root.walkTopDown().filter(File::isFile)
+            .associate { it.relativeTo(created.root).path to it.readBytes().toList() }
+        // Simulate moving only the portable project inputs to another machine.
+        check(requireNotNull(repository.cacheFor(projectFile.path)).deleteRecursively())
+        val repaired = repository.initialize(projectFile.path, reference)
+        assertEquals(authored, repaired.root.walkTopDown().filter(File::isFile)
+            .associate { it.relativeTo(repaired.root).path to it.readBytes().toList() })
+        assertEquals(override, File(repaired.workingDirectory, "src/bank_80.asm").readText())
+        assertEquals(setOf(moduleId), repaired.disabledProjectModuleFileIds)
+    }
+
+    @Test
+    fun `generated module mirror never resurrects a removed authored module`() {
+        val reference = fakeReference(emptyList())
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val projectFile = File(tempDirectory, "No resurrection.smedit").apply { writeText("{}") }
+        repository.initialize(projectFile.path, reference)
+        val (workspace, _) = repository.createModule(projectFile.path, "temporary_hook")
+        val mirror = File(workspace.workingDirectory, "src/project/temporary_hook.asm")
+        assertTrue(mirror.exists())
+        check(File(workspace.root, "modules").deleteRecursively())
+        val loaded = requireNotNull(repository.load(projectFile.path))
+        assertEquals(emptyList<String>(), loaded.projectModuleFileIds)
+        assertFalse(mirror.exists())
+        assertFalse(File(workspace.root, "modules/temporary_hook.asm").exists())
     }
 
     @Test
@@ -379,6 +418,43 @@ class AsmProjectWorkspaceTest {
         assertEquals(setOf("bank_80.asm"), state.unsavedSourceFileIds)
         assertTrue(state.sourceEditText("bank_80.asm").contains("NOP"))
         assertEquals(emptySet<String>(), state.projectModifiedFileIds)
+    }
+
+    @Test
+    fun `generated room navigation is read only and preserves source history and buffers`() = runBlocking {
+        val reference = fakeReference(emptyList())
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val projectFile = File(tempDirectory, "Generated.smedit").apply { writeText("{}") }
+        repository.initialize(projectFile.path, reference)
+        val artifacts = AsmBuildArtifactRepository(repository)
+        artifacts.publishSuccess(
+            projectFile.path, ByteArray(0), emptyList(), "fixture",
+            "; Generated room\nSmeditRoom_91F8_State0_Plms:\n    dw ${'$'}0000\n",
+        )
+        val state = AsmWorkspaceState(projectRepository = repository, buildArtifactRepository = artifacts)
+        state.bindProject(projectFile.path, enabled = true)
+        state.openSource("bank_80.asm", 3)
+        val sourceLocation = state.locationSnapshot()
+        val original = state.sourceEditText("bank_80.asm")
+        state.updateSourceEditText("bank_80.asm", "$original\n; unsaved bank work")
+        state.openGeneratedRooms(1)
+        assertEquals(AsmBrowserMode.GENERATED_ROOMS, state.browserMode)
+        assertFalse(state.isProjectSourceEditable)
+        assertEquals(AsmWorkspaceLocation.GeneratedRooms(1), state.locationSnapshot())
+        assertTrue(state.workspace?.index?.file(AsmGeneratedRoomSource.FILE_NAME) == null)
+        state.updateSourceEditText(AsmGeneratedRoomSource.FILE_NAME, "must not become an editable buffer")
+        assertEquals(setOf("bank_80.asm"), state.unsavedSourceFileIds)
+        state.goBack()
+        assertEquals(sourceLocation, state.locationSnapshot())
+        assertTrue(state.isProjectSourceEditable)
+        assertTrue(state.sourceEditText("bank_80.asm").endsWith("; unsaved bank work"))
+        state.goForward()
+        assertEquals(AsmWorkspaceLocation.GeneratedRooms(1), state.locationSnapshot())
+        state.openGeneratedRooms(Int.MAX_VALUE)
+        assertEquals(state.generatedRoomSource?.lines?.lastIndex, state.generatedRoomLineIndex)
+        state.bindProject(File(tempDirectory, "Other.smedit").path, enabled = false)
+        assertTrue(state.generatedRoomSource == null, "snapshots must not leak between projects")
+        assertEquals(AsmBrowserMode.SOURCE, state.browserMode)
     }
 
     private fun fakeReference(ranges: List<AsmAssetRange>): AsmReferenceWorkspace {

@@ -141,10 +141,15 @@ never be silently omitted from an export.
     plans the normal semantic-edit transaction. Fixed-range editor writes that
     fit wholly inside one known `incbin` are staged into temporary project
     `data/` overrides and assembled into the source base. They appear in ROM
-    ownership as `asm-asset:<path>`. Inline ASM data, ambiguous aliases, and
-    relocated/allocated writes remain in the normal post-compile transaction.
-    SMEDIT requires the staged and unstaged routes to produce the same final ROM
-    hash before export succeeds. Patches, conflict checks, validation, and
+    ownership as `asm-asset:<path>`. Inline ASM data and ambiguous aliases remain
+    in the normal post-compile transaction. Existing-room edits now have an
+    additional atomic generated-ASM backend: the proven room exporter first
+    plans the complete final graph, including variable-sized allocations and
+    every pointer update, and SMEDIT assembles that exact graph before export.
+    Project-created rooms retain the ROM backend until they have stable source
+    identities independent from their preview and allocated room IDs. SMEDIT
+    requires the staged and unstaged routes to produce the same final semantic
+    ROM hash before export succeeds. Patches, conflict checks, validation, and
     atomic output remain shared with Loaded ROM mode.
     The ROM preview uses the same selection and performs the same build without
     writing an output file.
@@ -266,14 +271,15 @@ the reference to a `.smedit` project, or commit downloaded source/assets to this
 repository. Metadata retains only the ROM display name, normalized size, and
 SHA-256 fingerprint.
 
-An opted-in project's files live beside the project at
-`<project-name>_smedit/asm/`. `original/` is an immutable, offline snapshot of
+An opted-in project's authored files live in `asm/` at the project root; generated
+files live in `smedit/asm/`. See [project layout and manual reorganization](../project/project_format.md#project-root-and-opening-workflow).
+Within the generated cache, `original/` is an immutable, offline snapshot of
 the pinned source and ROM-derived assets at opt-in time; `workspace/` is the
 editable tree that future compilation will consume. Both generated trees are
-ignored by the sidecar's own `.gitignore`; intentionally saved source changes are
-mirrored under `overrides/src/`, which is small, reviewable, and suitable for
+ignored by the cache's own `.gitignore`; intentionally saved source changes are
+mirrored under `asm/overrides/src/`, which is small, reviewable, and suitable for
 source control. A recreated local tree reapplies those overrides automatically.
-Standalone project-authored routines and tables live under `modules/`, beside an
+Standalone project-authored routines and tables live under `asm/modules/`, beside an
 explicit `.order` file and, when needed, a small `.disabled` manifest. Names and
 descriptions are portable metadata comments in the module itself. Modules appear
 first in the Project Source tree and can be created, configured, disabled,
@@ -284,10 +290,10 @@ until the user explicitly enables it.
 At build time SMEDIT creates a reserved gateway that includes those modules after
 the vanilla source and before generated patch backends. Disabled modules remain
 editable and retain their position, but are omitted from the gateway and source
-validation until re-enabled. Both `modules/` and
-`overrides/src/` are portable authored inputs; only their generated mirrors under
-`workspace/src/project/` are ignored.
-The ignored `build/` directory retains the latest Asar log and WLA symbol map so
+validation until re-enabled. Both `asm/modules/` and
+`asm/overrides/src/` are portable authored inputs; their generated mirrors under
+`smedit/asm/workspace/src/` are ignored and never treated as source authority.
+The ignored `smedit/asm/build/` directory retains the latest Asar log and WLA symbol map so
 compiled addresses and diagnostics remain available to the ASM workspace. These
 are reproducible local products, never project-authored source.
 The `.smedit` JSON records that ASM mode is enabled, its source revision, and the
@@ -413,7 +419,7 @@ first pass instead of assembling that same baseline twice.
 Compiled bases also use bounded, session-local content-addressed caches. Their
 keys contain the SMEDIT compiler-contract version, loaded-ROM identity, exact
 Asar binary and version, immutable or compiled reference input, editable
-`src/`/`data/` trees, and every generated source-asset and patch claim. An exact
+`src/`/`data/` trees, and every generated source-asset, room, and patch claim. An exact
 project/source match can reuse the already prepared base and avoid both Asar and
 the preliminary materialization-planning pass. A change handled only by the ROM
 patch backend misses that whole-project shortcut but still reuses both compiled
@@ -434,9 +440,104 @@ injection, inline source data, crossings, and intentional aliases are never
 guessed. The working sidecar is not rewritten: overrides exist only in the clean
 temporary build tree. Generated ranges are excluded from authored-source
 ownership, reintroduced as `ASM_ASSET`/`asm-asset:<path>` claims, and the final
-ROM must match the pre-materialization plan byte for byte. Unsupported domains
+ROM must match the pre-materialization plan except for the derived checksum
+bytes described below. Unsupported domains
 therefore retain the proven post-compile behavior instead of blocking source
-mode or being silently reclassified.
+mode or being silently reclassified. Existing-room graphs graduate atomically
+rather than write-by-write: generated source owns all planned room bytes or
+none. The initial implementation is deliberately byte-faithful to the existing
+exporter so it can prove identical semantic ROM output before individual
+resources become typed label-driven tables. Asar's four derived internal
+checksum/complement bytes are the only exclusion from that parity hash; all
+semantic bytes remain exact.
+
+The first typed resource is now a PLM list and its room-state references.
+Reachable, edited lists in an existing selector graph emit readable `dw`/`db`
+records under names such as `SmeditRoom_91F8_State1_Plms`. State pointers use
+`dw SmeditRoom_91F8_State1_Plms&$FFFF`, so Asar resolves the relationship.
+Shared pointers emit one table; equal contents at distinct pointers remain
+distinct resources. Complete table/pointer ranges are claimed, including bytes
+unchanged by the edit, and conflicting source/patch ownership blocks promotion.
+The emitter verifies the zero terminator, field widths, and bank-$8F placement,
+and asserts the compiled list size. Explicit data primitives avoid inheriting
+an edited upstream macro's layout.
+
+The existing room allocator still selects placements, and the original exporter
+still provides the exact-output oracle. Other room resources, including rewritten
+selector graphs, retain the atomic byte backend. Project-created rooms and
+allocations beyond the compiled source ROM retain the ROM backend. This pilot
+therefore establishes symbolic PLM references without claiming that Asar now
+chooses all room allocations. The GUI model remains authoritative.
+
+After compilation, `smedit/asm/build/generated-rooms.asm` retains the
+generated input for inspection beside `symbols.sym`. It describes that compilation,
+not unsaved/current GUI edits; rebuild to refresh it. It is a disposable build
+artifact, not an editable project module. Cached prepared builds restore their
+matching source and symbol report.
+
+In **ASM → Source → Project → Generated rooms**, a read-only snapshot now shows
+the emitted source with the same syntax colors, selectable text, scrollbars and
+navigation history as the source browser. Select a PLM section to follow its
+symbolic references or use **Edit room** to return to its GUI owner. The state
+number is explicitly the original **source state** identity, not a new display
+ordinal. Raw byte-overlay sections do not guess an individual room owner.
+Generated text never enters editable buffers, source replacement or modules.
+
+The compact **Format checks** action explains the supported six-byte PLM format
+and validation limits. Structural/ownership failures still appear in the build
+panel, including failures after Asar succeeds: planning/export failures retain
+their actual reason instead of only a generic build-failed message. Existing
+Asar errors keep their clickable source locations. No claim is made that
+arbitrary engine-layout edits can be detected.
+The snapshot belongs to a successful *source compilation*, not necessarily a
+successful final export, and is not live GUI data. It remains inspectable after
+source edits or a later failed compilation. A successful compilation with no
+generated input clears it, including a preliminary pass or ROM-backend fallback.
+
+The real-ROM tests create disposable projects from the explicit fixture contract;
+they never read or modify a user's Sandbox. They cover all-state list growth,
+selected-state growth and shrinkage with copy-on-write, empty lists, symbolic
+addresses, combined room/graphics/patch output, and cache reuse. Synthetic tests
+cover ownership conflicts, copier headers, bank boundaries, unsupported allocation
+space, new-room fallback, and missing terminators. The packaged-Asar smoke test
+also moves a synthetic table and verifies that both state pointers follow its
+label; it needs no Nintendo data and runs in the existing cross-platform CI job.
+
+Run the strict real-ROM check with the pinned checkout provisioned:
+
+```sh
+export SMEDIT_TEST_ROM='/path/to/clean/unheadered/Super Metroid.sfc'
+./gradlew parityBootstrap
+./gradlew :desktopApp:asmBuildIntegrationTest
+```
+
+`SMEDIT_DISASSEMBLY_DIR` optionally overrides the pinned checkout location. Missing
+fixtures fail this strict task, while the ordinary JVM suite reports them as skipped.
+The task stages the same pinned Asar executable as the desktop package (requiring
+the normal CMake/native build toolchain on a fresh checkout).
+Future placement changes that intentionally differ from the legacy allocator must
+retain byte-exact tests where applicable and add decoded-resource, pointer/sharing,
+and relocation-diff allowlist proofs.
+
+### Extending engine data formats
+
+Adding a field is different from changing its value or adding another record.
+The original PLM population is `word ID, byte X, byte Y, word parameter`, followed
+by a word-zero terminator. Bank `$82:EB74` reads the population pointer from state
+offset `$14`; `$82:EB85` advances it by six bytes. Changing a macro to emit a seventh
+byte can assemble successfully while making the engine interpret the next entry
+at the wrong offset. Changing the 26-byte state record has the same issue across
+its many consumers. Labels fix addresses, not record layouts or runtime contracts.
+
+For small extensions, prefer an existing custom PLM parameter or a separate,
+explicitly keyed metadata table when the design permits it. A true format change
+requires coordinated engine readers, encoded data, GUI parsers/writers, validators,
+and any affected import/export/patch paths. A future supported variant should name
+its format/version and provide those codecs and compatibility checks. Unsupported
+formats should remain source-owned rather than being rewritten using vanilla GUI
+assumptions. Arbitrary ASM can disguise a layout change as plausible vanilla bytes;
+current ownership/parity checks are not a general detector or runtime proof of such
+changes. Automatic format detection/adapters are not implemented by this pilot.
 
 ### Authority and patch backends
 
@@ -530,7 +631,7 @@ once conversion.
 - `AsmProjectCompiler` performs clean out-of-tree reference/project builds,
   preserves optional copier headers, captures Asar diagnostics, requires a valid
   emitted symbol map, applies size-checked staged data overrides, and returns
-  separate minimal authored-source, generated-asset, and generated-patch ranges
+  separate minimal authored-source, generated-asset, generated-room, and generated-patch ranges
   rather than an opaque ROM replacement.
 - `AsmBuildArtifactRepository` retains the latest local Asar log and WLA map;
   `AsmBuildOutputParser` turns compiler messages into file/line diagnostics and
@@ -548,6 +649,14 @@ once conversion.
 - `AsmSourceAssetMaterializer` projects eligible write-plan bytes into exact
   manifest-owned `data/` files, excludes allocations and ambiguous ownership,
   and leaves the project workspace unchanged.
+- `AsmSourceRoomMaterializer` atomically converts the complete validated
+  existing-room write graph—including allocator-owned payloads and pointer
+  changes—into a temporary ASM input. It cannot partially migrate a graph, and
+  project-created rooms deliberately fall back until source IDs are defined.
+- `AsmRoomPlmTable` encodes the first typed generated room resource. Its name
+  follows a consuming room/state identity rather than its allocation address;
+  all consuming state-pointer fields reference that label. Discovery decodes
+  reachable lists from the validated plan and checks full-resource ownership.
 - `AsmPatchBackendRegistry` explicitly declares which patch families have an
   ASM implementation; unregistered patches retain the ROM backend.
 - `AsmSourcePatchMaterializer` converts validated writes for a selected generated
@@ -614,14 +723,21 @@ Follow-up work can now be incremental:
    and `.B`/`.W`/`.L` suffixes. Literal project-wide
    find/replace already has a reviewed, buffer-only preview, and Tab/Shift-Tab
    provide selection-scoped indentation without a whole-file formatter.
-2. Add artifact sinks for semantic editors so room, graphics, map, text, and
-   sound changes can materialize into project-owned `data/`/source before Asar.
-   Today those edits still run safely after compilation through the shared
-   transaction; moving each stable encoder before compilation is the next
-   incremental step toward fully source-native assets.
+2. Continue the artifact sinks for semantic editors. Existing-room graphs now
+   have an atomic byte-faithful generated-ASM backend, including variable-sized
+   allocations and pointer changes. Replace that bridge incrementally with
+   typed labels/tables. The first PLM-list/state-pointer pilot and read-only
+   generated-source navigation are implemented; extend to rewritten state graphs,
+   then level data, enemies/GFX, FX, scrolls, doors, headers, and state selectors;
+   then give project-created rooms stable source
+   identities. Graphics, map, text, and sound encoders should follow the same
+   project-owned `data/`/source boundary before Asar.
 3. Extend the reverse semantic bridge to remaining specialized title/menu,
    cinematic, and generated-runtime assets as those editors gain stable semantic
-   selection entry points.
+   selection entry points. The inventory must explicitly include regional
+   Japanese content: the Japanese font/tile encoding, Japanese strings and intro
+   text/control streams, regional intro/cinematic images and frame tables, plus
+   item-drop, weapon, beam, and projectile graphics/animations.
 4. Use retained project symbols for emulator run-to-address, breakpoints,
    registers/stack inspection, and source-mapped crash diagnostics.
 

@@ -4,7 +4,7 @@
 **See also:** `plan.md` for detailed implementation notes per feature.
 **See also:** `room_model.md` for the current state model and delivery chunks, and
 `project_format.md` for the native `.smedit` boundary.
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-12
 
 ---
 
@@ -42,6 +42,7 @@
 - Custom ASM Embedding — Hex bytes → free space + auto-link pointer
 
 ### Infrastructure
+- Project-root workflow — NEW/OPEN, original-name immutable base ROM, portable relative path + ROM fingerprint, missing-ROM recovery, project-named builds, authored `asm/`, generated `smedit/`, `states/` and `exports/`; no automatic legacy-folder migration
 - Enemy/Boss promoted to top-level tabs
 - TestRomHelper migration — 73 test files, eliminated hardcoded ROM paths
 - FlowRow tab navigation — Tabs wrap when column is narrow
@@ -50,6 +51,8 @@
 - Transactional ROM write planner — desktop/headless byte ownership, overlap and bounds failures, base-ROM hashes, expected-hook bytes, full allocation claims, runtime-resource declarations, and ownership reports
 - Scalable editor typography — Material control defaults plus Patch, Enemy, and Boss tuning surfaces use the global semantic font-size presets
 - ASM reference and project workspace — On-demand pinned source, current-ROM extraction of all 1,130 assets, bank/function/label/macro navigation, editable project source and ordered modules, scope-aware opcode/symbol/macro completion, debounced source diagnostics, cross-platform Asar builds, semantic links, ROM ownership/diff inspection, and a practical 65C816 Library
+- First typed room-source pilot — Existing-state PLM lists compile as named tables with symbolic state pointers, retain sharing/copy-on-write semantics, and match the ROM exporter; isolated fixture tests and a portable synthetic Asar relocation check protect the boundary. The shared allocator still chooses placement; broader symbolic room formats remain follow-ups.
+- Generated room-source browser — Read-only compilation snapshots under ASM Source, searchable PLM sections, symbolic links, navigation history and links back to the owning room. Compact format-check help distinguishes structural/parity checks from unsupported custom engine layouts and runtime validation.
 
 ---
 
@@ -73,18 +76,19 @@
 | 7 | **Layer 2/BG Scrolling Hardening** | Medium | Embedded L2 editing exists; still need richer parallax mode, BG pointer, and door-dependent transfer workflows. |
 | 8 | **Generated Room Output** | Medium | Send biome/generator results into the same project-owned-room lifecycle. Dedicated static templates are deferred because Clone current state already covers the immediate workflow. |
 | 9 | **Auto Item/Door ID Assignment** | Small | Scan all rooms, deduplicate collection bits, sequential ID assignment. |
-| 10 | **Optional World Graph Viewer** | Small | Visualize and navigate door/save topology without requiring reciprocity or treating intentional disconnected hack content as invalid. |
+| 10 | **Cinematic + Regional Asset Coverage** | Medium | Source-link and visualize title/menu/intro/cutscene images and frame/control tables, Japanese font tiles and encoded Japanese text/intro streams, plus currently disconnected item-drop, weapon, beam, and projectile graphics/animations. Treat regional game content separately from SMEDIT UI localization. |
+| 11 | **Optional World Graph Viewer** | Small | Visualize and navigate door/save topology without requiring reciprocity or treating intentional disconnected hack content as invalid. |
 
 ### Tier 3: Backlog
 
 | # | Feature | Effort | Why |
 |---|---------|--------|-----|
-| 11 | **Projectile Editor** | Medium | Edit projectile behaviors, damage values, graphics. |
-| 12 | **Block Grouping (2x1, 1x2, 2x2)** | Small | Grouped destructible blocks that break together with respawn toggles. |
-| 13 | **Hotkey Configuration** | Small | Custom keyboard shortcut mapping. |
-| 14 | **Samus Pose/Animation Editor** | Large | Configure animation poses per equipment state. |
-| 15 | **Color Math Editor** | Medium | SNES Add/Subtract color math registers. |
-| 16 | **Plugin System** | Large | Extensibility framework for custom tool integration. |
+| 12 | **Projectile Editor** | Medium | Edit projectile behaviors, damage values, graphics. |
+| 13 | **Block Grouping (2x1, 1x2, 2x2)** | Small | Grouped destructible blocks that break together with respawn toggles. |
+| 14 | **Hotkey Configuration** | Small | Custom keyboard shortcut mapping. |
+| 15 | **Samus Pose/Animation Editor** | Large | Configure animation poses per equipment state. |
+| 16 | **Color Math Editor** | Medium | SNES Add/Subtract color math registers. |
+| 17 | **Plugin System** | Large | Extensibility framework for custom tool integration. |
 
 ---
 

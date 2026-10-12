@@ -887,6 +887,14 @@ data class ProjectAsmWorkspaceSettings(
  * Keys are hex room IDs (as strings), values are the list of edit operations.
  */
 @Serializable
+data class ProjectBaseRom(
+    val originalFileName: String,
+    /** Identity of the headerless ROM, independent of filename/copier header. */
+    val sha256: String,
+    val size: Int,
+)
+
+@Serializable
 data class SmEditProject(
     val romPath: String,
     val rooms: MutableMap<String, RoomEdits> = mutableMapOf(),  // key = "91F8"
@@ -909,9 +917,11 @@ data class SmEditProject(
     var buildName: String = "",
     /** Serialization schema only; unrelated to the exported ROM version above. */
     var projectFormatVersion: Int = CURRENT_PROJECT_FORMAT_VERSION,
+    val projectId: String = "",
+    val baseRom: ProjectBaseRom? = null,
 ) {
     companion object {
-        const val CURRENT_PROJECT_FORMAT_VERSION = 8
+        const val CURRENT_PROJECT_FORMAT_VERSION = 9
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

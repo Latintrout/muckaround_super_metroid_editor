@@ -97,7 +97,7 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 | File | Contents |
 |------|----------|
-| [`asm/reference_workspace.md`](asm/reference_workspace.md) | Read-only ASM tab, pinned-source/download contract, current-ROM asset extraction, bank/section/label navigation, cache/privacy boundary, integration test, and the staged path toward writable assembly projects. |
+| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, Library, pinned cross-platform Asar builds, GUI/source ownership, generated asset/room/patch inputs, read-only generated-room browsing and format-check limits, parity checks, and the remaining path to symbolic room relocation and runtime debugging. |
 
 ### Project Planning (`docs/project/`)
 
@@ -107,7 +107,7 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 | [`project/roadmap.md`](project/roadmap.md)           | Feature roadmap: boss/enemy stats editors, patches, sprite export, scroll editor, FX editor, etc. |
 | [`project/smile_parity.md`](project/smile_parity.md) | Complete SMILE vs SMEDIT feature comparison matrix with priority tiers and implementation notes.   |
 | [`project/room_model.md`](project/room_model.md) | Current room/state model, verified runtime behavior, export invariants, and explicitly deferred extensions. |
-| [`project/project_format.md`](project/project_format.md) | Native `.smedit` boundary, internal schema marker, ROM-compatibility separation, and foreign-import rules. |
+| [`project/project_format.md`](project/project_format.md) | Native `.smedit` boundary, project-root layout, NEW/OPEN and missing-ROM recovery, `tools/migrate_project.sh` backup/preview migration, internal schema marker, ROM-compatibility separation, and foreign-import rules. |
 | [`project/codebase_notes.md`](project/codebase_notes.md) | Local repo/codebase map, current sound branch architecture notes, and piano-roll editor implementation notes. |
 | [`project/parity_hardening_backlog.md`](project/parity_hardening_backlog.md) | Current quality-first priority order, completed hardening, and remaining SMILE-parity risks. |
 

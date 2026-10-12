@@ -245,6 +245,10 @@ internal object AsmBuildOutputParser {
     )
 
     fun diagnostics(output: List<String>): List<AsmBuildDiagnostic> = output.mapNotNull { line ->
+        // Pipeline checks have no source line: do not invent a clickable location.
+        if (line.startsWith("SMEDIT: error: ")) {
+            return@mapNotNull AsmBuildDiagnostic(AsmDiagnosticSeverity.ERROR, line.removePrefix("SMEDIT: error: "))
+        }
         val match = locatedDiagnostic.matchEntire(line.trim()) ?: return@mapNotNull null
         val path = match.groupValues[1].replace('\\', '/')
         val fileId = path.substringAfterLast("/src/", path.substringAfter("src/"))
@@ -328,10 +332,15 @@ internal class AsmBuildArtifactRepository(
         symbols: ByteArray,
         output: List<String>,
         assemblerVersion: String,
+        generatedRoomSource: String = "",
     ) {
         val directory = writableBuildDirectory(projectFilePath) ?: return
         directory.mkdirs()
         writeBytesAtomically(File(directory, SYMBOLS_FILE), symbols)
+        writeTextAtomically(
+            File(directory, AsmGeneratedRoomSource.FILE_NAME),
+            generatedRoomSource.ifBlank { "; This compilation has no generated room source.\n" },
+        )
         writeTextAtomically(
             File(directory, OUTPUT_FILE),
             output.joinToString("\n", postfix = if (output.isEmpty()) "" else "\n"),
@@ -356,6 +365,20 @@ internal class AsmBuildArtifactRepository(
             succeeded = false,
             assemblerVersion = assemblerVersion,
             sourceFingerprint = sourceFingerprintProvider(projectFilePath).orEmpty(),
+        )
+    }
+
+    fun publishPipelineFailure(projectFilePath: String, message: String) {
+        val previous = load(projectFilePath)
+        // Preserve Asar's line-specific diagnostics when compilation itself failed.
+        if (previous?.succeeded == false && previous.diagnostics.any {
+                it.fileId != null && it.severity == AsmDiagnosticSeverity.ERROR
+            }
+        ) return
+        publishFailure(
+            projectFilePath,
+            listOf("SMEDIT: error: ${message.lineSequence().joinToString(" ")}"),
+            previous?.assemblerVersion.orEmpty(),
         )
     }
 
@@ -386,11 +409,23 @@ internal class AsmBuildArtifactRepository(
         }.getOrNull()
     }
 
+    /** Unlike diagnostics this remains useful after source edits/failures. It is
+     * explicitly a snapshot of a successful compilation, never live GUI data
+     * or proof that the final ROM export succeeded. Empty compilations clear it. */
+    fun loadGeneratedRooms(projectFilePath: String): AsmGeneratedRoomSource? {
+        val directory = buildDirectory(projectFilePath) ?: return null
+        val file = File(directory, AsmGeneratedRoomSource.FILE_NAME)
+        return runCatching {
+            if (!file.isFile) return@runCatching null
+            AsmGeneratedRoomSource.parse(file.readText(), Instant.ofEpochMilli(file.lastModified()).toString())
+        }.getOrNull()
+    }
+
     private fun buildDirectory(projectFilePath: String): File? =
-        workspaceRepository.rootFor(projectFilePath)?.let { File(it, BUILD_DIRECTORY) }
+        workspaceRepository.cacheFor(projectFilePath)?.let { File(it, BUILD_DIRECTORY) }
 
     private fun writableBuildDirectory(projectFilePath: String): File? {
-        val root = workspaceRepository.rootFor(projectFilePath) ?: return null
+        val root = workspaceRepository.cacheFor(projectFilePath) ?: return null
         ensureBuildIgnored(root)
         return File(root, BUILD_DIRECTORY)
     }

@@ -120,6 +120,25 @@ tasks.register<org.gradle.api.tasks.testing.Test>("asmReferenceIntegrationTest")
     outputs.upToDateWhen { false }
 }
 
+tasks.register<org.gradle.api.tasks.testing.Test>("asmBuildIntegrationTest") {
+    group = "verification"
+    description = "Prove symbolic room resources and mixed ASM backends in isolated projects using explicit parity fixtures"
+    dependsOn(tasks.named("jvmTestClasses"), "copyAsarToAppResources")
+    testClassesDirs = regularJvmTest.get().testClassesDirs
+    classpath = regularJvmTest.get().classpath
+    // Real source indexing plus retained compiled-base caches exceed Gradle's
+    // default 512 MiB test heap when exercising multiple disposable projects.
+    maxHeapSize = "1g"
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching("com.supermetroid.editor.ui.AsmBuildPipelineIntegrationTest")
+        includeTestsMatching("com.supermetroid.editor.asm.AsmProjectCompilerTest")
+    }
+    systemProperty("smedit.requireParityFixtures", "true")
+    systemProperty("compose.application.resources.dir", platformAppResourcesDirectory.get().asFile.absolutePath)
+    outputs.upToDateWhen { false }
+}
+
 tasks.register<org.gradle.api.tasks.testing.Test>("asmSymbolCoverageTest") {
     group = "verification"
     description = "Prove every emitted symbol referenced by the pinned ASM source resolves in SMEDIT"

@@ -35,7 +35,7 @@ data class WindowConfig(
 data class AppSettings(
     val lastRomPath: String? = null,
     val window: WindowConfig = WindowConfig(),
-    val lastRoomPerRom: Map<String, String> = emptyMap(),
+    val lastRoomPerProject: Map<String, String> = emptyMap(),
     val emulatorBackend: String = "libretro",
     val emulatorNavExportDir: String = defaultNavExportDir(),
     val emulatorFollowLiveRoom: Boolean = true,

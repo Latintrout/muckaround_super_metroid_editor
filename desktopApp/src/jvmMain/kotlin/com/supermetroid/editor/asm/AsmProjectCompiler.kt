@@ -33,7 +33,8 @@ internal data class AsmSourceOwnedRange(
  * [referenceRomSha256] identifies the unedited project snapshot against which
  * source changes were measured; [sourceOwnedRanges] makes those changes visible
  * to the shared ROM ownership/conflict planner. [generatedAssetClaims] keeps
- * staged editor data separate from source the user authored directly, while
+ * staged editor data separate from source the user authored directly,
+ * [generatedRoomClaims] identifies the atomic room-graph source backend, and
  * [generatedPatchClaims] identifies patches selected for the ASM backend.
  */
 internal data class AsmCompiledBuildBase(
@@ -43,11 +44,16 @@ internal data class AsmCompiledBuildBase(
     val referenceRomSha256: String,
     val sourceOwnedRanges: List<AsmSourceOwnedRange>,
     val generatedAssetClaims: List<AsmGeneratedAssetClaim> = emptyList(),
+    val generatedRoomClaims: List<AsmGeneratedRoomClaim> = emptyList(),
+    val generatedRoomIds: Set<String> = emptySet(),
+    val generatedRoomSource: String = "",
     val generatedPatchClaims: List<AsmGeneratedPatchClaim> = emptyList(),
     val assemblerVersion: String,
     val compilerOutput: List<String>,
     val compilerSymbols: ByteArray = ByteArray(0),
-    val expectedFinalRomSha256: String? = null,
+    val expectedFinalParitySha256: String? = null,
+    /** Retained only for generated-input parity diagnostics in the prepared build cache. */
+    val expectedFinalRomBytes: ByteArray? = null,
 )
 
 internal fun AsmCompiledBuildBase.copyForReuse(): AsmCompiledBuildBase = copy(
@@ -55,9 +61,12 @@ internal fun AsmCompiledBuildBase.copyForReuse(): AsmCompiledBuildBase = copy(
     referenceRomBody = referenceRomBody.copyOf(),
     sourceOwnedRanges = sourceOwnedRanges.toList(),
     generatedAssetClaims = generatedAssetClaims.map { it.copy(bytes = it.bytes.copyOf()) },
+    generatedRoomClaims = generatedRoomClaims.map { it.copy(bytes = it.bytes.copyOf()) },
+    generatedRoomIds = generatedRoomIds.toSet(),
     generatedPatchClaims = generatedPatchClaims.map { it.copy(bytes = it.bytes.copyOf()) },
     compilerOutput = compilerOutput.toList(),
     compilerSymbols = compilerSymbols.copyOf(),
+    expectedFinalRomBytes = expectedFinalRomBytes?.copyOf(),
 )
 
 internal class AsmCompilationException(
@@ -169,6 +178,7 @@ internal class AsmProjectCompiler(
         loadedRom: ByteArray,
         materialization: AsmAssetMaterialization = AsmAssetMaterialization.EMPTY,
         patchMaterialization: AsmPatchMaterialization = AsmPatchMaterialization.EMPTY,
+        roomMaterialization: AsmRoomMaterialization = AsmRoomMaterialization.EMPTY,
         referenceRomBody: ByteArray? = null,
         onProgress: (String) -> Unit = {},
     ): AsmCompiledBuildBase {
@@ -196,10 +206,11 @@ internal class AsmProjectCompiler(
             loadedRom = loadedRom,
             materialization = materialization,
             patchMaterialization = patchMaterialization,
+            roomMaterialization = roomMaterialization,
             referenceRomBody = referenceRomBody,
         )
         AsmCompiledBuildCache.get(cacheKey)?.let { cached ->
-            val label = if (materialization.isEmpty && patchMaterialization.isEmpty) {
+            val label = if (materialization.isEmpty && patchMaterialization.isEmpty && roomMaterialization.isEmpty) {
                 "ASM source unchanged — reusing compiled base…"
             } else {
                 "Generated ASM inputs unchanged — reusing compiled base…"
@@ -211,6 +222,7 @@ internal class AsmProjectCompiler(
                     symbols = cached.compilerSymbols,
                     output = cached.compilerOutput,
                     assemblerVersion = cached.assemblerVersion,
+                    generatedRoomSource = roomMaterialization.source,
                 )
             }
             return cached
@@ -234,6 +246,7 @@ internal class AsmProjectCompiler(
                 sourceTree = workspace.workingDirectory,
                 asar = asar,
                 assetOverrides = materialization.assetOverrides,
+                generatedRoomSource = roomMaterialization.source,
                 generatedPatchSource = patchMaterialization.source,
             )
         } catch (problem: AsmCompilationException) {
@@ -265,6 +278,9 @@ internal class AsmProjectCompiler(
         patchMaterialization.claims.forEach { claim ->
             validateCompiledClaim(project.rom, claim.pcOffset, claim.bytes, "patch ${claim.owner}/${claim.label}")
         }
+        roomMaterialization.claims.forEach { claim ->
+            validateCompiledClaim(project.rom, claim.pcOffset, claim.bytes, "room graph ${claim.label}")
+        }
         val output = if (headerSize == 0) {
             project.rom
         } else {
@@ -284,11 +300,15 @@ internal class AsmProjectCompiler(
                     project.rom,
                     listOf(SNES_CHECKSUM_RANGE) +
                         materialization.claims.map { it.pcOffset until it.endExclusive } +
+                        roomMaterialization.claims.map { it.pcOffset until it.endExclusive } +
                         patchMaterialization.claims.map { it.pcOffset until it.endExclusive },
                 ),
                 symbols = project.symbols,
             ),
             generatedAssetClaims = materialization.claims,
+            generatedRoomClaims = roomMaterialization.claims,
+            generatedRoomIds = roomMaterialization.roomIds,
+            generatedRoomSource = roomMaterialization.source,
             generatedPatchClaims = patchMaterialization.claims,
             assemblerVersion = version.lineSequence().firstOrNull().orEmpty(),
             compilerOutput = (reference.output + project.output).distinct(),
@@ -300,6 +320,7 @@ internal class AsmProjectCompiler(
                     symbols = compiled.compilerSymbols,
                     output = compiled.compilerOutput,
                     assemblerVersion = version,
+                    generatedRoomSource = roomMaterialization.source,
                 )
             }
             AsmCompiledBuildCache.put(cacheKey, compiled)
@@ -322,6 +343,7 @@ internal class AsmProjectCompiler(
             loadedRom = loadedRom,
             materialization = AsmAssetMaterialization.EMPTY,
             patchMaterialization = AsmPatchMaterialization.EMPTY,
+            roomMaterialization = AsmRoomMaterialization.EMPTY,
             referenceRomBody = null,
         )
     }
@@ -349,6 +371,7 @@ internal class AsmProjectCompiler(
         loadedRom: ByteArray,
         materialization: AsmAssetMaterialization,
         patchMaterialization: AsmPatchMaterialization,
+        roomMaterialization: AsmRoomMaterialization,
         referenceRomBody: ByteArray?,
     ): String {
         val fingerprint = BuildFingerprint()
@@ -377,6 +400,14 @@ internal class AsmProjectCompiler(
                 fingerprint.addText("asset-claim:${claim.owner}:${claim.label}:${claim.assetPath}:${claim.pcOffset}")
                 fingerprint.addBytes("asset-claim-bytes", claim.bytes)
             }
+        fingerprint.addText("generated-room-source:${roomMaterialization.source}")
+        roomMaterialization.claims
+            .sortedWith(compareBy({ it.pcOffset }, { it.owner }, { it.label }))
+            .forEach { claim ->
+                fingerprint.addText("room-claim:${claim.owner}:${claim.label}:${claim.pcOffset}")
+                fingerprint.addBytes("room-claim-bytes", claim.bytes)
+            }
+        roomMaterialization.roomIds.sorted().forEach { fingerprint.addText("room-id:$it") }
         fingerprint.addText("generated-patch-source:${patchMaterialization.source}")
         patchMaterialization.claims
             .sortedWith(compareBy({ it.pcOffset }, { it.owner }, { it.label }))
@@ -391,6 +422,7 @@ internal class AsmProjectCompiler(
         sourceTree: File,
         asar: File,
         assetOverrides: Map<String, ByteArray> = emptyMap(),
+        generatedRoomSource: String = "",
         generatedPatchSource: String = "",
     ): CompiledTree {
         require(File(sourceTree, "src/main.asm").isFile) { "ASM source tree has no src/main.asm: $sourceTree" }
@@ -401,6 +433,7 @@ internal class AsmProjectCompiler(
             copyTree(File(sourceTree, "data"), File(staging, "data"))
             applyAssetOverrides(File(staging, "data"), assetOverrides)
             AsmProjectModuleGateway.apply(File(staging, "src"))
+            applyGeneratedRoomSource(File(staging, "src"), generatedRoomSource)
             applyGeneratedPatchSource(File(staging, "src"), generatedPatchSource)
             val rom = File(staging, "SM.sfc")
             rom.writeBytes(ByteArray(ASM_ROM_SIZE) { 0xFF.toByte() })
@@ -470,6 +503,21 @@ internal class AsmProjectCompiler(
         )
     }
 
+    private fun applyGeneratedRoomSource(sourceRoot: File, source: String) {
+        if (source.isBlank()) return
+        val generated = File(sourceRoot, GENERATED_ROOM_FILE)
+        require(!generated.exists()) { "Project source uses reserved SMEDIT file name $GENERATED_ROOM_FILE" }
+        generated.writeText(source)
+        val main = File(sourceRoot, "main.asm")
+        val include = "; SMEDIT generated room backend\nincsrc \"$GENERATED_ROOM_FILE\"\n\n"
+        val original = main.readText()
+        val marker = "print \"Assembly complete. Total bytes written: \", bytes"
+        main.writeText(
+            if (marker in original) original.replaceFirst(marker, include + marker)
+            else original + "\n" + include
+        )
+    }
+
     private fun applyAssetOverrides(dataRoot: File, overrides: Map<String, ByteArray>) {
         val rootPath = dataRoot.canonicalFile.toPath()
         overrides.forEach { (relativePath, bytes) ->
@@ -519,8 +567,9 @@ internal class AsmProjectCompiler(
 
     companion object {
         const val ASM_ROM_SIZE = 3 * 1024 * 1024
+        private const val GENERATED_ROOM_FILE = "__smedit_generated_rooms.asm"
         private const val GENERATED_PATCH_FILE = "__smedit_generated_patches.asm"
-        private const val CACHE_FORMAT_VERSION = "smedit-asm-build-cache-v3"
+        private const val CACHE_FORMAT_VERSION = "smedit-asm-build-cache-v5"
 
         internal fun clearBuildCacheForTests() = AsmCompiledBuildCache.clear()
 

@@ -2864,36 +2864,25 @@ class EditorState(
 
     // ─── Project lifecycle ──────────────────────────────────────
 
-    fun initForRom(romPath: String) {
+    internal fun initForProject(file: File, loaded: SmEditProject) {
         layoutEditScopes.clear()
         dismissPendingLayoutEditScope()
         sourceRomData = null
         sourceRoomCatalog = null
-        projectFilePath = romPath.replaceAfterLast('.', "smedit")
-        val file = File(projectFilePath)
-        var repairedRomPath = false
-        if (file.exists()) {
-            try {
-                project = ProjectFileService.loadProject(file)
-                if (!File(project.romPath).isFile) {
-                    editorLog("Project ROM path is unavailable; using the ROM opened with this project: $romPath")
-                    project = project.copy(romPath = romPath)
-                    repairedRomPath = true
-                }
-                val enabledPatches = project.patches.filter { it.enabled }
-                editorLog("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms, ${project.patches.size} patches)")
-                if (enabledPatches.isNotEmpty()) {
-                    editorLog("  Enabled patches: ${enabledPatches.joinToString { "'${it.name}'" }}")
-                }
-            } catch (e: Exception) {
-                editorLog("Failed to load project: ${e.message}")
-                project = SmEditProject(romPath = romPath)
-            }
-        } else {
-            project = SmEditProject(romPath = romPath)
-        }
+        projectFilePath = file.absolutePath
+        project = loaded
         resetForLoadedProject(seedPatches = true)
-        if (repairedRomPath) dirty = true
+        editorLog("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms, ${project.patches.size} patches)")
+    }
+
+    fun initForRom(romPath: String) {
+        // Programmatic/in-memory callers may not have persisted their ROM yet.
+        // Desktop NEW/OPEN resolves a project explicitly via ProjectLifecycle.
+        val file = File(romPath).resolveSibling("${File(romPath).nameWithoutExtension}.smedit")
+        val loaded = if (file.isFile) ProjectFileService.loadProject(file).also {
+            ProjectLifecycle.verify(it, File(it.romPath))
+        } else SmEditProject(romPath = romPath)
+        initForProject(file, loaded)
     }
 
     fun initForReadOnlyRom(romPath: String) {

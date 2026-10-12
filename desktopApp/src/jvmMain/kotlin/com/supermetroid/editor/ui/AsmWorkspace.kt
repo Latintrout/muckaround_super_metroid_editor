@@ -428,7 +428,7 @@ internal fun AsmWorkspaceSidebar(
 
     Column(modifier = modifier.padding(8.dp)) {
         Row(Modifier.fillMaxWidth()) {
-            AsmModeButton("Source", state.browserMode == AsmBrowserMode.SOURCE) {
+            AsmModeButton("Source", state.browserMode in setOf(AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS)) {
                 state.showSourceBrowser()
             }
             AsmModeButton("Assets", state.browserMode == AsmBrowserMode.ASSETS) {
@@ -473,7 +473,7 @@ internal fun AsmWorkspaceSidebar(
                 label = {
                     Text(
                         when (state.browserMode) {
-                            AsmBrowserMode.SOURCE -> "Find source, label, or address"
+                            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS -> "Find source, label, or address"
                             AsmBrowserMode.ASSETS -> "Find extracted asset"
                             AsmBrowserMode.LIBRARY -> "Find lesson or instruction"
                             AsmBrowserMode.ROM -> ""
@@ -498,7 +498,7 @@ internal fun AsmWorkspaceSidebar(
         }
 
         when (state.browserMode) {
-            AsmBrowserMode.SOURCE -> workspace?.let {
+            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS -> workspace?.let {
                 AsmSourceTree(
                     state = state,
                     index = it.index,
@@ -1378,7 +1378,42 @@ private fun AsmSourceTree(
     val results = remember(index, query) {
         if (query.isEmpty()) emptyList() else sourceSearch(index, state.sourceTexts(), query)
     }
+    val generated = state.generatedRoomSource
+    val generatedSections = generated?.sections.orEmpty().filter {
+        query.isEmpty() || it.title.contains(query, ignoreCase = true) || it.label.contains(query, ignoreCase = true)
+    }
+    val showGenerated = state.workspaceKind == AsmWorkspaceKind.PROJECT &&
+        (query.isEmpty() || generatedSections.isNotEmpty() || "generated rooms".contains(query, ignoreCase = true))
     AsmSidebarScrollPane(modifier) {
+        if (showGenerated) {
+            item(key = "generated-rooms") {
+                val selected = state.browserMode == AsmBrowserMode.GENERATED_ROOMS
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .clickable { state.openGeneratedRooms() }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text("Generated rooms", fontSize = fs.body, fontWeight = FontWeight.SemiBold)
+                    Text("Read-only · build snapshot", fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (state.browserMode == AsmBrowserMode.GENERATED_ROOMS || query.isNotEmpty()) {
+                generatedSections.forEach { section ->
+                    item(key = "generated:${section.label}") {
+                        val selected = state.browserMode == AsmBrowserMode.GENERATED_ROOMS &&
+                            generated?.sectionAt(state.generatedRoomLineIndex) == section
+                        Text(
+                            section.title, fontSize = fs.detail,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { state.openGeneratedRooms(section.lineIndex) }
+                                .padding(start = 20.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+                        )
+                    }
+                }
+            }
+        }
         if (query.isNotEmpty()) {
             items(results, key = { "${it.fileId}:${it.assetPath}:${it.lineIndex}:${it.columnIndex}:${it.title}" }) { result ->
                 val splitFileId = result.fileId?.takeIf {
@@ -1403,7 +1438,7 @@ private fun AsmSourceTree(
                     }
                 }
             }
-            if (results.isEmpty()) item { Text("No source or address matches", fontSize = fs.detail, modifier = Modifier.padding(8.dp)) }
+            if (results.isEmpty() && !showGenerated) item { Text("No source or address matches", fontSize = fs.detail, modifier = Modifier.padding(8.dp)) }
         } else {
             val banks = index.files.filter(AsmSourceFile::isBank)
             val modules = state.projectModuleFileIds.mapNotNull(index::file)
@@ -1549,7 +1584,8 @@ private fun SourceFileRow(
     trailingContent: @Composable RowScope.() -> Unit = {},
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
-    val selected = state.selectedFileId == source.id && state.selectedAssetPath == null
+    val selected = state.browserMode == AsmBrowserMode.SOURCE &&
+        state.selectedFileId == source.id && state.selectedAssetPath == null
     AsmSourceOpenContextMenu(onOpenInSplit) {
         Row(
             Modifier.fillMaxWidth()
@@ -1727,6 +1763,18 @@ internal fun AsmWorkspaceCanvas(
 ) {
     val workspace = state.workspace
     val semanticIndex = remember(romParser) { romParser?.let(AsmSemanticBridge::buildIndex) }
+    if (state.browserMode == AsmBrowserMode.GENERATED_ROOMS) {
+        Column(modifier.fillMaxSize()) {
+            AsmGeneratedRoomsCanvas(state, onOpenInEditor, Modifier.weight(1f).fillMaxWidth())
+            if (state.buildReport != null || state.displayedDiagnostics.isNotEmpty()) {
+                AsmBuildProblemsStrip(
+                    state, state.buildReport, state.displayedDiagnostics,
+                    problemsPaneHeightDp, onProblemsPaneHeightChange,
+                )
+            }
+        }
+        return
+    }
     if (state.browserMode == AsmBrowserMode.ROM) {
         AsmRomPreviewCanvas(state, modifier)
         return
@@ -2367,6 +2415,119 @@ private fun AsmWelcomeCanvas(state: AsmWorkspaceState, modifier: Modifier) {
                     fontSize = fs.body,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AsmGeneratedRoomsCanvas(
+    state: AsmWorkspaceState,
+    onOpenInEditor: (AsmEditorTarget) -> Unit,
+    modifier: Modifier,
+) {
+    val fs = LocalEditorTheme.current.fontSize.value
+    val source = state.generatedRoomSource
+    val listState = rememberLazyListState()
+    val horizontal = rememberScrollState()
+    var showFormatHelp by remember { mutableStateOf(false) }
+    val section = source?.sectionAt(state.generatedRoomLineIndex)
+    if (showFormatHelp) {
+        AlertDialog(
+            onDismissRequest = { showFormatHelp = false },
+            title = { Text("Generated room data", fontSize = fs.heading) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Edit rooms in the room editor, then Build to refresh this snapshot. " +
+                            "This is generated input from a successful source compilation, not proof that the final ROM export succeeded.",
+                        fontSize = fs.body,
+                    )
+                    Text(
+                        "PLM lists use the original six-byte layout: word ID, byte X/Y, word parameter, then a word-zero terminator. " +
+                            "SMEDIT checks field widths, bank placement, terminators, ownership and compiled bytes. Detected failures appear in the build panel.",
+                        fontSize = fs.body,
+                    )
+                    Text(
+                        "Custom engine layouts are not automatically detected or supported. Adding bytes to a record can still assemble but break its readers. " +
+                            "A changed format needs matching engine code and editor parsers/writers; a successful build is not runtime validation.",
+                        fontSize = fs.body,
+                    )
+                    source?.let { Text("Snapshot: ${it.generatedAt}", fontSize = fs.detail) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFormatHelp = false }) { Text("Done", fontSize = fs.body) } },
+        )
+    }
+    LaunchedEffect(source, state.generatedRoomNavigationSerial) {
+        if (source != null) listState.scrollToItem(state.generatedRoomLineIndex.coerceIn(source.lines.indices))
+    }
+    Column(modifier) {
+        AsmNavigationHeader(
+            state, "Generated rooms", "Read-only · last compilation", "",
+            actions = {
+                section?.roomId?.let { roomId ->
+                    TextButton(onClick = { onOpenInEditor(AsmEditorTarget.Room(roomId)) }) {
+                        Text("Edit room $${roomId.hex(4)}", fontSize = fs.body)
+                    }
+                }
+                TextButton(onClick = { showFormatHelp = true }) { Text("Format checks", fontSize = fs.body) }
+            },
+        )
+        if (source == null) {
+            Text(
+                "No generated room input for the latest compilation. Edit an existing room and Build in ASM mode. " +
+                    "Projects with new rooms currently use the ROM-patch backend for room data.",
+                fontSize = fs.body,
+                modifier = Modifier.padding(16.dp),
+            )
+        } else {
+            val width = remember(source, fs.body) {
+                (ASM_LINE_NUMBER_WIDTH.value + 24f + (source.lines.maxOfOrNull(String::length) ?: 0)
+                    .coerceAtMost(MAX_MEASURED_CODE_COLUMNS) * fs.body.value * MONOSPACE_CHARACTER_WIDTH).dp
+            }
+            AsmScrollableTextPane(
+                listState, horizontal, width, source.generatedAt,
+                state::requestSearchFocus, state::goBack, state::goForward,
+                Modifier.weight(1f).fillMaxWidth().background(codeBackground()),
+            ) {
+                items(source.lines.size, key = { it }) { lineIndex ->
+                    val line = source.lines[lineIndex]
+                    val styled = asmAnnotatedLine(line, knownLabels = source.definitions.keys)
+                    val annotated = remember(styled, source) {
+                        buildAnnotatedString {
+                            append(styled)
+                            Regex("[A-Za-z_][A-Za-z0-9_]*").findAll(line.substringBefore(';')).forEach { token ->
+                                if (token.value in source.definitions) {
+                                    addStringAnnotation("generated", token.value, token.range.first, token.range.last + 1)
+                                    addStyle(SpanStyle(textDecoration = TextDecoration.Underline), token.range.first, token.range.last + 1)
+                                }
+                            }
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(if (lineIndex == state.generatedRoomLineIndex) MaterialTheme.colorScheme.primary.copy(alpha = 0.11f) else Color.Transparent)
+                            .padding(vertical = 1.dp),
+                    ) {
+                        DisableSelection {
+                            Text(
+                                (lineIndex + 1).toString(), fontSize = fs.detail, fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp)
+                                    .clickable { state.openGeneratedRooms(lineIndex) },
+                            )
+                        }
+                        AsmSelectableLinkedText(
+                            annotated, TextStyle(fontSize = fs.body, fontFamily = FontFamily.Monospace, color = codeForeground()),
+                        ) { annotation ->
+                            when (annotation.tag) {
+                                "generated" -> source.definitions[annotation.item]?.let { state.openGeneratedRooms(it) }
+                                "instruction" -> state.showInstruction(annotation.item)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

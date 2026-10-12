@@ -422,7 +422,10 @@ Work one checked slice at a time. Do not mark parent rows verified from a spot c
   completion, source navigation, safe Save/Build boundaries, and disabled starter
   modules without changing a clean project's bytes.
 - [ ] Expand source-native sinks to variable-sized room resources and migrate more
-  curated patches from post-compile writes into readable symbolic modules.
+  curated patches from post-compile writes into readable symbolic modules. The
+  complete existing-room graph now has an atomic byte-faithful ASM backend; the
+  remaining room work is typed label/table output plus stable source identities
+  for project-created rooms.
 - [ ] Add emulator run-to-address, breakpoints, register/stack inspection, and
   source-mapped crash diagnostics.
 
@@ -430,6 +433,8 @@ Work one checked slice at a time. Do not mark parent rows verified from a spot c
 
 | Date | Change | Evidence |
 |---|---|---|
+| 2026-10-12 | Added the first typed PLM source tables and symbolic room-state references | Existing-state PLM edits emit named six-byte-entry tables and symbolic state pointers while preserving the shared allocator and exact-output oracle. Complete resource ownership, bank/size/terminator checks, and explicit data primitives guard the format. Tests now use isolated projects with explicit ROM/source fixtures rather than the mutable Sandbox; the strict `:desktopApp:asmBuildIntegrationTest` covers growth, copy-on-write, shrinkage, empty lists, mixed backends, and cache/report restoration. A Nintendo-data-free packaged-Asar smoke case relocates a synthetic table and verifies both symbolic pointers, through the existing macOS/Windows/Linux CI task. Generated source is retained in the ignored per-project build directory. Engine-format extensions are documented as coordinated reader/codec changes, not something labels or successful assembly validate automatically. |
+| 2026-10-11 | Added the first variable-sized room source backend | In ASM mode, an existing room's complete validated write graph—including compressed layouts, allocator-owned payloads, and pointer updates—is now converted atomically into temporary generated ASM and assembled before the final export. The post-compile room exporter is skipped only when every room write graduated; new project-created rooms retain the proven ROM backend until stable source IDs exist. A real Landing Site edit compiles through the pinned project workspace, reparses with the intended tile value, and produces the same semantic ROM as the established exporter. The parity hash excludes only Asar's four derived SNES checksum/complement bytes and reports exact byte locations for any other mismatch. Focused tests cover deduped allocation claims, all-or-nothing fallback, compiler ownership exclusion, checksum canonicalization, and the end-to-end source build. |
 | 2026-10-10 | Added native Library tables and consolidated emulator build feedback | The ASM Library now renders selectable, theme/font-aware tables and includes one Quick-reference page for equivalent decimal/Asar-hex/Asar-binary values, byte/word/long ranges, NVMXDIZC flags, matching call/return forms, and all native/emulation vectors from Super Metroid's bank-`$80` header. Structural tests require equal header/row/weight dimensions and pin `$80:FFEA` to native NMI plus `$80:FFFC` to emulation RESET/Boot. During Run, the emulator shows one centered build status with a spinner instead of repeating the same compiler phase in the placeholder and a second top overlay. |
 | 2026-10-10 | Promoted ASM Build and emulator Run to explicit project-wide commands | Per-pane Build controls were removed because both split views edit one project build graph. Project ASM now exposes one global **Build/Build*** beside always-available **Run** and **EMU**: Run saves source/project state, follows the validated cached export path, opens the emulator, and plays; EMU only toggles the window. The obsolete auto-play-on-open setting no longer changes EMU semantics, while the emulator window retains its manual Play control. Cmd/Ctrl+B and Cmd/Ctrl+R invoke the same global actions from editable source. |
 | 2026-10-10 | Added a synchronized two-column ASM editor with bounded Undo/Redo | Banks, sections, search results, and non-module source files can open in a resizable split while each pane retains its own caret, scroll position, reference context, and Back/Forward history. Both panes address one file-keyed document buffer, including when the same bank is open twice. Undo/Redo stores at most 250 compact text deltas per file rather than whole large-bank snapshots; state regressions cover pane isolation, shared documents, history, insertion/deletion/replacement round trips, and dirty-state restoration. The prominent Revert/Restore controls were replaced by Save/Build plus a source settings cog containing discard-to-save and confirmed pristine-source recovery. |
@@ -493,6 +498,19 @@ Work one checked slice at a time. Do not mark parent rows verified from a spot c
 | 2026-10-05 | Consolidated and source-routed the Evir family | Evir `$E63F` and its internal projectile `$E67F` share one pixel/palette owner but retain distinct runtime headers. The standalone “Zero” mislabel was removed; Evir now exposes exact left/right body and arms loops plus the normal projectile pose under one editor entry. All 24 maps / 161 entries and seven lists / 49 source frame occurrences are pinned, growing E-11 to seven headers, 23 actions / 112 guided frames and E-08 to 141 assembled / seven tile-sheet-only / 155 previewable species. |
 | 2026-10-05 | Closed the all-species tile-only gap | Magdollite gained 11 source actions across its three slots, Beetom gained eight directional/action routes, and both Sidehopper corpse headers gained four shared behavior routes over their exact two-owner runtime OBJ layout. Kzan bottom and the Tourian soul header are now proved non-drawing helpers, while Ridley's explosion payload is assigned to the consolidated Ridley renderer. E-11 reaches 11 headers / 46 actions / 196 guided frames; E-08 reaches 145 assembled / zero tile-sheet-only / 15 composite / four nonvisual / zero failed, with 159 previewable species. This also corrected stale stats IDs for green Kihunter, Beetom, and Magdollite. |
 | 2026-10-05 | Consolidated and source-routed Kihunter | Green/red/gold Kihunter now expose 13 exact body/wing actions per color from 41 maps / 300 OAM entries and 13 lists / 59 source frame occurrences. The three `$0200` wing-transfer headers remain runtime companions but no longer appear as disconnected standalone characters; wing actions synchronize and composite against the matching body in runtime OAM order. Large ordinary tile sheets no longer trigger the bank-wide boss-pose scanner, removing bogus Body Pose panels for Kihunter and the Sidehopper corpse. E-11 reaches 14 routed headers / 59 actions / 255 guided frames. |
+
+### Generated-source browser checks (2026-10-12)
+
+The generated-room browser is tested independently of editable source: emitted
+PLM labels retain their room/source-state identity, raw overlays never invent an
+owner, navigation restores the previous source location and unsaved buffer, and
+generated text cannot enter the source edit index. Artifact tests cover stale
+diagnostics versus historical snapshots, failures, empty builds and project
+isolation. The real-ROM build matrix also checks the browsable source and cached
+artifact restoration. Post-Asar planning/export failures retain their actual
+message in the build drawer; line-specific Asar errors keep their source links.
+These checks do not prove that an arbitrary custom engine understands the
+vanilla records or that a successfully assembled ROM behaves correctly at runtime.
 
 ## Deliberately deferred
 

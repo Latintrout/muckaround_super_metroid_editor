@@ -5,7 +5,7 @@ does not embed another editor's configuration model.
 
 ## What A Project Stores
 
-A project identifies its loaded ROM with `romPath` and stores semantic edits applied by
+A project identifies its immutable base ROM with a project-relative `romPath` and stores semantic edits applied by
 SMEDIT at export time. By default that file is the immutable build base. An opted-in
 Project ASM workspace may instead select a clean source compilation as the build base;
 the loaded ROM remains the private asset source and comparison input. The current top-level model includes room edits, room-state manifests,
@@ -36,8 +36,8 @@ and `sourceRevision` identify the pinned source snapshot, while `buildMode` is e
 `ASM_SOURCE`. Enabling Project ASM selects `ASM_SOURCE` automatically. A clean ASM
 workspace may return to `PATCHED_ROM`, but saved or unsaved source edits require
 `ASM_SOURCE`; both the UI and export validation prevent those edits from being
-silently ignored. Source/data trees remain beside the project under
-`<project-name>_smedit/asm/`; they are not embedded in JSON. Saved source overrides
+silently ignored. Authored source lives under `asm/`; generated source/data trees live
+under `smedit/asm/`. They are not embedded in JSON. Saved source overrides
 are the portable authored content. In `ASM_SOURCE` mode the two source trees compile
 before the shared semantic-edit and patch transaction, and their authored byte delta
 becomes a normal conflict-checked ROM owner. Eligible fixed-range editor writes are
@@ -54,6 +54,130 @@ Here, `data/*.bin` means an extracted source asset consumed by the disassembly;
 it is distinct from an IPS or fixed-offset ROM-byte patch applied after compilation.
 Both build modes end in a binary ROM—the ASM choice changes the order and ownership
 of inputs, not the output format.
+
+## Project Root And Opening Workflow
+
+The `.smedit` file is the entry point, not a sidecar inferred from a renamed ROM.
+One project lives in each directory. `ProjectPaths` is the shared path contract:
+
+```text
+Super Metroid ASM Sandbox/
+  Super Metroid ASM Sandbox.smedit
+  Super Metroid [JU].smc              # immutable supplied base; original filename
+  Super Metroid ASM Sandbox-v1.0.smc  # generated build; project name + version
+  asm/
+    modules/                         # authored modules, .order and .disabled
+    overrides/src/                   # authored replacements for source banks
+  data/                              # reserved for explicit custom asset inputs
+  states/                            # emulator SRAM and save states
+  exports/graphics/                  # generated CRE/URE preview PNGs
+  smedit/asm/
+    original/                        # pinned source + private extracted assets
+    workspace/                       # generated editable mirror
+    build/                           # compiler reports, symbols, generated rooms
+    .smedit-project-asm.properties
+```
+
+Project-local support folders are simply `smedit/` and `states/`; the parent folder
+already identifies the project. The application-wide `~/.smedit/` directory is
+separate and keeps its existing name.
+
+Directories are created only when used. `data/` is a reserved location, not a new
+automatic import mechanism: custom graphics, community Samus sources and music
+edits remain authoritative in the project JSON. Generated PNGs are previews, not
+editable build inputs. Other manually chosen export destinations remain user-controlled.
+An authored module is never recovered from a stale generated mirror.
+
+- **NEW** asks for name, parent folder and base ROM. It creates a new project folder,
+  copies the ROM without renaming it, and starts in ROM-patching mode. Existing folders
+  and files are never overwritten by project creation. ASM can be enabled afterward;
+  it still needs that private ROM for extracted assets.
+- **OPEN** accepts `.smedit`, `.smc` or `.sfc`. A project opens its recorded base. A ROM
+  beside exactly one project opens that project, including when the selected ROM is
+  a generated build. A standalone editable ROM opens the prefilled NEW dialog; compatible
+  inspection-only ROMs still open read-only. Multiple neighboring projects require an
+  explicit project-file selection. Discovery is not recursive.
+- **Missing/mismatched base** opens Locate base ROM, naming the original file. New
+  projects record `baseRom.originalFileName`, headerless `sha256` and `size`. A renamed
+  or copier-headered copy is accepted if its contents match; a different revision,
+  hack or modified build is refused. The selected copy is imported into the project
+  root, with no overwrite of an existing differently located file. Projects without
+  identity metadata explicitly warn that this first choice establishes the identity.
+- Saves write a relative ROM filename atomically. Runtime code resolves it against
+  the project directory. Copying/moving the entire directory does not require editing
+  absolute machine paths. The loader never substitutes an empty project for corrupt JSON.
+- `projectId` is generated for a new project and persists across moves. Last-room
+  preferences are keyed by this ID, not the shared base-ROM filename. The application
+  remembers the last `.smedit` file, so missing-ROM recovery also works on startup.
+- Exports use the **project** name, build label and version, not the base-ROM name.
+  Output paths reject unsafe names and any destination that would replace the input ROM.
+
+Source control should include `.smedit`, `asm/modules/`, `asm/overrides/`, and genuinely
+authored assets. Do not commit ROMs, extracted binary assets, `smedit/`, `states/`
+or generated previews. NEW writes a local `.gitignore`. Changing ignore rules does not
+untrack ROMs already committed to the repository; cleaning those up is a separate step.
+
+### Migrating Existing Local Projects
+
+The editor deliberately has no automatic legacy-folder migration or dual-layout fallback.
+For a one-off migration, close SMEDIT and use the standalone Bash script (Python 3.8+
+required; standard library only):
+
+```bash
+# Preview only: no files are changed or backups created.
+./tools/migrate_project.sh '/path/My Project/Old Name.smedit'
+
+# Back up and apply the migration.
+./tools/migrate_project.sh --apply '/path/My Project/Old Name.smedit'
+```
+
+Select the authoritative root project, not a historical nested copy. The script renames
+the selected file to match its containing folder (`My Project/My Project.smedit`); the
+folder and base ROM keep their names. It moves legacy support folders, separates authored
+ASM from generated caches, archives nested historical projects, and records a relative
+base-ROM filename and stable project ID without changing gameplay data or schema markers.
+Unknown JSON fields are preserved, though updated JSON is serialized compactly.
+
+An existing root base ROM is fingerprinted (ignoring a copier header); a recorded fingerprint
+mismatch aborts. Without a fingerprint, review the preview's ROM filename before proceeding.
+If the base is missing, the script does not guess or copy another ROM: **OPEN** will request
+Locate base ROM. Existing identity metadata is retained. Root `.gitignore` rules are extended
+without removing custom rules; this does not untrack files already committed.
+
+Applying makes a complete, verified private backup under `~/.smedit/backups/` and verifies
+file contents again after moving. Use `--backup-dir '/path/to/backups'` to choose another
+backup parent outside the project. Do not publish these backups: they may include ROMs and
+extracted assets. Conflicting old/new destinations, multiple root project files, symlinks,
+and malformed JSON are refused rather than merged or overwritten. A completed migration
+can be rerun using the new project filename. On an interrupted/failed migration, keep both
+copies and recover from the printed backup before opening/building the project.
+
+The script covers these paths; they can also be moved manually after backing up:
+
+| Existing content | New location relative to the project root |
+|---|---|
+| Authoritative top-level `.smedit` | Keep at the root |
+| Original input ROM | Root, ideally its original filename |
+| `<name>_smedit/asm/modules/` and `overrides/` | `asm/modules/` and `asm/overrides/` |
+| `<name>_smedit/asm/original/`, `workspace/`, `build/` and ASM metadata | `smedit/asm/` (or rebuild these caches) |
+| `<name>_states/` or `emu_states/` | `states/` |
+| Project-local `.smedit/` from the earlier layout | `smedit/` |
+| Generated CRE/URE PNGs, mapshots, MIDI/SPC exports | `exports/` (graphics previews go under `graphics/`) |
+| Hand-edited assets | Preserve separately, optionally under `data/`; do not confuse with generated previews |
+| Nested historical `.smedit` files | Preserve/archive; never silently merge or discard |
+
+Open the root project and locate the base if its recorded path changed. Saving records
+the relative filename and fingerprint. If the generated ASM cache was not moved, use
+ASM's Download/Refresh as needed, then **Repair Project ASM** to recreate it from the
+pinned reference plus `asm/` authored inputs. Move authored source **before** repair/build.
+The repository's local `projects/` directories were reorganized separately on 2026-10-12,
+after a full backup and with file-content verification. Spike Olympics' older nested project
+contains distinct historical edits and is preserved in `archive/legacy-project/`; its loose
+tileset images are in `data/legacy-assets/`. The editor itself does not automatically move or
+delete legacy folders.
+
+The migration regression tests use temporary synthetic projects only:
+`python3 -m unittest discover -s tools/tests -v`.
 
 Room data is described in [`room_model.md`](room_model.md). `newRooms` owns stable project room
 identities, complete initial headers/default-state payloads, and semantic door destinations.

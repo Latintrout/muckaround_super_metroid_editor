@@ -225,6 +225,14 @@ Offset  Size  Field
 
 Total set size = `(N × 6) + 2` bytes, where N = number of PLMs.
 
+The source consumer at `$82:EB74` reads the state record's `+$14` pointer, and
+`$82:EB85` advances by six bytes per entry. Adding fields to `%PLMPopEntry` does
+not update this reader. A new record layout requires matching engine consumers
+and editor codecs; successful assembly alone does not prove compatibility.
+SMEDIT's generated PLM ASM uses explicit `dw`/`db` fields plus named table
+references and preserves this original layout. See the engine-format extension
+boundary in [`../asm/reference_workspace.md`](../asm/reference_workspace.md).
+
 ### PLM Parameter Meanings
 
 | PLM Type       | Parameter meaning |

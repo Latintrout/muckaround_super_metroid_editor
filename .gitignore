@@ -48,8 +48,10 @@ room_model/datasets/
 *.sfc
 *.rom
 *.wav
-# Project builds are source-controlled.
-!projects/**/*.smc
+# Project roots contain private inputs and generated outputs, never ROMs to publish.
+projects/**/smedit/
+projects/**/states/
+projects/**/exports/
 # But keep test-resources directory structure
 !test-resources/.gitkeep
 

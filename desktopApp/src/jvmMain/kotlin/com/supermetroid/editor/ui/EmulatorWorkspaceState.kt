@@ -897,14 +897,14 @@ class EmulatorWorkspaceState(
 
     /**
      * Compute a project-specific state directory.
-     * Prefers a `_states/` folder next to the .smedit project file (stable across ROM exports).
+     * Uses the project's states/ folder (stable across ROM exports and base-ROM names).
      * Falls back to ~/.smedit/states/libretro/<slug> if no project file is set.
      */
     internal fun projectStateDir(): File {
         // If we have a project file, store states alongside it
         projectFilePath?.let { path ->
             val projectFile = File(path)
-            val statesDir = File(projectFile.parentFile, "${projectFile.nameWithoutExtension}_states")
+            val statesDir = com.supermetroid.editor.data.ProjectPaths(projectFile).emulatorStates
             return statesDir
         }
         // Fallback: derive from ROM path

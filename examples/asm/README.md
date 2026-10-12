@@ -40,5 +40,5 @@ authority, module ordering, and the compile-then-patch build pipeline.
   `$82:F7C0..F835`. Text uses Super Metroid's existing pause-menu A-Z tiles `$30..$49`, so the
   module adds no font graphics and does not replace shared Equipment-screen tiles.
 - The copies in this directory are the repository-facing references. Runnable copies also live
-  in `projects/Super Metroid Sandbox/Super Metroid Sandbox_smedit/asm/modules/` so the Sandbox can
+  in `projects/Super Metroid ASM Sandbox/asm/modules/` so the ASM Sandbox can
   demonstrate all three without setup.

@@ -9,6 +9,55 @@ import kotlin.test.assertTrue
 
 class AsmBuildArtifactsTest {
     @Test
+    fun `post assembler safety failures have visible diagnostics without losing source errors`() {
+        val directory = createTempDirectory("smedit-pipeline-report-").toFile()
+        try {
+            val projectFile = File(directory, "Example.smedit").apply { writeText("{}") }
+            val repository = AsmBuildArtifactRepository(sourceFingerprintProvider = { "fixture" })
+            repository.publishSuccess(projectFile.path, ByteArray(0), listOf("Assembly complete"), "fixture")
+            repository.publishPipelineFailure(projectFile.path, "PLM list does not match the supported six-byte format")
+            val failure = requireNotNull(repository.load(projectFile.path))
+            assertEquals(false, failure.succeeded)
+            assertTrue(failure.diagnostics.single().message.contains("six-byte format"))
+            assertNull(failure.diagnostics.single().fileId, "pipeline errors must not invent source lines")
+            repository.publishFailure(projectFile.path, listOf("src/bank_90.asm:8: error: Unknown command"))
+            repository.publishPipelineFailure(projectFile.path, "Compilation failed")
+            val sourceError = requireNotNull(repository.load(projectFile.path)).diagnostics.single()
+            assertEquals("bank_90.asm", sourceError.fileId)
+            assertEquals(7, sourceError.lineIndex)
+            assertEquals("Unknown command", sourceError.message)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `generated room snapshot is separate from live diagnostics and empty builds clear it`() {
+        val directory = createTempDirectory("smedit-generated-report-").toFile()
+        try {
+            val projectFile = File(directory, "Example.smedit").apply { writeText("{}") }
+            var fingerprint = "source-v1"
+            val repository = AsmBuildArtifactRepository(sourceFingerprintProvider = { fingerprint })
+            val source = "SmeditRoom_91F8_State0_Plms:\n    dw ${'$'}0000\n"
+            repository.publishSuccess(projectFile.path, ByteArray(0), emptyList(), "fixture", source)
+            val snapshot = requireNotNull(repository.loadGeneratedRooms(projectFile.path))
+            assertEquals(source.lines(), snapshot.lines)
+            assertTrue(snapshot.generatedAt.isNotBlank())
+            fingerprint = "source-v2"
+            assertNull(repository.load(projectFile.path))
+            assertEquals(snapshot, repository.loadGeneratedRooms(projectFile.path), "saved source must not relabel an old snapshot as current")
+            repository.publishFailure(projectFile.path, listOf("Build failed"))
+            assertEquals(false, repository.load(projectFile.path)?.succeeded)
+            assertEquals(snapshot, repository.loadGeneratedRooms(projectFile.path), "an earlier compilation remains inspectable after failure")
+            repository.publishSuccess(projectFile.path, ByteArray(0), emptyList(), "fixture")
+            assertNull(repository.loadGeneratedRooms(projectFile.path), "a no-room compilation must not retain stale generated tables")
+            assertNull(repository.loadGeneratedRooms(File(directory, "Other.smedit").path))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `WLA symbols retain labels and exact source line addresses`() {
         val symbols = AsmWlaSymbolParser.parse(
             """
@@ -168,7 +217,7 @@ class AsmBuildArtifactsTest {
             .map { root ->
                 File(
                     root,
-                    "projects/Super Metroid Sandbox/Super Metroid Sandbox_smedit/asm/original/src",
+                    "parity/work/sm_disassembly/src",
                 )
             }
             .firstOrNull(File::isDirectory)

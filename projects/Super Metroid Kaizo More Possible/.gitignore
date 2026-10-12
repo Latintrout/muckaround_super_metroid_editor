@@ -1,0 +1,6 @@
+# Private ROMs, emulator saves, and generated files. Keep authored asm/ and data/.
+*.[sS][mM][cC]
+*.[sS][fF][cC]
+/smedit/
+/states/
+/exports/

@@ -21,6 +21,41 @@ class AsmToolchainSmokeTest {
     lateinit var tempDirectory: File
 
     @Test
+    fun `symbolic PLM state pointers follow a table when its reserved placement changes`() {
+        val resources = File(requireNotNull(System.getProperty("smedit.testPackagedResourcesDir")))
+        val executableName = "asar-standalone" + if (System.getProperty("os.name").contains("Windows", true)) ".exe" else ""
+        val asar = File(resources, "tools/asar/1.81/$executableName")
+        val table = AsmRoomPlmTable(
+            "SmokePlms", 0x7F000,
+            listOf(com.supermetroid.editor.rom.RomParser.PlmEntry(0xBEEF, 4, 9, 0x100)),
+            listOf(0x7B014, 0x7B034),
+        )
+        for (placement in listOf(0x7F000, 0x7F080)) {
+            val relocated = table.copy(pcOffset = placement)
+            val assembly = File(tempDirectory, "plms.asm").apply {
+                writeText("lorom\n" + relocated.renderSource())
+            }
+            val rom = File(tempDirectory, "plms.sfc").apply { writeBytes(ByteArray(0x80000)) }
+            val process = ProcessBuilder(asar.absolutePath, "--no-title-check", assembly.name, rom.name)
+                .directory(tempDirectory).redirectErrorStream(true).start()
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                error("PLM smoke assembly timed out")
+            }
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            assertEquals(0, process.exitValue(), output)
+            val compiled = rom.readBytes()
+            relocated.claims().forEach { claim ->
+                kotlin.test.assertContentEquals(
+                    claim.bytes, compiled.copyOfRange(claim.pcOffset, claim.endExclusive), claim.label,
+                )
+            }
+            val pointer = (compiled[0x7B014].toInt() and 0xFF) or ((compiled[0x7B015].toInt() and 0xFF) shl 8)
+            assertEquals(relocated.entries, com.supermetroid.editor.rom.RomParser(compiled).parsePlmSet(pointer))
+        }
+    }
+
+    @Test
     fun `packaged Asar installs verifies and assembles a synthetic LoROM`() {
         val resources = File(
             requireNotNull(System.getProperty("smedit.testPackagedResourcesDir")) {

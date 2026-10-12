@@ -72,6 +72,12 @@ import androidx.compose.ui.window.rememberWindowState
 import com.supermetroid.editor.data.AppConfig
 import com.supermetroid.editor.data.ProjectRomBuildMode
 import com.supermetroid.editor.data.RomPreferences
+import com.supermetroid.editor.ui.OpenProject
+import com.supermetroid.editor.ui.ProjectLifecycle
+import com.supermetroid.editor.ui.ProjectFileService
+import com.supermetroid.editor.ui.NewProjectDialog
+import com.supermetroid.editor.ui.LocateProjectRomDialog
+import com.supermetroid.editor.ui.pickProjectOrRom
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.data.WindowConfig
 import com.supermetroid.editor.procgen.TilesetProfileCache
@@ -196,10 +202,24 @@ fun main() = application {
     var romLoadMessageIsError by remember { mutableStateOf(false) }
     val editorState = remember { EditorState() }
     val asmWorkspaceState = remember { AsmWorkspaceState() }
+    var showNewProject by remember { mutableStateOf(false) }
+    var newProjectRom by remember { mutableStateOf<File?>(null) }
+    var missingProjectRom by remember { mutableStateOf<OpenProject?>(null) }
+    var projectDialogError by remember { mutableStateOf<String?>(null) }
+    var pendingProjectAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun requestProjectAction(action: () -> Unit) {
+        if (editorState.dirty || asmWorkspaceState.unsavedSourceFileIds.isNotEmpty()) pendingProjectAction = action
+        else action()
+    }
+
+    fun projectPreferenceKey(romPath: String): String = editorState.project.projectId.ifBlank {
+        editorState.projectFilePath.ifBlank { File(romPath).absolutePath }
+    }
 
     fun pickDefaultRoom(allRooms: List<RoomInfo>, romPath: String): RoomInfo? {
-        val romKey = File(romPath).name
-        val lastRoomId = AppConfig.load().lastRoomPerRom[romKey]
+        val romKey = projectPreferenceKey(romPath)
+        val lastRoomId = AppConfig.load().lastRoomPerProject[romKey]
         if (lastRoomId != null) {
             val found = allRooms.firstOrNull { it.id == lastRoomId }
             if (found != null) return found
@@ -210,9 +230,9 @@ fun main() = application {
     }
 
     fun saveLastRoom(romPath: String, room: RoomInfo) {
-        val romKey = File(romPath).name
+        val romKey = projectPreferenceKey(romPath)
         AppConfig.update {
-            copy(lastRoomPerRom = lastRoomPerRom + (romKey to room.id))
+            copy(lastRoomPerProject = lastRoomPerProject + (romKey to room.id))
         }
     }
 
@@ -220,44 +240,73 @@ fun main() = application {
         RomParser.loadRom(path)
     }
 
-    // Load requested ROM on startup.
-    LaunchedEffect(Unit) {
-        // Auto-load requested ROM first, then fall back to last ROM if available.
-        val bootRomPath = RomPreferences.getLastRomPath()
-        if (bootRomPath != null) {
-            try {
-                romLoadInFlight = true
-                TilesetProfileCache.invalidate()
-                val parser = loadRomParser(bootRomPath)
-                val catalog = parser.roomCatalog
-                romFileName = File(bootRomPath).nameWithoutExtension
-                romLoadMessage = catalog.loadNotice(File(bootRomPath).name)
-                romLoadMessageIsError = false
-                RomPreferences.setLastRomPath(bootRomPath)
-                if (catalog.editable) {
-                    editorState.initForRom(bootRomPath)
-                    val workspace = editorState.prepareWorkspaceParser(parser)
-                    romParser = workspace
-                    rooms = workspace.roomCatalog.rooms
-                } else {
-                    editorState.initForReadOnlyRom(bootRomPath)
-                    romParser = parser
-                    rooms = catalog.rooms
+    suspend fun openProjectOrRom(file: File) {
+        romLoadInFlight = true
+        projectDialogError = null
+        try {
+            val projectFile = withContext(Dispatchers.IO) { ProjectLifecycle.projectBeside(file) }
+            val open = projectFile?.let { withContext(Dispatchers.IO) { OpenProject(it, ProjectFileService.loadProject(it)) } }
+            val base = open?.project?.romPath?.let(::File) ?: file
+            if (open != null) {
+                val problem = withContext(Dispatchers.IO) {
+                    runCatching {
+                        ProjectLifecycle.verify(open.project, base)
+                        require(base.canonicalFile.parentFile == open.file.canonicalFile.parentFile) {
+                            "Import the base ROM into this project's folder before continuing."
+                        }
+                    }.exceptionOrNull()
                 }
-                if (selectedRoom == null) {
-                    selectedRoom = pickDefaultRoom(rooms, bootRomPath)
+                if (problem != null) {
+                    missingProjectRom = open
+                    projectDialogError = problem.message
+                    return
                 }
-            } catch (e: Exception) {
-                mainLog.error(e) { "Failed to auto-load ROM: ${e.message}" }
-                romLoadMessage = e.message ?: "Failed to auto-load ROM."
-                romLoadMessageIsError = true
-                romParser = null
-                rooms = emptyList()
-                selectedRoom = null
-            } finally {
-                romLoadInFlight = false
             }
-        }
+            val parser = loadRomParser(base.absolutePath)
+            val catalog = withContext(Dispatchers.IO) { parser.roomCatalog }
+            if (open == null && catalog.editable) {
+                newProjectRom = base
+                showNewProject = true
+                return
+            }
+            // Validate project-owned room allocation before replacing the active
+            // editor state. A damaged project must not leave its edits paired
+            // with the previously open ROM after an unsuccessful OPEN.
+            if (open != null && open.project.newRooms.isNotEmpty()) withContext(Dispatchers.IO) {
+                val data = parser.copyRomData()
+                com.supermetroid.editor.rom.ProjectNewRoomMaterializer(open.project, RomParser(data), data).materialize()
+            }
+            TilesetProfileCache.invalidate()
+            if (open != null && catalog.editable) {
+                editorState.initForProject(open.file, open.project.copy(
+                    baseRom = open.project.baseRom ?: withContext(Dispatchers.IO) { ProjectLifecycle.identity(base) },
+                ))
+                romParser = editorState.prepareWorkspaceParser(parser)
+                RomPreferences.setLastProjectPath(open.file.absolutePath)
+            } else {
+                require(open == null) { "This project's ROM cannot be edited. Open the ROM separately for read-only inspection." }
+                editorState.initForReadOnlyRom(base.absolutePath)
+                romParser = parser
+                RomPreferences.clearLastProjectPath()
+            }
+            rooms = romParser!!.roomCatalog.rooms
+            selectedRoom = pickDefaultRoom(rooms, base.absolutePath)
+            romFileName = open?.file?.nameWithoutExtension ?: base.nameWithoutExtension
+            romLoadMessage = catalog.loadNotice(base.name)
+            romLoadMessageIsError = false
+            RomPreferences.setLastRomPath(base.absolutePath)
+            missingProjectRom = null
+            showNewProject = false
+        } catch (e: Exception) {
+            mainLog.error(e) { "Failed to open project/ROM: ${e.message}" }
+            projectDialogError = e.message
+            romLoadMessage = e.message ?: "Failed to open project/ROM."
+            romLoadMessageIsError = true
+        } finally { romLoadInFlight = false }
+    }
+
+    LaunchedEffect(Unit) {
+        (RomPreferences.getLastProjectPath() ?: RomPreferences.getLastRomPath())?.let { openProjectOrRom(File(it)) }
     }
     
     val appSettings = remember { AppConfig.load() }
@@ -338,6 +387,39 @@ fun main() = application {
             var romLoadMessageDetailsOpen by remember { mutableStateOf(false) }
             var romLoadMessageDismissedFor by remember { mutableStateOf<String?>(null) }
             val fs = editorThemeState.fontSize.value
+            if (showNewProject) NewProjectDialog(newProjectRom, romLoadInFlight, projectDialogError,
+                onDismiss = { showNewProject = false; projectDialogError = null },
+                onCreate = { name, parent, base -> scope.launch {
+                    romLoadInFlight = true
+                    projectDialogError = null
+                    try {
+                        val created = withContext(Dispatchers.IO) { ProjectLifecycle.create(name, parent, base) }
+                        openProjectOrRom(created.file)
+                    } catch (e: Exception) { projectDialogError = e.message }
+                    finally { romLoadInFlight = false }
+                } },
+            )
+            missingProjectRom?.let { open -> LocateProjectRomDialog(open, romLoadInFlight, projectDialogError,
+                onDismiss = { missingProjectRom = null; projectDialogError = null },
+                onLocate = { base -> scope.launch {
+                    romLoadInFlight = true
+                    projectDialogError = null
+                    try {
+                        withContext(Dispatchers.IO) { ProjectLifecycle.importBase(open, base) }
+                        openProjectOrRom(open.file)
+                    } catch (e: Exception) { projectDialogError = e.message }
+                    finally { romLoadInFlight = false }
+                } },
+            ) }
+            pendingProjectAction?.let { action ->
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { pendingProjectAction = null },
+                    title = { Text("Leave unsaved changes?") },
+                    text = { Text("Project edits or ASM buffers have not been saved. Cancel to save them first.") },
+                    confirmButton = { Button(onClick = { pendingProjectAction = null; action() }) { Text("Continue") } },
+                    dismissButton = { androidx.compose.material3.TextButton(onClick = { pendingProjectAction = null }) { Text("Cancel") } },
+                )
+            }
             val romCatalog = romParser?.roomCatalog
             val romEditable = romCatalog?.editable == true
             val romReadOnly = romCatalog?.readOnly == true
@@ -357,6 +439,7 @@ fun main() = application {
             val textEditorState = remember { TextEditorState() }
             var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns, 2 = Palette
             val navigationHistory = remember { EditorNavigationHistory<EditorNavigationLocation>() }
+            LaunchedEffect(editorState.projectFilePath, editorState.project.romPath) { navigationHistory.clear() }
 
             fun captureNavigationLocation() = EditorNavigationLocation(
                 tab = leftTab,
@@ -559,7 +642,7 @@ fun main() = application {
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
             ) {
-                // Top bar: Open ROM + status (left) | Save + Export (right)
+                // Project entry points (left) | Save + execution/export (right)
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -570,55 +653,21 @@ fun main() = application {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
-                            enabled = !romLoadInFlight,
+                            enabled = !romLoadInFlight && !editorState.romBuildInProgress && !asmWorkspaceState.previewBusy && !asmWorkspaceState.busy,
                             shape = RoundedCornerShape(6.dp),
-                            onClick = {
-                                val fileDialog = FileDialog(null as Frame?, "Open Super Metroid ROM", FileDialog.LOAD)
-                                fileDialog.setFilenameFilter { _, name ->
-                                    name.endsWith(".smc", ignoreCase = true) || 
-                                    name.endsWith(".sfc", ignoreCase = true)
-                                }
-                                fileDialog.isVisible = true
-                                val selectedFile = fileDialog.file
-                                if (selectedFile != null) {
-                                    val file = File(fileDialog.directory, selectedFile)
-                                    navigationHistory.clear()
-                                    scope.launch {
-                                        romLoadInFlight = true
-                                        try {
-                                            TilesetProfileCache.invalidate()
-                                            val parser = loadRomParser(file.absolutePath)
-                                            val catalog = parser.roomCatalog
-                                            romFileName = file.nameWithoutExtension
-                                            romLoadMessage = catalog.loadNotice(file.name)
-                                            romLoadMessageIsError = false
-                                            RomPreferences.setLastRomPath(file.absolutePath)
-                                            if (catalog.editable) {
-                                                editorState.initForRom(file.absolutePath)
-                                                val workspace = editorState.prepareWorkspaceParser(parser)
-                                                romParser = workspace
-                                                rooms = workspace.roomCatalog.rooms
-                                            } else {
-                                                editorState.initForReadOnlyRom(file.absolutePath)
-                                                romParser = parser
-                                                rooms = catalog.rooms
-                                            }
-                                            selectedRoom = pickDefaultRoom(rooms, file.absolutePath)
-                                        } catch (e: Exception) {
-                                            mainLog.error(e) { "Failed to load selected ROM: ${e.message}" }
-                                            romParser = null
-                                            romFileName = null
-                                            rooms = emptyList()
-                                            selectedRoom = null
-                                            romLoadMessage = e.message ?: "Failed to load selected ROM."
-                                            romLoadMessageIsError = true
-                                        } finally {
-                                            romLoadInFlight = false
-                                        }
-                                    }
-                                }
-                            }
-                        ) { Text(if (romLoadInFlight) "Loading ROM..." else "Open ROM...", fontSize = fs.body) }
+                            onClick = { requestProjectAction {
+                                projectDialogError = null
+                                newProjectRom = null
+                                showNewProject = true
+                            } },
+                        ) { Text("NEW", fontSize = fs.body) }
+                        Button(
+                            enabled = !romLoadInFlight && !editorState.romBuildInProgress && !asmWorkspaceState.previewBusy && !asmWorkspaceState.busy,
+                            shape = RoundedCornerShape(6.dp),
+                            onClick = { requestProjectAction {
+                                pickProjectOrRom()?.let { file -> scope.launch { openProjectOrRom(file) } }
+                            } },
+                        ) { Text(if (romLoadInFlight) "Opening…" else "OPEN", fontSize = fs.body) }
                         if (romFileName != null) {
                             Text(
                                 "Loaded: $romFileName${if (romReadOnly) " (read-only)" else ""}",
@@ -1165,7 +1214,7 @@ fun main() = application {
                                     TAB_ASM -> AsmWorkspaceSidebar(
                                         state = asmWorkspaceState,
                                         romParser = romParser,
-                                        romName = romFileName,
+                                        romName = File(editorState.project.romPath).name,
                                         projectFilePath = editorState.projectFilePath,
                                         projectAsmEnabled = editorState.project.asmWorkspace.enabled,
                                         onProjectAsmEnabled = {

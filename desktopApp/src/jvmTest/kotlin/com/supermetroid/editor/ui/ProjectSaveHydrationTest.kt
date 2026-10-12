@@ -13,7 +13,7 @@ class ProjectSaveHydrationTest {
 
     @Test
     fun `save persists deterministic patch hydration before clearing dirty state`() {
-        val rom = File(tempDirectory, "Hydration.smc").apply { writeBytes(ByteArray(0)) }
+        val rom = File(tempDirectory, "Hydration.smc").apply { writeBytes(ByteArray(0x8000)) }
         val state = EditorState().also {
             it.testMode = true
             it.initForRom(rom.absolutePath)

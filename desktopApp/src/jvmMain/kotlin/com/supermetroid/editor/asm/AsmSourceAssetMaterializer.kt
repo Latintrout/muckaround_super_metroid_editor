@@ -57,15 +57,18 @@ internal class AsmSourceAssetMaterializer(
     fun materialize(
         projectFilePath: String,
         report: RomWritePlanReport,
+        excludedOwners: Set<String> = emptySet(),
     ): AsmAssetMaterialization {
-        val workspace = workspaceRepository.load(projectFilePath)
+        // Materialization needs paths, not another full IDE symbol/usage index.
+        val workspace = workspaceRepository.loadForBuild(projectFilePath)
             ?: throw AsmCompilationException("Project ASM workspace is unavailable for asset generation")
-        return materializeDataRoot(File(workspace.workingDirectory, "data"), report)
+        return materializeDataRoot(File(workspace.workingDirectory, "data"), report, excludedOwners)
     }
 
     internal fun materializeDataRoot(
         dataRoot: File,
         report: RomWritePlanReport,
+        excludedOwners: Set<String> = emptySet(),
     ): AsmAssetMaterialization {
         val overrides = linkedMapOf<String, ByteArray>()
         val baselines = linkedMapOf<String, ByteArray>()
@@ -76,7 +79,11 @@ internal class AsmSourceAssetMaterializer(
             .map { it.offset..it.endInclusive }
 
         report.writes.forEach { write ->
-            if (write.kind !in MATERIALIZABLE_KINDS || write.owner == COMMUNITY_SAMUS_OWNER) return@forEach
+            if (
+                write.kind !in MATERIALIZABLE_KINDS ||
+                write.owner == COMMUNITY_SAMUS_OWNER ||
+                write.owner in excludedOwners
+            ) return@forEach
             eligible++
             if (allocatedRanges.any { write.offset <= it.last && it.first <= write.endInclusive }) {
                 skipped++

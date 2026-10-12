@@ -122,7 +122,7 @@ class ProjectFileServiceTest {
     @Test
     fun `loaded ROM build refuses to ignore saved ASM source overrides`() {
         val projectFile = File(tempDir, "asm-edited.smedit").apply { writeText("{}") }
-        val override = File(tempDir, "asm-edited_smedit/asm/overrides/src/bank_90.asm")
+        val override = File(tempDir, "asm/overrides/src/bank_90.asm")
         override.parentFile.mkdirs()
         override.writeText("; saved project edit")
         val project = SmEditProject(romPath = "base.smc").also {

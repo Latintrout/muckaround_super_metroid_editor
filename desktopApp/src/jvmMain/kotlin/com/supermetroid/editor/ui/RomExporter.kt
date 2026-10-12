@@ -186,13 +186,14 @@ internal data class RomBuildResult(
     val asmPatched: Int,
     val sourcePatched: Int = 0,
     val sourceAssetPatched: Int = 0,
+    val sourceRoomPatched: Int = 0,
     val sourcePatchPatched: Int = 0,
 ) {
     val hasSemanticEdits: Boolean
         get() = roomsPatched > 0 || patchesApplied > 0 || musicPatched > 0 ||
             graphicsPatched > 0 || samusPatched > 0 || minimapPatched > 0 ||
             textPatched > 0 || asmPatched > 0 || sourcePatched > 0 || sourceAssetPatched > 0 ||
-            sourcePatchPatched > 0
+            sourceRoomPatched > 0 || sourcePatchPatched > 0
 }
 
 /**
@@ -209,13 +210,8 @@ internal class RomExporter(
     private val onStatus: (String) -> Unit = {},
     private val logWritePlanDetails: Boolean = true,
     private val compiledAsmBase: AsmCompiledBuildBase? = null,
+    private val projectFilePath: String = "",
 ) {
-
-    private fun exportSuffix(): String {
-        val version = "v${project.versionMajor}.${project.versionMinor}"
-        val build = project.buildName.trim()
-        return if (build.isNotEmpty()) "$build-$version" else version
-    }
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
@@ -237,6 +233,7 @@ internal class RomExporter(
                 "[ASM-BUILD] ${compiledAsmBase.assemblerVersion} compiled project source; " +
                     "${compiledAsmBase.sourceOwnedRanges.size} authored range(s), " +
                     "${compiledAsmBase.generatedAssetClaims.size} generated asset range(s), " +
+                    "${compiledAsmBase.generatedRoomClaims.size} generated room range(s), " +
                     "${compiledAsmBase.generatedPatchClaims.size} ASM patch range(s)"
             )
         }
@@ -277,6 +274,15 @@ internal class RomExporter(
                 offset = claim.pcOffset,
                 size = claim.length,
                 kind = RomWriteKind.ASM_ASSET,
+            )
+        }
+        compiledAsmBase?.generatedRoomClaims?.forEach { claim ->
+            writePlan.claimCurrentRange(
+                owner = claim.owner,
+                label = claim.label,
+                offset = claim.pcOffset,
+                size = claim.length,
+                kind = RomWriteKind.ASM_ROOM,
             )
         }
         compiledAsmBase?.generatedPatchClaims?.forEach { claim ->
@@ -388,33 +394,45 @@ internal class RomExporter(
 
             try {
                 if (ProjectRoomExporter.hasRoomEdits(project)) {
-                    val owner = "room-graph:project"
-                    val roomExportResult = writePlan.capture(
-                        owner = owner,
-                        label = "Project room graph",
-                        kind = RomWriteKind.ROOM,
-                        overlapPolicy = com.supermetroid.editor.rom.RomOverlapPolicy.ALLOW_SAME_OWNER,
-                    ) { workingRom ->
-                        ProjectRoomExporter(
-                            project = project,
-                            romParser = RomParser(workingRom),
-                            romData = workingRom,
-                            roomAreaOverrides = project.rooms.mapNotNull { (key, edits) ->
-                                val roomId = key.toIntOrNull(16) ?: return@mapNotNull null
-                                edits.roomHeaderChange?.area?.let { roomId to it }
-                            }.toMap(),
-                            freeSpaceAllocator = freeSpaceAllocator,
-                            onLog = onLog,
-                        ).exportRooms()
-                    }
-                    roomsPatched.addAll(roomExportResult.roomsPatched)
-                    for (allocation in roomExportResult.allocations) {
-                        writePlan.claimCurrentRange(
-                            owner = owner,
-                            label = allocation.label,
-                            offset = allocation.pcOffset - writePlan.headerSize,
-                            size = allocation.size,
+                    val compiledRoomIds = compiledAsmBase?.generatedRoomIds.orEmpty()
+                    if (compiledAsmBase?.generatedRoomClaims.orEmpty().isNotEmpty()) {
+                        require(compiledRoomIds.isNotEmpty()) {
+                            "Compiled room source has byte claims but no room identities"
+                        }
+                        roomsPatched.addAll(compiledRoomIds)
+                        onLog(
+                            "[EXPORT] ASM backend supplied the complete room graph for " +
+                                "${compiledRoomIds.size} existing room(s)"
                         )
+                    } else {
+                        val owner = "room-graph:project"
+                        val roomExportResult = writePlan.capture(
+                            owner = owner,
+                            label = "Project room graph",
+                            kind = RomWriteKind.ROOM,
+                            overlapPolicy = com.supermetroid.editor.rom.RomOverlapPolicy.ALLOW_SAME_OWNER,
+                        ) { workingRom ->
+                            ProjectRoomExporter(
+                                project = project,
+                                romParser = RomParser(workingRom),
+                                romData = workingRom,
+                                roomAreaOverrides = project.rooms.mapNotNull { (key, edits) ->
+                                    val roomId = key.toIntOrNull(16) ?: return@mapNotNull null
+                                    edits.roomHeaderChange?.area?.let { roomId to it }
+                                }.toMap(),
+                                freeSpaceAllocator = freeSpaceAllocator,
+                                onLog = onLog,
+                            ).exportRooms()
+                        }
+                        roomsPatched.addAll(roomExportResult.roomsPatched)
+                        for (allocation in roomExportResult.allocations) {
+                            writePlan.claimCurrentRange(
+                                owner = owner,
+                                label = allocation.label,
+                                offset = allocation.pcOffset - writePlan.headerSize,
+                                size = allocation.size,
+                            )
+                        }
                     }
                 }
             } catch (e: ProjectRoomExportException) {
@@ -454,12 +472,32 @@ internal class RomExporter(
             )
         }
         val finalRom = writePlan.finalRom()
-        compiledAsmBase?.expectedFinalRomSha256?.let { expected ->
-            val actual = bytesSha256(finalRom)
+        compiledAsmBase?.expectedFinalParitySha256?.let { expected ->
+            val actual = asmGeneratedParitySha256(finalRom)
             if (actual != expected) {
+                val expectedBytes = compiledAsmBase.expectedFinalRomBytes
+                val differingBytes = if (expectedBytes != null && expectedBytes.size == finalRom.size) {
+                    expectedBytes.indices
+                        .asSequence()
+                        .filter {
+                            !isSnesInternalChecksumOffset(finalRom, it) && expectedBytes[it] != finalRom[it]
+                        }
+                        .take(8)
+                        .map { offset ->
+                            val expectedByte = expectedBytes[offset].toInt() and 0xFF
+                            val actualByte = finalRom[offset].toInt() and 0xFF
+                            "0x${offset.toString(16).uppercase().padStart(6, '0')} " +
+                                "${expectedByte.toString(16).uppercase().padStart(2, '0')}→" +
+                                actualByte.toString(16).uppercase().padStart(2, '0')
+                        }
+                        .toList()
+                } else {
+                    emptyList()
+                }
+                val detail = if (differingBytes.isEmpty()) "" else "; first differences: ${differingBytes.joinToString()}"
                 val message =
                     "Export failed safely: generated ASM inputs changed the planned ROM result " +
-                        "(expected ${expected.take(12)}, got ${actual.take(12)})"
+                        "(expected ${expected.take(12)}, got ${actual.take(12)}$detail)"
                 onLog("ERROR: $message")
                 onStatus(message)
                 return null
@@ -471,6 +509,7 @@ internal class RomExporter(
             samusPatched == 0 && minimapPatched == 0 && textPatched == 0 && asmPatched == 0 &&
             compiledAsmBase?.sourceOwnedRanges.orEmpty().isEmpty() &&
             compiledAsmBase?.generatedAssetClaims.orEmpty().isEmpty() &&
+            compiledAsmBase?.generatedRoomClaims.orEmpty().isEmpty() &&
             compiledAsmBase?.generatedPatchClaims.orEmpty().isEmpty()
         ) {
             return RomBuildResult(
@@ -488,6 +527,7 @@ internal class RomExporter(
                 asmPatched = asmPatched,
                 sourcePatched = compiledAsmBase?.sourceOwnedRanges?.sumOf { it.length } ?: 0,
                 sourceAssetPatched = compiledAsmBase?.generatedAssetClaims?.sumOf { it.length } ?: 0,
+                sourceRoomPatched = compiledAsmBase?.generatedRoomClaims?.sumOf { it.length } ?: 0,
                 sourcePatchPatched = compiledAsmBase?.generatedPatchClaims?.sumOf { it.length } ?: 0,
             )
         }
@@ -540,14 +580,15 @@ internal class RomExporter(
             asmPatched = asmPatched,
             sourcePatched = compiledAsmBase?.sourceOwnedRanges?.sumOf { it.length } ?: 0,
             sourceAssetPatched = compiledAsmBase?.generatedAssetClaims?.sumOf { it.length } ?: 0,
+            sourceRoomPatched = compiledAsmBase?.generatedRoomClaims?.sumOf { it.length } ?: 0,
             sourcePatchPatched = compiledAsmBase?.generatedPatchClaims?.sumOf { it.length } ?: 0,
         )
     }
 
     fun export(): String? {
+        val path = projectFilePath.ifBlank { File(project.romPath).resolveSibling("${File(project.romPath).nameWithoutExtension}.smedit").path }
+        val out = com.supermetroid.editor.data.ProjectPaths.forProject(path).romOutput(project)
         val build = build() ?: return null
-        val orig = File(project.romPath)
-        val out = File(orig.parent, "${orig.nameWithoutExtension}-${exportSuffix()}.${orig.extension}")
         try {
             writeBytesAtomically(out, build.resultRom)
         } catch (e: Exception) {
@@ -571,7 +612,12 @@ internal class RomExporter(
         } else {
             ""
         }
-        val msg = "Exported ROM: ${out.absolutePath} (${build.roomsPatched} rooms, ${build.patchesApplied} patches, ${build.musicPatched} music, ${build.graphicsPatched} gfx, ${build.samusPatched} Samus$sourceSummary$sourceAssetSummary$sourcePatchSummary)"
+        val sourceRoomSummary = if (build.sourceRoomPatched > 0) {
+            ", ${build.sourceRoomPatched} generated ASM room bytes"
+        } else {
+            ""
+        }
+        val msg = "Exported ROM: ${out.absolutePath} (${build.roomsPatched} rooms, ${build.patchesApplied} patches, ${build.musicPatched} music, ${build.graphicsPatched} gfx, ${build.samusPatched} Samus$sourceSummary$sourceAssetSummary$sourceRoomSummary$sourcePatchSummary)"
         onLog(msg)
         onStatus(msg)
         return out.absolutePath
@@ -1954,8 +2000,7 @@ internal class RomExporter(
         val patched = File(smcPath).readBytes()
 
         val ipsData = buildIpsPatch(original, patched)
-        val orig = File(romPath)
-        val ipsFile = File(orig.parent, "${orig.nameWithoutExtension}-${exportSuffix()}.ips")
+        val ipsFile = File(smcPath).let { File(it.parentFile, "${it.nameWithoutExtension}.ips") }
         try {
             writeBytesAtomically(ipsFile, ipsData)
         } catch (e: Exception) {

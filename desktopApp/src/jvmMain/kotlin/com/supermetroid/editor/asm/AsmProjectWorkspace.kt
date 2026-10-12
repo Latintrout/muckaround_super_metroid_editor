@@ -1,5 +1,6 @@
 package com.supermetroid.editor.asm
 
+import com.supermetroid.editor.data.ProjectPaths
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -56,7 +57,7 @@ internal data class AsmProjectBuildWorkspace(
 )
 
 /**
- * Owns the project-local ASM sidecar. Initial creation is transactional and
+ * Owns authored asm/ plus the generated smedit/asm/ cache. Initial creation is transactional and
  * never mutates the global downloaded reference. An immutable original tree is
  * retained beside the working tree so restore remains available offline.
  */
@@ -67,7 +68,7 @@ internal class AsmProjectWorkspaceRepository(
     fun load(projectFilePath: String): AsmProjectWorkspace? {
         synchronizeProjectModules(projectFilePath)
         val buildWorkspace = loadForBuild(projectFilePath) ?: return null
-        val metadata = readMetadata(File(buildWorkspace.root, METADATA_FILE)) ?: return null
+        val metadata = readMetadata(File(cacheRoot(buildWorkspace.root), METADATA_FILE)) ?: return null
         val workspace = referenceWorkspace(buildWorkspace.workingDirectory, metadata.reference)
         val projectModuleFileIds = readProjectModuleOrder(buildWorkspace.workingDirectory)
         val disabledProjectModuleFileIds = buildWorkspace.disabledProjectModuleFileIds
@@ -88,12 +89,13 @@ internal class AsmProjectWorkspaceRepository(
     fun loadForBuild(projectFilePath: String): AsmProjectBuildWorkspace? {
         val root = projectRoot(projectFilePath) ?: return null
         if (!root.isDirectory) return null
-        val metadata = readMetadata(File(root, METADATA_FILE)) ?: return null
+        val cache = cacheRoot(root)
+        val metadata = readMetadata(File(cache, METADATA_FILE)) ?: return null
         if (metadata.layoutVersion != LAYOUT_VERSION || metadata.reference.commit != AsmReferenceContract.COMMIT) {
             return null
         }
-        val original = File(root, ORIGINAL_DIRECTORY)
-        val working = File(root, WORKING_DIRECTORY)
+        val original = File(cache, ORIGINAL_DIRECTORY)
+        val working = File(cache, WORKING_DIRECTORY)
         if (!File(original, "src/main.asm").isFile || !File(working, "src/main.asm").isFile) return null
         if (!assetRanges.all { File(working, "data/${it.path}").isFile }) return null
         val modulesDirectory = File(root, MODULES_DIRECTORY)
@@ -131,7 +133,8 @@ internal class AsmProjectWorkspaceRepository(
             "Save the SMEDIT project before enabling project ASM"
         }
         load(projectFilePath)?.let { return it }
-        val sidecar = target.parentFile
+        val cache = cacheRoot(target)
+        val sidecar = cache.parentFile
         sidecar.mkdirs()
         val staging = File(sidecar, ".asm.installing-${UUID.randomUUID()}")
         requireManagedChild(sidecar, staging)
@@ -146,18 +149,13 @@ internal class AsmProjectWorkspaceRepository(
             copyTree(File(original, "data"), File(working, "data"))
             val existingOverrides = File(target, OVERRIDES_DIRECTORY)
             if (existingOverrides.isDirectory) {
-                copyTree(existingOverrides, File(staging, OVERRIDES_DIRECTORY))
-                applySourceOverrides(File(staging, OVERRIDES_DIRECTORY), File(working, "src"))
+                applySourceOverrides(existingOverrides, File(working, "src"))
             }
             val existingModules = File(target, MODULES_DIRECTORY)
-            if (existingModules.isDirectory && existingModules.listFiles().orEmpty().any {
-                    it.isFile && it.extension.equals("asm", ignoreCase = true)
-                }
-            ) {
-                copyTree(existingModules, File(staging, MODULES_DIRECTORY))
-                ensureProjectModuleDirectory(File(staging, MODULES_DIRECTORY))
+            if (existingModules.isDirectory) {
+                ensureProjectModuleDirectory(existingModules)
                 syncProjectModules(
-                    modulesDirectory = File(staging, MODULES_DIRECTORY),
+                    modulesDirectory = existingModules,
                     workingSourceRoot = File(working, "src"),
                 )
             } else if (starterModules.isNotEmpty()) {
@@ -166,7 +164,7 @@ internal class AsmProjectWorkspaceRepository(
                     workingSourceRoot = File(working, "src"),
                 )
             }
-            File(staging, ".gitignore").writeText(PROJECT_ASM_GITIGNORE)
+            File(sidecar, ".gitignore").writeText("*\n")
             writeMetadata(
                 File(staging, METADATA_FILE),
                 AsmProjectMetadata(
@@ -184,7 +182,16 @@ internal class AsmProjectWorkspaceRepository(
             // Parse before activation so an incomplete or malformed tree never
             // becomes the project's live workspace.
             referenceWorkspace(working, reference.metadata)
-            activateDirectory(staging, target)
+            // Authored source survives cache rebuilds. Publish starter modules only
+            // when this project has no modules; never replace user-authored files.
+            val starters = File(staging, MODULES_DIRECTORY)
+            if (starters.isDirectory) {
+                target.mkdirs()
+                require(!existingModules.exists()) { "ASM modules folder already exists; no authored files were replaced." }
+                Files.move(starters.toPath(), existingModules.toPath())
+            }
+            target.mkdirs()
+            activateDirectory(staging, cache)
             return checkNotNull(load(projectFilePath)) { "Project ASM workspace did not validate after creation" }
         } catch (problem: Exception) {
             deleteTree(sidecar, staging)
@@ -237,6 +244,8 @@ internal class AsmProjectWorkspaceRepository(
     }
 
     fun rootFor(projectFilePath: String): File? = projectRoot(projectFilePath)
+
+    fun cacheFor(projectFilePath: String): File? = projectRoot(projectFilePath)?.let(::cacheRoot)
 
     /**
      * Saved project source edits are mirrored as small override files. Reading
@@ -412,43 +421,11 @@ internal class AsmProjectWorkspaceRepository(
 
     private fun synchronizeProjectModules(projectFilePath: String) {
         val root = projectRoot(projectFilePath) ?: return
-        val workingSourceRoot = File(root, "$WORKING_DIRECTORY/src")
+        val workingSourceRoot = File(cacheRoot(root), "$WORKING_DIRECTORY/src")
         if (!workingSourceRoot.isDirectory) return
         val modulesDirectory = File(root, MODULES_DIRECTORY)
-        val legacyProjectSource = File(workingSourceRoot, ASM_PROJECT_MODULE_DIRECTORY)
-        val legacyModules = legacyProjectSource.listFiles().orEmpty()
-            .filter { it.isFile && it.extension.equals("asm", ignoreCase = true) }
-        if (modulesDirectory.isDirectory && modulesDirectory.listFiles().orEmpty().none {
-                it.isFile && it.extension.equals("asm", ignoreCase = true)
-            }
-        ) {
-            Files.deleteIfExists(File(modulesDirectory, ASM_PROJECT_MODULE_ORDER_FILE).toPath())
-            Files.deleteIfExists(File(modulesDirectory, ASM_PROJECT_MODULE_DISABLED_FILE).toPath())
-            modulesDirectory.delete()
-            if (legacyModules.isEmpty()) {
-                if (legacyProjectSource.exists()) deleteTree(workingSourceRoot, legacyProjectSource)
-                return
-            }
-        }
-        if (!modulesDirectory.exists()) {
-            if (legacyModules.isEmpty()) {
-                if (legacyProjectSource.exists()) deleteTree(workingSourceRoot, legacyProjectSource)
-                return
-            }
-            modulesDirectory.mkdirs()
-            legacyModules.forEach { source ->
-                Files.copy(source.toPath(), File(modulesDirectory, source.name).toPath())
-            }
-            val legacyOrder = File(legacyProjectSource, ASM_PROJECT_MODULE_ORDER_FILE)
-                .takeIf(File::isFile)
-                ?.readLines()
-                ?.map(String::trim)
-                ?.filter { name -> legacyModules.any { it.name == name } }
-                .orEmpty()
-            val remaining = legacyModules.map(File::getName).filterNot(legacyOrder::contains).sorted()
-            writeModuleOrder(modulesDirectory, legacyOrder + remaining)
-        }
-        ensureProjectModuleDirectory(modulesDirectory)
+        // The cache is never an alternate authority. In particular, deleting an
+        // authored module must not resurrect it from an old generated mirror.
         syncProjectModules(modulesDirectory, workingSourceRoot)
     }
 
@@ -637,11 +614,10 @@ internal class AsmProjectWorkspaceRepository(
 
     private fun projectRoot(projectFilePath: String): File? {
         if (projectFilePath.isBlank()) return null
-        val projectFile = File(projectFilePath).absoluteFile
-        val parent = projectFile.parentFile ?: return null
-        val sidecar = File(parent, "${projectFile.nameWithoutExtension}_smedit")
-        return File(sidecar, "asm")
+        return ProjectPaths.forProject(projectFilePath).asm
     }
+
+    private fun cacheRoot(asmRoot: File): File = ProjectPaths.asmCacheIn(asmRoot.parentFile)
 
     private fun modifiedSourceFiles(original: File, working: File): Set<String> {
         val originalRoot = File(original, "src")
@@ -826,13 +802,5 @@ internal class AsmProjectWorkspaceRepository(
         const val OVERRIDES_DIRECTORY = "overrides"
         const val MODULES_DIRECTORY = "modules"
         const val ASM_PROJECT_MODULE_DIRECTORY = "project"
-        val PROJECT_ASM_GITIGNORE = """
-            # Generated ASM snapshots and ROM-derived assets stay local.
-            # overrides/ and modules/ are intentional project-authored source.
-            /original/
-            /workspace/
-            /build/
-            /.smedit-project-asm.properties
-        """.trimIndent() + "\n"
     }
 }

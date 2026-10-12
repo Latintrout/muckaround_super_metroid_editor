@@ -18,6 +18,7 @@ enum class RomWriteKind {
     CUSTOM_ASM,
     ASM_SOURCE,
     ASM_ASSET,
+    ASM_ROOM,
     ASM_PATCH,
     RAW,
 }

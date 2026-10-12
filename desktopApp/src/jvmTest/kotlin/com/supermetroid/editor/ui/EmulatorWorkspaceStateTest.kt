@@ -296,8 +296,8 @@ class EmulatorWorkspaceStateTest {
         state.updateProjectFilePath("/Users/tester/roms/Super Metroid (JU) [!].smedit")
         val dir = state.projectStateDir()
         val normalizedPath = dir.path.replace('\\', '/')
-        assertTrue(normalizedPath.endsWith("Super Metroid (JU) [!]_states")) {
-            "Expected path to end with 'Super Metroid (JU) [!]_states' but was '$normalizedPath'"
+        assertTrue(normalizedPath.endsWith("/states")) {
+            "Expected project-root states but was '$normalizedPath'"
         }
         assertTrue(normalizedPath.contains("/Users/tester/roms/")) {
             "Expected states dir to be alongside the project file but was '$normalizedPath'"
