@@ -10,6 +10,7 @@ internal data class AsmRoomPlmTable(
     val pcOffset: Int,
     val entries: List<RomParser.PlmEntry>,
     val pointerPcOffsets: List<Int>,
+    val authoredMacro: String? = null,
 ) {
     val bytes: ByteArray get() = RomParser.serializePlmSet(entries).map(Int::toByte).toByteArray()
 
@@ -37,13 +38,18 @@ internal data class AsmRoomPlmTable(
         appendLine("; PLM list: word ID, byte X/Y, word parameter; word zero terminator.")
         appendLine("org ${snesLiteral(pcOffset)}")
         appendLine("$label:")
-        entries.forEach { entry ->
-            // Explicit primitives keep the verified layout independent of user-edited macros.
-            appendLine("    dw ${hex(entry.id, 4)}")
-            appendLine("    db ${hex(entry.x, 2)}, ${hex(entry.y, 2)}")
-            appendLine("    dw ${hex(entry.param, 4)}")
+        if (authoredMacro != null) {
+            require(authoredMacro.matches(Regex("SmeditObjects_[A-Za-z0-9_]+"))) { "Invalid authored PLM macro name." }
+            appendLine("    %$authoredMacro()")
+        } else {
+            entries.forEach { entry ->
+                // Explicit primitives keep the verified layout independent of user-edited macros.
+                appendLine("    dw ${hex(entry.id, 4)}")
+                appendLine("    db ${hex(entry.x, 2)}, ${hex(entry.y, 2)}")
+                appendLine("    dw ${hex(entry.param, 4)}")
+            }
+            appendLine("    dw \$0000")
         }
-        appendLine("    dw \$0000")
         appendLine("${label}_End:")
         appendLine("assert ($label>>16) == \$8F")
         appendLine("assert ${label}_End-$label == ${entries.size * 6 + 2}")
@@ -63,8 +69,8 @@ internal data class AsmRoomPlmTable(
 
 /**
  * Decode the validated room plan into typed resources. Only edited, reachable
- * PLM lists are promoted; unrelated lists and rewritten selector graphs retain
- * the atomic byte backend. Sharing follows actual state pointers, never content
+ * PLM lists are promoted; managed object lists can also belong to rewritten graphs.
+ * Other resources retain the atomic byte backend. Sharing follows actual state pointers, never content
  * equality. Complete promoted ranges must have a single GUI owner.
  */
 internal fun discoverAsmRoomPlmTables(
@@ -78,7 +84,7 @@ internal fun discoverAsmRoomPlmTables(
     val tables = linkedMapOf<Int, AsmRoomPlmTable>()
     fun word(pc: Int): Int = (plannedRom[pc].toInt() and 0xFF) or ((plannedRom[pc + 1].toInt() and 0xFF) shl 8)
     project.rooms.toSortedMap().forEach { (roomKey, edits) ->
-        if (!edits.hasEdits || edits.stateGraphChanged) return@forEach
+        if (!edits.hasEdits || (edits.stateGraphChanged && edits.asmPlmSourceVersion == 0)) return@forEach
         val roomId = requireNotNull(roomKey.toIntOrNull(16))
         parser.findAllStateDataOffsets(roomId).forEachIndexed stateLoop@{ index, statePc ->
             val pointer = word(statePc + 20)
@@ -86,9 +92,15 @@ internal fun discoverAsmRoomPlmTables(
             val pc = parser.snesToPc(0x8F0000 or pointer) - header
             val existing = tables[pc]
             val stateIdentity = edits.states.getOrNull(index)?.sourceStateIndex ?: index
-            val label = "SmeditRoom_${roomId.toString(16).uppercase()}_State${stateIdentity}_Plms"
+            val state = if (edits.stateGraphChanged) edits.states.getOrNull(index)
+                else edits.states.singleOrNull { it.sourceStateIndex == index }
+            val authored = if (edits.asmPlmSourceVersion != 0) {
+                AsmRoomObjectSource.stateMacro(roomId, requireNotNull(state) { "Missing authored state for room $roomKey" }.id)
+            } else null
+            val label = if (authored != null) "${authored}_Plms"
+                else "SmeditRoom_${roomId.toString(16).uppercase()}_State${stateIdentity}_Plms"
             tables[pc] = if (existing == null) {
-                AsmRoomPlmTable(label, pc, parser.parsePlmSet(pointer), listOf(statePc + 20 - header))
+                AsmRoomPlmTable(label, pc, parser.parsePlmSet(pointer), listOf(statePc + 20 - header), authored)
             } else {
                 existing.copy(pointerPcOffsets = (existing.pointerPcOffsets + (statePc + 20 - header)).distinct())
             }

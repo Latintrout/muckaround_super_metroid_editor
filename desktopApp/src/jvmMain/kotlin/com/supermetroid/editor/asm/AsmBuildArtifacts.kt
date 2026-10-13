@@ -243,15 +243,33 @@ internal object AsmBuildOutputParser {
         "^(.+?):(\\d+):\\s*(warning|error):\\s*(?:\\([^)]+\\):\\s*)?(.*)$",
         RegexOption.IGNORE_CASE,
     )
+    private val pipelineLocation = Regex(
+        "(?:^|:\\s+)((?:[A-Za-z]:)?[^:\\r\\n]+\\.asm):([1-9][0-9]*):\\s*(.*)$",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Planner/format checks can report an authored source location before Asar runs. */
+    fun pipelineDiagnostic(message: String): AsmBuildDiagnostic {
+        val match = pipelineLocation.find(message)
+        val lineIndex = match?.groupValues?.get(2)?.toIntOrNull()?.minus(1)
+        return if (match != null && lineIndex != null) {
+            AsmBuildDiagnostic(AsmDiagnosticSeverity.ERROR, match.groupValues[3].trim(),
+                sourceFileId(match.groupValues[1]), lineIndex)
+        } else AsmBuildDiagnostic(AsmDiagnosticSeverity.ERROR, message)
+    }
+
+    private fun sourceFileId(sourcePath: String): String {
+        val path = sourcePath.trim().replace('\\', '/')
+        return path.substringAfterLast("/src/", path.substringAfter("src/"))
+    }
 
     fun diagnostics(output: List<String>): List<AsmBuildDiagnostic> = output.mapNotNull { line ->
-        // Pipeline checks have no source line: do not invent a clickable location.
+        // Keep explicit source locations; general pipeline checks remain unlocated.
         if (line.startsWith("SMEDIT: error: ")) {
-            return@mapNotNull AsmBuildDiagnostic(AsmDiagnosticSeverity.ERROR, line.removePrefix("SMEDIT: error: "))
+            return@mapNotNull pipelineDiagnostic(line.removePrefix("SMEDIT: error: "))
         }
         val match = locatedDiagnostic.matchEntire(line.trim()) ?: return@mapNotNull null
-        val path = match.groupValues[1].replace('\\', '/')
-        val fileId = path.substringAfterLast("/src/", path.substringAfter("src/"))
+        val fileId = sourceFileId(match.groupValues[1])
         val lineIndex = match.groupValues[2].toIntOrNull()?.minus(1)?.coerceAtLeast(0)
         val severity = if (match.groupValues[3].equals("error", ignoreCase = true)) {
             AsmDiagnosticSeverity.ERROR

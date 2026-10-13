@@ -3,6 +3,7 @@ package com.supermetroid.editor.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.supermetroid.editor.asm.AsmPlmSourceBridge
 import com.supermetroid.editor.data.CustomItemDef
 import com.supermetroid.editor.data.CommunitySamusSpriteSource
 import com.supermetroid.editor.data.DoorChange
@@ -90,6 +91,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
 
 private val editorStateLog = KotlinLogging.logger {}
@@ -352,8 +355,17 @@ class EditorState(
     var itemEditScope by mutableStateOf(ItemStateScope.THIS_STATE)
         private set
     private var currentRomParser: RomParser? = null
-    var dirty by mutableStateOf(false)
+    private var dirtyValue by mutableStateOf(false)
+    private var projectDirtyRevision = 0L
+    var dirty: Boolean
+        get() = dirtyValue
+        private set(value) {
+            if (value) projectDirtyRevision++
+            dirtyValue = value
+        }
+    var projectSaveInProgress by mutableStateOf(false)
         private set
+    private val projectSaveMutex = Mutex()
 
     /** Monotonic counter incremented each time any room is edited. */
     private var _editCounter = 0L
@@ -386,6 +398,10 @@ class EditorState(
     }
 
     fun setProjectRomBuildMode(mode: ProjectRomBuildMode) {
+        if (mode == ProjectRomBuildMode.PATCHED_ROM && project.asmWorkspace.plmSourceBindings.isNotEmpty()) {
+            postStatus("Source-linked objects require ASM mode.")
+            return
+        }
         if (project.asmWorkspace.buildMode == mode) return
         project.asmWorkspace.buildMode = mode
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
@@ -532,6 +548,10 @@ class EditorState(
         private set
     var statusMessageTimestamp by mutableStateOf(0L)
         private set
+    val statusIsError: Boolean get() = statusMessage.startsWith("Export failed", ignoreCase = true) ||
+        statusMessage.startsWith("Export blocked", ignoreCase = true) ||
+        statusMessage.startsWith("Save failed", ignoreCase = true) ||
+        statusMessage.startsWith("Object edit blocked", ignoreCase = true)
 
     /** Long-running ROM build state stays visible instead of expiring like a transient status. */
     var romBuildInProgress by mutableStateOf(false)
@@ -561,6 +581,115 @@ class EditorState(
     /** Working PLMs for the current room (includes edits). */
     private val _workingPlms = mutableListOf<RomParser.PlmEntry>()
     val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
+    internal var asmPlmSourceBridge by mutableStateOf<AsmPlmSourceBridge?>(null)
+    private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, Pair<String, String>>()
+    internal var plmSourceMigrationProblem: String? = null
+        private set
+
+    internal fun hasManagedPlms(): Boolean = (project.rooms[project.roomKey(currentRoomId)]?.asmPlmSourceVersion ?: 0) != 0
+    internal fun currentPlmStateId(): String? = selectedStateEdits(project.rooms[project.roomKey(currentRoomId)])?.id
+
+    internal fun ensureCurrentPlmSource(roomName: String): Boolean {
+        plmSourceMigrationProblem = null
+        val bridge = asmPlmSourceBridge ?: run {
+            plmSourceMigrationProblem = "The project ASM workspace is not ready yet."
+            return false
+        }
+        if (hasManagedPlms()) return true
+        return runCatching {
+            bridge.migrateRoom(currentRoomId, roomName, ::isEditorItemPlm)
+            currentStateId = currentPlmStateId()
+            refreshLinkedPlms()
+            postStatus("Room objects now use editable ASM. Project Save keeps the source and room-state identities together.")
+            true
+        }.getOrElse {
+            plmSourceMigrationProblem = it.message ?: "Object source migration failed safely."
+            postStatus(plmSourceMigrationProblem!!)
+            false
+        }
+    }
+
+    private fun editManagedPlms(name: String, action: (AsmPlmSourceBridge, String) -> Unit): Boolean {
+        val bridge = asmPlmSourceBridge ?: run {
+            postStatus("Object edit blocked: wait for the ASM workspace before editing these objects.")
+            return false
+        }
+        val stateId = currentPlmStateId() ?: run {
+            postStatus("Object edit blocked: select a room state before editing these objects.")
+            return false
+        }
+        return runCatching {
+            val before = bridge.sourceText()
+            action(bridge, stateId)
+            val after = bridge.sourceText()
+            if (before != after) {
+                val op = EditOperation(name, emptyList())
+                managedPlmUndo[op] = before to after
+                undoStack.add(op)
+                redoStack.clear()
+                undoVersion++
+                refreshLinkedPlms()
+                editVersion++
+                postStatus("$name applied.")
+            }
+            true
+        }.getOrElse {
+            postStatus("Object edit blocked: ${it.message ?: "invalid object source; no edit applied."}")
+            false
+        }
+    }
+
+    internal fun notifyPlmSourceLinked() {
+        markDirty()
+        editVersion++
+    }
+
+    internal fun currentPlmSourcePointer(): Int? {
+        val parser = currentRomParser ?: return null
+        val state = parser.findAllStateDataOffsets(currentRoomId).getOrNull(currentStateIndex) ?: return null
+        return parser.readStateData(state)["plmSetPtr"]
+    }
+
+    internal fun currentPlmStateName(): String =
+        selectedStateEdits(project.rooms[project.roomKey(currentRoomId)])?.condition?.displaySummary(currentArea)
+            ?: currentRomParser?.parseRoomStates(currentRoomId)?.getOrNull(currentStateIndex)?.conditionName
+            ?: "Selected state"
+
+    internal fun refreshLinkedPlms() {
+        if (hasManagedPlms()) {
+            val stateId = currentPlmStateId() ?: return
+            val view = asmPlmSourceBridge?.managedView(currentRoomId, stateId) ?: return
+            val entries = view.document?.entries ?: return
+            if (_workingPlms != entries) {
+                _workingPlms.clear()
+                _workingPlms.addAll(entries)
+                _editVersionState.value++
+            }
+            return
+        }
+        val pointer = currentPlmSourcePointer() ?: return
+        val bridge = asmPlmSourceBridge ?: return
+        val entries = bridge.view(pointer).document?.entries ?: return
+        if (_workingPlms != entries) {
+            _workingPlms.clear()
+            _workingPlms.addAll(entries)
+            _editVersionState.value++ // Source projections are not independent project edits.
+        }
+    }
+
+    private fun blockLinkedPlmMutation(allStates: Boolean = false): Boolean {
+        if (hasManagedPlms()) {
+            postStatus("These objects use project ASM. Use item/PLM add/remove or source fields; this combined room operation is not source-aware yet.")
+            return true
+        }
+        val pointers = if (allStates) currentRomParser?.let { parser ->
+            parser.findAllStateDataOffsets(currentRoomId).mapNotNull { parser.readStateData(it)["plmSetPtr"] }
+        }.orEmpty() else listOfNotNull(currentPlmSourcePointer())
+        if (pointers.none { pointer -> asmPlmSourceBridge?.isLinked(pointer) == true ||
+                project.asmWorkspace.plmSourceBindings.any { it.pointer == pointer } }) return false
+        postStatus("These objects have ASM source edits. Use Room Info → Edit objects, or restore the list in ASM before adding room-editor changes. Source-list resizing and detachment are not supported yet.")
+        return true
+    }
     private var originalPlmCount = 0
 
     /**
@@ -574,6 +703,9 @@ class EditorState(
 
         val plms = romParser.getAllPlmEntriesForRoom(roomId).toMutableList()
         val roomEdits = project.rooms[project.roomKey(roomId)] ?: return plms
+        if (roomEdits.asmPlmSourceVersion != 0) return roomEdits.states.flatMap { state ->
+            asmPlmSourceBridge?.managedView(roomId, state.id)?.document?.entries.orEmpty()
+        }.distinct()
 
         for (change in roomEdits.plmChanges) {
             when (change.action) {
@@ -3420,6 +3552,7 @@ class EditorState(
     }
 
     private fun resetForLoadedProject(seedPatches: Boolean) {
+        asmPlmSourceBridge = null
         dirty = false
         patchesSeeded = false
         if (seedPatches) {
@@ -3462,6 +3595,7 @@ class EditorState(
         scrollTargetBlockY = -1
         metatileBlockTypePresets = emptyMap()
         undoStack.clear()
+        managedPlmUndo.clear()
         redoStack.clear()
         undoVersion++
         pendingEdits.clear()
@@ -3539,6 +3673,7 @@ class EditorState(
         mapSelEnd = null
         floatingSelection = null
         undoStack.clear()
+        managedPlmUndo.clear()
         redoStack.clear()
         undoVersion++
     }
@@ -3625,6 +3760,7 @@ class EditorState(
         metatileBlockTypePresets = merged
 
         undoStack.clear()
+        managedPlmUndo.clear()
         redoStack.clear()
         undoVersion++
         pendingEdits.clear()
@@ -3662,6 +3798,7 @@ class EditorState(
             if (savedRoom.states.isNotEmpty()) migrateLegacyStateLayoutOperations(savedRoom, romParser)
             replaySavedRoomEdits(savedRoom, effectiveWidth, roomKey)
         }
+        refreshLinkedPlms()
         // Bump render version without marking room as user-edited
         _editVersionState.value++
     }
@@ -4261,6 +4398,9 @@ class EditorState(
     private fun effectiveAuthoredStatePlms(): List<Pair<String, List<RomParser.PlmEntry>>> {
         val parser = currentRomParser ?: return listOf("This state" to _workingPlms.toList())
         val roomEdits = project.rooms[project.roomKey(currentRoomId)]
+        if (hasManagedPlms()) return roomEdits!!.states.map { state ->
+            state.condition.displaySummary(currentArea) to asmPlmSourceBridge?.managedView(currentRoomId, state.id)?.document?.entries.orEmpty()
+        }
         val runtimeStates = parser.parseRoomStatesWithData(currentRoomId)
         if (roomEdits?.states.isNullOrEmpty()) {
             return runtimeStates.mapIndexed { index, runtimeState ->
@@ -4291,6 +4431,9 @@ class EditorState(
     /** The explicit authoring scope of an item, or null for untouched ROM state data. */
     fun configuredItemScope(plm: RomParser.PlmEntry): ItemStateScope? {
         if (!isEditorItemPlm(plm.id)) return null
+        if (hasManagedPlms()) return if (currentPlmStateId()?.let {
+                asmPlmSourceBridge?.managedIsCommon(currentRoomId, it, plm)
+            } == true) ItemStateScope.ALL_STATES else ItemStateScope.THIS_STATE
         val roomEdits = project.rooms[project.roomKey(currentRoomId)] ?: return null
         val selected = selectedStateEdits(roomEdits)
         if (selected != null && itemChangesAt(selected.plmChanges, plm.id, plm.x, plm.y, plm.param)) {
@@ -4555,6 +4698,7 @@ class EditorState(
         mapSelEnd = null
         floatingSelection = null
         undoStack.clear()
+        managedPlmUndo.clear()
         redoStack.clear()
         pendingEdits.clear()
         pendingPositions.clear()
@@ -4613,6 +4757,7 @@ class EditorState(
 
         if (savedRoom != null) replaySavedRoomEdits(savedRoom, effectiveWidth, roomKey)
 
+        refreshLinkedPlms()
         _editVersionState.value++
         editorLog(
             "Switched to state '${selectedState.id}' (source $baseStateIndex): " +
@@ -4773,6 +4918,8 @@ class EditorState(
         ) return false
         if (activeRoomLayer == RoomEditLayer.LAYER2) return paintLayer2At(bx, by)
         val b = brush ?: return false
+        if ((0 until b.rows).any { r -> (0 until b.cols).any { c -> b.plmAt(r, c) != null } } &&
+            blockLinkedPlmMutation(allStates = itemEditScope == ItemStateScope.ALL_STATES)) return false
         // A brush stamp may contain both decorative tiles and a functional PLM.
         // If the PLM cannot be represented (for example, all save slots are in
         // use), roll back this whole stamp while preserving earlier drag-stroke
@@ -5455,6 +5602,11 @@ class EditorState(
             for (plm in _workingPlms) {
                 if (isEditorItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
             }
+            // Authored ASM values are not duplicated in project.rooms. Reserve their collection bits too,
+            // including source-edited rooms the user has never selected in this session.
+            asmPlmSourceBridge?.sourceOwnedEntries()?.forEach { plm ->
+                if (isEditorItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
+            }
             // Vanilla items use 0x00-0x50; search 0x51-0x1FF (431 slots)
             var idx = 0x51
             while (idx in usedIndices && idx <= 0x1FF) idx++
@@ -5517,6 +5669,11 @@ class EditorState(
         param: Int,
         itemScopeOverride: ItemStateScope? = null,
     ) {
+        if (hasManagedPlms() && plmId == 0xB76F) {
+            postStatus("Save-station placement also changes spawn data; that combined edit is not source-aware yet.")
+            return
+        }
+        if (!hasManagedPlms() && blockLinkedPlmMutation(isEditorItemPlm(plmId) && (itemScopeOverride ?: itemEditScope) == ItemStateScope.ALL_STATES)) return
         val isItem = isEditorItemPlm(plmId)
         val isDoorCap = RomParser.isDoorCapPlm(plmId)
         val requestedDoorDirection = RomParser.doorCapDefFor(plmId)?.direction
@@ -5555,6 +5712,15 @@ class EditorState(
             ?.takeIf { isItem && param == 0 }
             ?.param
         val actualParam = retainedSaveParam ?: retainedItemParam ?: autoAssignParam(plmId, param) ?: return
+        if (hasManagedPlms()) {
+            editManagedPlms("Add ${RomParser.plmDisplayName(plmId)} · ASM") { bridge, stateId ->
+                bridge.editManaged(currentRoomId, stateId, scope == ItemStateScope.ALL_STATES, { old ->
+                    old in existing || (old.x == targetX && old.y == targetY &&
+                        (old.id == plmId || (family != null && itemFamilyName(old.id) == family)))
+                }, RomParser.PlmEntry(plmId, targetX, targetY, actualParam))
+            }
+            return
+        }
         if (isItem && scope == ItemStateScope.ALL_STATES) {
             val before = itemScopeSnapshot()
             val removedChanges = addItemToAllStates(plmId, targetX, targetY, actualParam)
@@ -5625,6 +5791,7 @@ class EditorState(
 
     /** Update an existing custom scroll command set. */
     fun updateScrollCommand(cmdId: String, entries: List<ScrollCommand>) {
+        if (blockLinkedPlmMutation()) return
         currentScrollCommands()[cmdId] = entries.toMutableList()
         dirty = true
         editVersion++
@@ -5641,6 +5808,7 @@ class EditorState(
 
     /** Add a B703 scroll trigger with a new custom command set. Returns the PLM param (command ID encoded). */
     fun addScrollTriggerWithCommands(x: Int, y: Int, entries: List<ScrollCommand>) {
+        if (blockLinkedPlmMutation()) return
         val cmdId = createScrollCommand(entries)
         // Use a custom param range starting from 0x0100 for custom commands
         // Format: 0xCC00 | cmdIndex (to distinguish from ROM pointers)
@@ -5660,10 +5828,25 @@ class EditorState(
         plmId: Int,
         itemScopeOverride: ItemStateScope? = null,
     ) {
+        if (hasManagedPlms() && plmId == 0xB76F) {
+            postStatus("Save-station removal also changes spawn data; that combined edit is not source-aware yet.")
+            return
+        }
+        if (!hasManagedPlms() && blockLinkedPlmMutation(isEditorItemPlm(plmId) && (itemScopeOverride ?: itemEditScope) == ItemStateScope.ALL_STATES)) return
         val removed = _workingPlms.filter { it.x == x && it.y == y && it.id == plmId }
         if (removed.isEmpty()) return
         val isItem = isEditorItemPlm(plmId)
         val scope = if (isItem) itemScopeOverride ?: itemEditScope else ItemStateScope.THIS_STATE
+        if (hasManagedPlms()) {
+            val family = itemFamilyName(plmId)
+            editManagedPlms("Remove ${RomParser.plmDisplayName(plmId)} · ASM") { bridge, stateId ->
+                bridge.editManaged(currentRoomId, stateId, scope == ItemStateScope.ALL_STATES, { old ->
+                    old.x == x && old.y == y && (old.id == plmId ||
+                        (scope == ItemStateScope.ALL_STATES && family != null && itemFamilyName(old.id) == family))
+                }, null)
+            }
+            return
+        }
         if (isItem && scope == ItemStateScope.ALL_STATES) {
             val before = itemScopeSnapshot()
             val changes = removeItemFromAllStates(removed.first())
@@ -5995,6 +6178,7 @@ class EditorState(
         currentOperations().clear()
         currentScrollChanges().clear()
         undoStack.clear()
+        managedPlmUndo.clear()
         redoStack.clear()
         undoVersion++
 
@@ -6623,7 +6807,7 @@ class EditorState(
         do {
             id = "state-new-$ordinal"
             ordinal++
-        } while (roomEdits.states.any { it.id == id })
+        } while (roomEdits.states.any { it.id == id } || asmPlmSourceBridge?.hasStateSource(currentRoomId, id) == true)
 
         val newState = RoomStateEdits(
             id = id,
@@ -6644,6 +6828,10 @@ class EditorState(
         val templateIndex = roomEdits.states.indexOf(template)
         val defaultIndex = roomEdits.states.lastIndex
         val insertionIndex = if (templateIndex < defaultIndex) templateIndex + 1 else defaultIndex
+        if (hasManagedPlms()) {
+            val bridge = requireNotNull(asmPlmSourceBridge) { "ASM workspace is not ready." }
+            bridge.cloneManagedState(currentRoomId, template.id, newState.id)
+        }
         roomEdits.states.add(insertionIndex, newState)
         roomEdits.stateGraphChanged = true
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
@@ -6902,6 +7090,7 @@ class EditorState(
         candidate: PreparedLearnedRoomCandidate,
         reviewedCandidates: List<PreparedLearnedRoomCandidate> = listOf(candidate),
     ): Int {
+        if (_workingPlms.any { RomParser.isScrollPlm(it.id) } && blockLinkedPlmMutation()) return 0
         val width = workingBlocksWide
         val height = workingBlocksTall
         require(currentRoomId == candidate.proposal.source.roomId) { "The loaded room changed; reload candidates" }
@@ -6969,6 +7158,7 @@ class EditorState(
         keepLandingSiteShipClear: Boolean = true,
         romParser: RomParser? = null,
     ): Int {
+        if (_workingPlms.any { RomParser.isScrollPlm(it.id) } && blockLinkedPlmMutation()) return 0
         val w = workingBlocksWide
         val h = workingBlocksTall
         if (w <= 0 || h <= 0) return 0
@@ -7023,6 +7213,14 @@ class EditorState(
 
         for (roomInfo in roomInfos.sortedBy { it.getRoomIdAsInt() }) {
             val roomId = roomInfo.getRoomIdAsInt()
+            val linkedPointers = project.asmWorkspace.plmSourceBindings.map { it.pointer }.toSet()
+            if (romParser.findAllStateDataOffsets(roomId).any {
+                    val pointer = romParser.readStateData(it)["plmSetPtr"]
+                    pointer in linkedPointers || (pointer != null && asmPlmSourceBridge?.isLinked(pointer) == true)
+                }) {
+                skipped++
+                continue
+            }
             val roomKey = project.roomKey(roomId)
             val romRoom = headersById[roomId]
             if (romRoom == null) {
@@ -7517,6 +7715,10 @@ class EditorState(
     }
 
     fun resetCurrentRoomToOriginal(romParser: RomParser): Boolean {
+        if (hasManagedPlms()) {
+            postStatus("This room owns authored object source. Whole-room reset is not source-aware yet; edit its objects in ASM or undo the migration first.")
+            return false
+        }
         val roomId = currentRoomId
         if (roomId == 0) return false
         val room = romParser.readRoomHeader(roomId) ?: return false
@@ -7563,6 +7765,7 @@ class EditorState(
         pendingPlmAdds.clear()
         pendingPlmRemoves.clear()
         undoStack.clear()
+        managedPlmUndo.clear()
         redoStack.clear()
 
         undoVersion++
@@ -7651,6 +7854,19 @@ class EditorState(
 
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
+        val pending = undoStack.last()
+        managedPlmUndo[pending]?.let { (_, after) ->
+            return runCatching {
+                requireNotNull(asmPlmSourceBridge).undoSource(after)
+                undoStack.removeAt(undoStack.lastIndex)
+                redoStack.add(pending)
+                undoVersion++
+                refreshLinkedPlms()
+                true
+            }.getOrElse { postStatus("Object source changed; use Undo in ASM to follow its current history."); false }
+        }
+        if ((pending.plmAdds.isNotEmpty() || pending.plmRemoves.isNotEmpty()) &&
+            blockLinkedPlmMutation(pending.itemScope == ItemStateScope.ALL_STATES)) return false
         val op = undoStack.removeAt(undoStack.lastIndex)
         val scopedItemUndo = itemScopeSnapshots[op]
         val plmChanges = currentPlmChanges()
@@ -7727,6 +7943,19 @@ class EditorState(
 
     fun redo(): Boolean {
         if (redoStack.isEmpty()) return false
+        val pending = redoStack.last()
+        managedPlmUndo[pending]?.let { (before, _) ->
+            return runCatching {
+                requireNotNull(asmPlmSourceBridge).redoSource(before)
+                redoStack.removeAt(redoStack.lastIndex)
+                undoStack.add(pending)
+                undoVersion++
+                refreshLinkedPlms()
+                true
+            }.getOrElse { postStatus("Object source changed; use Redo in ASM to follow its current history."); false }
+        }
+        if ((pending.plmAdds.isNotEmpty() || pending.plmRemoves.isNotEmpty()) &&
+            blockLinkedPlmMutation(pending.itemScope == ItemStateScope.ALL_STATES)) return false
         val op = redoStack.removeAt(redoStack.lastIndex)
         val scopedItemUndo = itemScopeSnapshots[op]
         val plmChanges = currentPlmChanges()
@@ -7891,6 +8120,46 @@ class EditorState(
             postStatus("Save failed")
         }
         return saved
+    }
+
+    /** Save a detached project snapshot without blocking the editor. Source auto-save skips optional
+     * PNG/pattern exports; explicit Project Save supplies those options to preserve its workflow. */
+    internal suspend fun saveProjectAsync(
+        romParser: RomParser? = null,
+        savePatternLibrary: Boolean = false,
+        persist: suspend (String, String) -> Boolean = { text, path ->
+            withContext(Dispatchers.IO) {
+                ProjectFileService.saveSerializedProject(text, path, ::editorLog, romParser, savePatternLibrary && !testMode)
+            }
+        },
+    ): Boolean {
+        val owner = project
+        val path = projectFilePath
+        if (path.isBlank()) return false
+        return projectSaveMutex.withLock {
+            if (project !== owner || projectFilePath != path) return@withLock false
+            projectSaveInProgress = true
+            try {
+                // Project load already hydrates the catalog. An ASM text save does not require a
+                // forced ZIP reload/hash comparison of every bundled patch.
+                seedDefaultPatches()
+                val revision = projectDirtyRevision
+                val text = ProjectFileService.serializeProject(owner)
+                val saved = persist(text, path)
+                if (project === owner && projectFilePath == path) {
+                    if (saved && projectDirtyRevision == revision) dirty = false
+                    postStatus(if (saved) "Project saved: $path" else "Save failed")
+                }
+                saved
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (problem: Exception) {
+                if (project === owner && projectFilePath == path) postStatus("Save failed: ${problem.message}")
+                false
+            } finally {
+                projectSaveInProgress = false
+            }
+        }
     }
 
     // ─── Export: patch ROM ──────────────────────────────────────

@@ -5,10 +5,22 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
 
-internal enum class AsmBrowserMode { SOURCE, GENERATED_ROOMS, ASSETS, LIBRARY, ROM }
+internal enum class AsmBrowserMode { SOURCE, GENERATED_ROOMS, PLM_PLACEMENT, ASSETS, LIBRARY, ROM }
+
+/** Capture on the caller thread; perform bounded source normalization away from the UI. */
+internal interface AsmSourceSaveParticipant {
+    val sourceFileIds: Set<String>
+    fun prepare(fileId: String, text: String): () -> String
+}
 
 internal sealed interface AsmWorkspaceLocation {
     data class Source(
@@ -26,6 +38,7 @@ internal sealed interface AsmWorkspaceLocation {
     data class Library(val pageId: String, val instructionToken: String?) : AsmWorkspaceLocation
     data class Rom(val view: AsmRomPreviewView) : AsmWorkspaceLocation
     data class GeneratedRooms(val lineIndex: Int, val buildWrites: Boolean = false) : AsmWorkspaceLocation
+    data class PlmPlacement(val snapshot: AsmPlmPlacementSnapshot) : AsmWorkspaceLocation
 }
 
 internal sealed interface AsmReferenceExpansionTarget {
@@ -50,6 +63,9 @@ internal data class AsmSourceTextChange(
     val offset: Int,
     val removed: String,
     val inserted: String,
+    /** Rare source/model ownership transitions must undo atomically with their text. */
+    val beforeUndo: (() -> Unit)? = null,
+    val beforeRedo: (() -> Unit)? = null,
 ) {
     fun undo(text: String): String? = replaceExpected(text, inserted, removed)
     fun redo(text: String): String? = replaceExpected(text, removed, inserted)
@@ -86,6 +102,7 @@ internal class AsmWorkspaceState(
     private val repository: AsmReferenceRepository = AsmReferenceRepository(),
     private val projectRepository: AsmProjectWorkspaceRepository = AsmProjectWorkspaceRepository(),
     private val buildArtifactRepository: AsmBuildArtifactRepository = AsmBuildArtifactRepository(projectRepository),
+    private val sourceIndexLoader: suspend (String) -> AsmProjectWorkspace? = { projectRepository.load(it) },
 ) {
     var workspace by mutableStateOf<AsmReferenceWorkspace?>(null)
         private set
@@ -102,6 +119,8 @@ internal class AsmWorkspaceState(
     var currentRomSha256 by mutableStateOf<String?>(null)
         private set
     var browserMode by mutableStateOf(AsmBrowserMode.SOURCE)
+        private set
+    var plmPlacementSnapshot by mutableStateOf<AsmPlmPlacementSnapshot?>(null)
         private set
     var query by mutableStateOf("")
     private var selectedFileIdValue by mutableStateOf<String?>(null)
@@ -227,6 +246,15 @@ internal class AsmWorkspaceState(
     private val dirtySourceFileIds = mutableStateMapOf<String, Unit>()
     private val sourceUndoStacks = mutableMapOf<String, MutableList<AsmSourceTextChange>>()
     private val sourceRedoStacks = mutableMapOf<String, MutableList<AsmSourceTextChange>>()
+    var sourceSaveParticipant: AsmSourceSaveParticipant? = null
+    var sourceIndexingInProgress by mutableStateOf(false)
+        private set
+    var sourceIndexingStatus by mutableStateOf("")
+        private set
+    private var sourceIndexingJob: Job? = null
+    private var sourceIndexingGeneration = 0L
+    private val sourceIndexPendingFiles = linkedSetOf<String>()
+    private val savedSourceDiagnostics = mutableMapOf<String, List<AsmBuildDiagnostic>>()
 
     val canGoBack: Boolean get() = backStack.isNotEmpty()
     val canGoForward: Boolean get() = forwardStack.isNotEmpty()
@@ -410,6 +438,12 @@ internal class AsmWorkspaceState(
         boundProjectEnabled = enabled
         if (changedProject) {
             clearEditSessions()
+            plmPlacementSnapshot = null
+            // A captured placement belongs to one project; it cannot be reinterpreted in another.
+            (backStacks.values + forwardStacks.values).forEach { stack ->
+                stack.removeAll { it is AsmWorkspaceLocation.PlmPlacement }
+            }
+            if (browserMode == AsmBrowserMode.PLM_PLACEMENT) showSourceBrowser()
             roomDataExpanded = false
             expandedRoomDataGroups.clear()
             showRoomBuildWrites = false
@@ -505,6 +539,13 @@ internal class AsmWorkspaceState(
         query = ""
         selectedAssetPath = null
         navigationSerial++
+    }
+
+    fun openPlmPlacement(snapshot: AsmPlmPlacementSnapshot, addToHistory: Boolean = true) {
+        if (addToHistory) rememberCurrentLocation()
+        plmPlacementSnapshot = snapshot
+        browserMode = AsmBrowserMode.PLM_PLACEMENT
+        if (addToHistory) forwardStack.clear()
     }
 
     fun openGeneratedRooms(lineIndex: Int = 0, addToHistory: Boolean = true, buildWrites: Boolean = showRoomBuildWrites) {
@@ -616,10 +657,7 @@ internal class AsmWorkspaceState(
     private fun retainOrCreateBuildFailure(message: String) {
         val existing = buildReport
         if (existing != null && !existing.succeeded) return
-        val diagnostic = AsmBuildDiagnostic(
-            severity = AsmDiagnosticSeverity.ERROR,
-            message = message,
-        )
+        val diagnostic = AsmBuildOutputParser.pipelineDiagnostic(message)
         buildReport = AsmBuildReport(
             succeeded = false,
             generatedAt = Instant.now().toString(),
@@ -628,6 +666,16 @@ internal class AsmWorkspaceState(
             diagnostics = listOf(diagnostic),
             symbols = existing?.symbols ?: AsmCompiledSymbols.EMPTY,
         )
+    }
+
+    /** Bring the build drawer into view and reveal the first located error in editable source. */
+    fun showBuildFailure() {
+        showProjectWorkspace()
+        showSourceBrowser()
+        displayedDiagnostics.firstOrNull {
+            it.severity == AsmDiagnosticSeverity.ERROR && it.lineIndex != null &&
+                it.fileId?.let { fileId -> workspace?.index?.file(fileId) != null } == true
+        }?.let { openSource(it.fileId!!, it.lineIndex!!) }
     }
 
     fun openSource(
@@ -666,6 +714,28 @@ internal class AsmWorkspaceState(
 
     fun sourceEditText(fileId: String): String = sourceBuffers[fileId]
         ?: workspace?.index?.file(fileId)?.file?.readText().orEmpty()
+
+    /** Semantic editors share the very same document/undo stack, independent of which browser tab is visible. */
+    fun projectSourceText(fileId: String): String {
+        sourceBuffers[fileId]?.let { return it }
+        val text = projectWorkspace?.referenceWorkspace?.index?.file(fileId)?.file?.readText().orEmpty()
+        if (projectWorkspace != null) {
+            savedSourceTexts[fileId] = text
+            sourceBuffers[fileId] = text
+        }
+        return text
+    }
+
+    fun replaceProjectSource(fileId: String, expected: String, replacement: String,
+                             beforeUndo: (() -> Unit)? = null, beforeRedo: (() -> Unit)? = null) {
+        check(!busy && projectWorkspace != null) { "ASM workspace is busy or unavailable." }
+        check(projectSourceText(fileId) == expected) { "Source changed while this edit was open. Reopen the object and try again." }
+        if (expected == replacement) return
+        recordSourceUndo(fileId, expected, replacement, AsmSourceTextChange.between(expected, replacement)
+            ?.copy(beforeUndo = beforeUndo, beforeRedo = beforeRedo))
+        applySourceEditText(fileId, replacement)
+        editSessionSerial++
+    }
 
     fun updateSourceEditText(fileId: String, text: String, undoChange: AsmSourceTextChange? = null) {
         if (workspaceKind != AsmWorkspaceKind.PROJECT || workspace?.index?.file(fileId) == null) return
@@ -720,6 +790,10 @@ internal class AsmWorkspaceState(
         val change = undo.lastOrNull() ?: return false
         val current = sourceEditText(selectedId)
         val restored = change.undo(current) ?: return false
+        try { change.beforeUndo?.invoke() } catch (problem: Exception) {
+            error = problem.message ?: "Cannot undo this source/model transition safely."
+            return false
+        }
         undo.removeAt(undo.lastIndex)
         sourceRedoStacks.getOrPut(selectedId, ::mutableListOf).add(change)
         applySourceEditText(selectedId, restored)
@@ -733,6 +807,10 @@ internal class AsmWorkspaceState(
         val change = redo.lastOrNull() ?: return false
         val current = sourceEditText(selectedId)
         val restored = change.redo(current) ?: return false
+        try { change.beforeRedo?.invoke() } catch (problem: Exception) {
+            error = problem.message ?: "Cannot redo this source/model transition safely."
+            return false
+        }
         redo.removeAt(redo.lastIndex)
         sourceUndoStacks.getOrPut(selectedId, ::mutableListOf).add(change)
         applySourceEditText(selectedId, restored)
@@ -757,6 +835,17 @@ internal class AsmWorkspaceState(
     fun sourceTexts(): List<AsmSourceText> = workspace?.index?.files.orEmpty().map { source ->
         AsmSourceText(source.id, source.displayName, sourceEditText(source.id))
     }
+
+    /** Include unsaved text and disabled modules, independent of the visible browser scope. */
+    fun projectSourceTextsExcept(fileId: String): Sequence<String> =
+        projectSourceReadersExcept(fileId).asSequence().map { it() }
+
+    fun projectSourceReadersExcept(fileId: String): List<() -> String> =
+        projectWorkspace?.referenceWorkspace?.index?.files.orEmpty()
+            .filter { it.id != fileId }.map { source ->
+                val buffered = sourceBuffers[source.id]
+                { buffered ?: source.file.readText() }
+            }
 
     fun previewProjectSourceReplacement(
         query: String,
@@ -822,48 +911,60 @@ internal class AsmWorkspaceState(
     }
 
     suspend fun saveSource(fileId: String? = selectedFileId): Boolean {
-        if (workspaceKind != AsmWorkspaceKind.PROJECT || boundProjectFilePath.isBlank()) return false
+        if (projectWorkspace == null || boundProjectFilePath.isBlank()) return false
+        val projectPath = boundProjectFilePath
+        val session = sourceIndexingGeneration
         val selectedId = fileId ?: return false
-        val text = sourceBuffers[selectedId] ?: return true
+        val text = sourceBuffers[selectedId] ?: projectSourceText(selectedId)
+        val expectedText = savedSourceTexts[selectedId]
         if (busy) return false
+        val revision = sourceBufferRevision
+        val normalize = sourceSaveParticipant?.prepare(selectedId, text) ?: { text }
         val affectsBuild = !isProjectModule(selectedId) || isProjectModuleEnabled(selectedId)
-        val previousBuildReport = buildReport
         busy = true
         error = null
         return try {
             progress = "Saving $selectedId…"
+            val normalized = withContext(Dispatchers.Default) { normalize() }
+            if (projectPath != boundProjectFilePath || session != sourceIndexingGeneration) return false
+            // New edits may add external helper consumers. Defer cleanup rather than using stale metadata.
+            val savedText = if (revision == sourceBufferRevision) normalized else text
+            if (savedText == text && !hasUnsavedSourceChanges(selectedId)) return true
             val result = withContext(Dispatchers.IO) {
-                projectRepository.saveSource(boundProjectFilePath, selectedId, text)
+                projectRepository.persistSource(projectPath, selectedId, savedText, expectedText)
             }
-            projectWorkspace = result
-            workspace = result.referenceWorkspace
-            buildReport = if (affectsBuild) {
-                withContext(Dispatchers.IO) {
-                    AsmSourceLinter.report(
-                        AsmSourceLinter.lintTree(
-                            java.io.File(result.workingDirectory, "src"),
-                            result.disabledProjectModuleFileIds,
-                        ),
-                    )
+            if (projectPath != boundProjectFilePath || session != sourceIndexingGeneration) return false
+            projectWorkspace = projectWorkspace?.let { previous ->
+                previous.copy(modifiedFileIds = previous.modifiedFileIds.toMutableSet().also {
+                    if (result.modified && affectsBuild) it.add(selectedId) else it.remove(selectedId)
+                })
+            }
+            if (affectsBuild) buildReport = null
+            if (sourceBuffers[selectedId] == text && savedText != text) {
+                recordSourceUndo(selectedId, text, savedText)
+                applySourceEditText(selectedId, savedText)
+                val lines = savedText.lines()
+                sourcePanes = sourcePanes.map { pane ->
+                    if (pane.fileId != selectedId) pane else {
+                        val row = pane.lineIndex.coerceIn(0, lines.lastIndex)
+                        pane.copy(lineIndex = row, columnIndex = pane.columnIndex.coerceIn(0, lines[row].length))
+                    }
                 }
-            } else {
-                previousBuildReport
+                sourcePane(activeSourcePaneId)?.let { pane ->
+                    selectedLineIndexValue = pane.lineIndex
+                    selectedColumnIndexValue = pane.columnIndex
+                }
+                editSessionSerial++
             }
-            savedSourceTexts[selectedId] = text
-            dirtySourceFileIds.remove(selectedId)
+            savedSourceTexts[selectedId] = savedText
+            if (sourceBuffers[selectedId] == savedText) dirtySourceFileIds.remove(selectedId)
+            else dirtySourceFileIds[selectedId] = Unit
             sourceBufferRevision++
-            selectedLineIndex = selectedLineIndex.coerceIn(
-                0,
-                (workspace?.index?.file(selectedId)?.lines?.lastIndex ?: 0).coerceAtLeast(0),
-            )
-            selectedColumnIndex = selectedColumnIndex.coerceIn(
-                0,
-                workspace?.index?.file(selectedId)?.lines?.getOrNull(selectedLineIndex)?.length ?: 0,
-            )
-            activeReferenceSymbol = null
-            activeReferenceMacro = null
-            navigationSerial++
+            sourceIndexPendingFiles += selectedId
+            scheduleSourceIndexing()
             true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (problem: Exception) {
             error = problem.message ?: "Could not save $selectedId"
             false
@@ -874,11 +975,73 @@ internal class AsmWorkspaceState(
     }
 
     suspend fun saveAllSources(): Boolean {
-        val pending = unsavedSourceFileIds.toList()
+        val pending = (unsavedSourceFileIds + sourceSaveParticipant?.sourceFileIds.orEmpty()).toList()
         for (fileId in pending) {
             if (!saveSource(fileId)) return false
         }
         return true
+    }
+
+    /** Saving returns after persistence. Index jobs coalesce and may not replace newer buffers/reports. */
+    private suspend fun scheduleSourceIndexing() {
+        sourceIndexingJob?.cancel()
+        val generation = ++sourceIndexingGeneration
+        val projectPath = boundProjectFilePath
+        sourceIndexingInProgress = true
+        sourceIndexingStatus = "Indexing ASM…"
+        sourceIndexingJob = CoroutineScope(currentCoroutineContext()).launch {
+            try {
+                delay(75) // A multi-bank save needs one index rebuild, not one per file.
+                val indexed = withContext(Dispatchers.IO) { sourceIndexLoader(projectPath) }
+                    ?: error("Saved ASM could not be indexed")
+                if (generation != sourceIndexingGeneration || projectPath != boundProjectFilePath) return@launch
+                projectWorkspace = indexed
+                if (workspaceKind == AsmWorkspaceKind.PROJECT) workspace = indexed.referenceWorkspace
+                val files = sourceIndexPendingFiles.toList()
+                val revision = sourceBufferRevision
+                sourceIndexingStatus = "Checking ASM…"
+                val diagnostics = withContext(Dispatchers.Default) {
+                    files.associateWith { fileId ->
+                        val source = indexed.referenceWorkspace.index.file(fileId)
+                        if (source == null || fileId in indexed.disabledProjectModuleFileIds) emptyList()
+                        else AsmSourceLinter.lintText(fileId, source.lines.joinToString("\n"), indexed.referenceWorkspace.index.macros)
+                    }
+                }
+                if (generation != sourceIndexingGeneration || projectPath != boundProjectFilePath) return@launch
+                savedSourceDiagnostics.putAll(diagnostics)
+                if (revision == sourceBufferRevision && (buildReport == null || buildReport?.validationOnly == true)) {
+                    buildReport = AsmSourceLinter.report(savedSourceDiagnostics.filterKeys {
+                        it !in dirtySourceFileIds && it !in indexed.disabledProjectModuleFileIds
+                    }.values.flatten())
+                }
+                sourceIndexPendingFiles.removeAll(files.toSet())
+                // Recompute completion/navigation against the new index without moving any caret.
+                sourceBufferRevision++
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (problem: Exception) {
+                if (generation == sourceIndexingGeneration && projectPath == boundProjectFilePath) {
+                    error = "ASM saved; index update failed: ${problem.message}"
+                }
+            } finally {
+                if (generation == sourceIndexingGeneration) {
+                    sourceIndexingInProgress = false
+                    sourceIndexingStatus = ""
+                }
+            }
+        }
+    }
+
+    suspend fun awaitSourceIndexing() { sourceIndexingJob?.join() }
+
+    private fun cancelSourceIndexing() {
+        sourceIndexingGeneration++
+        sourceIndexingJob?.cancel()
+        sourceIndexingJob = null
+        sourceIndexingInProgress = false
+        sourceIndexingStatus = ""
+        sourceIndexPendingFiles.clear()
+        savedSourceDiagnostics.clear()
     }
 
     suspend fun restoreOriginalSource(fileId: String? = selectedFileId): Boolean {
@@ -889,6 +1052,7 @@ internal class AsmWorkspaceState(
             return false
         }
         if (busy) return false
+        cancelSourceIndexing()
         busy = true
         error = null
         return try {
@@ -1316,6 +1480,7 @@ internal class AsmWorkspaceState(
     }
 
     private fun adoptProjectWorkspace(project: AsmProjectWorkspace) {
+        cancelSourceIndexing()
         projectWorkspace = project
         workspace = project.referenceWorkspace
         workspaceKind = AsmWorkspaceKind.PROJECT
@@ -1325,6 +1490,8 @@ internal class AsmWorkspaceState(
     }
 
     private fun clearEditSessions() {
+        cancelSourceIndexing()
+        sourceSaveParticipant = null
         sourceBuffers.clear()
         savedSourceTexts.clear()
         dirtySourceFileIds.clear()
@@ -1380,6 +1547,7 @@ internal class AsmWorkspaceState(
         AsmBrowserMode.LIBRARY -> AsmWorkspaceLocation.Library(selectedLibraryPageId, selectedInstructionToken)
         AsmBrowserMode.ROM -> AsmWorkspaceLocation.Rom(romPreviewView)
         AsmBrowserMode.GENERATED_ROOMS -> AsmWorkspaceLocation.GeneratedRooms(generatedRoomLineIndex, showRoomBuildWrites)
+        AsmBrowserMode.PLM_PLACEMENT -> plmPlacementSnapshot?.let(AsmWorkspaceLocation::PlmPlacement)
     }
 
     private fun rememberCurrentLocation() {
@@ -1413,6 +1581,7 @@ internal class AsmWorkspaceState(
             }
             is AsmWorkspaceLocation.Rom -> selectRomPreviewView(location.view, addToHistory = false)
             is AsmWorkspaceLocation.GeneratedRooms -> openGeneratedRooms(location.lineIndex, addToHistory = false, buildWrites = location.buildWrites)
+            is AsmWorkspaceLocation.PlmPlacement -> openPlmPlacement(location.snapshot, addToHistory = false)
         }
     }
 

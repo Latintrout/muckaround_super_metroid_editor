@@ -12,10 +12,59 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.jupiter.api.Assertions.assertFalse
 
 class ProjectFileServiceTest {
     @TempDir
     lateinit var tempDir: File
+
+    @Test
+    fun `source project save uses an immutable snapshot and does not clear newer GUI edits`() = runBlocking {
+        val file = File(tempDir, "Async Source.smedit").apply { writeText("{}") }
+        val project = SmEditProject("base.smc").apply { buildName = "before" }
+        val state = EditorState().apply { testMode = true; initForProject(file, project); markDirty() }
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var capturedText = ""
+        val save = async {
+            state.saveProjectAsync { text, path ->
+                assertEquals(file.absolutePath, path)
+                capturedText = text
+                started.complete(Unit)
+                release.await()
+                true
+            }
+        }
+        try {
+            withTimeout(5_000) { started.await() }
+            assertTrue(state.projectSaveInProgress)
+            project.buildName = "newer"
+            state.markDirty() // Assigning dirty=true again must still advance the revision.
+            release.complete(Unit)
+            assertTrue(save.await())
+            assertTrue(state.dirty)
+            assertTrue(capturedText.contains("\"buildName\":\"before\""))
+            assertFalse(capturedText.contains("\"buildName\":\"newer\""))
+            assertTrue(state.saveProjectAsync())
+            assertFalse(state.dirty)
+            assertFalse(state.projectSaveInProgress)
+            assertEquals("newer", ProjectFileService.loadProject(file).buildName)
+        } finally { release.complete(Unit); save.await() }
+    }
+
+    @Test
+    fun `failed async project save keeps pending changes unsaved`() = runBlocking {
+        val file = File(tempDir, "Save Failure.smedit").apply { writeText("{}") }
+        val state = EditorState().apply { testMode = true; initForProject(file, SmEditProject("base.smc")); markDirty() }
+        assertFalse(state.saveProjectAsync { _, _ -> false })
+        assertTrue(state.dirty)
+        assertFalse(state.projectSaveInProgress)
+        assertEquals("{}", file.readText())
+    }
 
     @Test
     fun `project file preserves patch browser settings`() {

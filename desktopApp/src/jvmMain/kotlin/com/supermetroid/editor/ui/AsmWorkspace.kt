@@ -200,7 +200,6 @@ import java.awt.Cursor
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import kotlin.math.roundToInt
-import kotlinx.coroutines.yield
 
 private val ASM_CONTEXT_MENU_REPRESENTATION = object : ContextMenuRepresentation {
     @OptIn(ExperimentalComposeUiApi::class)
@@ -437,7 +436,7 @@ internal fun AsmWorkspaceSidebar(
         } else false
     }) {
         Row(Modifier.fillMaxWidth()) {
-            AsmModeButton("Source", state.browserMode in setOf(AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS)) {
+            AsmModeButton("Source", state.browserMode in setOf(AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS, AsmBrowserMode.PLM_PLACEMENT)) {
                 state.showSourceBrowser()
             }
             AsmModeButton("Assets", state.browserMode == AsmBrowserMode.ASSETS) {
@@ -482,7 +481,7 @@ internal fun AsmWorkspaceSidebar(
                 label = {
                     Text(
                         when (state.browserMode) {
-                            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS -> "Find room, source, label, or address"
+                            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS, AsmBrowserMode.PLM_PLACEMENT -> "Find room, source, label, or address"
                             AsmBrowserMode.ASSETS -> "Find extracted asset"
                             AsmBrowserMode.LIBRARY -> "Find lesson or instruction"
                             AsmBrowserMode.ROM -> ""
@@ -507,7 +506,7 @@ internal fun AsmWorkspaceSidebar(
         }
 
         when (state.browserMode) {
-            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS -> workspace?.let {
+            AsmBrowserMode.SOURCE, AsmBrowserMode.GENERATED_ROOMS, AsmBrowserMode.PLM_PLACEMENT -> workspace?.let {
                 AsmSourceTree(
                     state = state,
                     index = it.index,
@@ -1796,7 +1795,7 @@ internal fun AsmWorkspaceCanvas(
     state: AsmWorkspaceState,
     romParser: RomParser? = null,
     onOpenInEditor: (AsmEditorTarget) -> Unit = {},
-    onSaveProject: () -> Boolean = { true },
+    onSaveProject: suspend () -> Boolean = { true },
     onBuildProject: (() -> Unit)? = null,
     onRunInEmulator: (() -> Unit)? = null,
     problemsPaneHeightDp: Float = DEFAULT_ASM_PROBLEMS_HEIGHT_DP,
@@ -1816,7 +1815,7 @@ private fun AsmWorkspaceCanvasContent(
     state: AsmWorkspaceState,
     romParser: RomParser?,
     onOpenInEditor: (AsmEditorTarget) -> Unit,
-    onSaveProject: () -> Boolean,
+    onSaveProject: suspend () -> Boolean,
     onBuildProject: (() -> Unit)?,
     onRunInEmulator: (() -> Unit)?,
     problemsPaneHeightDp: Float,
@@ -1825,6 +1824,12 @@ private fun AsmWorkspaceCanvasContent(
 ) {
     val workspace = state.workspace
     val semanticIndex = remember(romParser) { romParser?.let(AsmSemanticBridge::buildIndex) }
+    if (state.browserMode == AsmBrowserMode.PLM_PLACEMENT) {
+        state.plmPlacementSnapshot?.let { snapshot ->
+            AsmPlmPlacementPane(snapshot, { state.openAddress(it) }, modifier)
+        }
+        return
+    }
     if (state.browserMode == AsmBrowserMode.GENERATED_ROOMS) {
         Column(modifier.fillMaxSize()) {
             AsmGeneratedRoomsCanvas(state, onOpenInEditor, Modifier.weight(1f).fillMaxWidth())
@@ -2571,8 +2576,11 @@ private fun AsmGeneratedRoomsCanvas(
                 modifier = Modifier.padding(16.dp),
             )
         } else {
-            val width = remember(source, fs.body) {
-                (ASM_LINE_NUMBER_WIDTH.value + 24f + (source.lines.maxOfOrNull(String::length) ?: 0)
+            val numberWidth = with(LocalDensity.current) {
+                (fs.body.toPx() * MONOSPACE_CHARACTER_WIDTH * source.lines.size.toString().length).toDp() + 16.dp
+            }.coerceAtLeast(ASM_LINE_NUMBER_WIDTH)
+            val width = remember(source, fs.body, numberWidth) {
+                (numberWidth.value + 24f + (source.lines.maxOfOrNull(String::length) ?: 0)
                     .coerceAtMost(MAX_MEASURED_CODE_COLUMNS) * fs.body.value * MONOSPACE_CHARACTER_WIDTH).dp
             }
             AsmScrollableTextPane(
@@ -2595,8 +2603,9 @@ private fun AsmGeneratedRoomsCanvas(
                             Text(
                                 (first until end).joinToString("\n", postfix = if (end < source.lines.size) "\n" else "") { (it + 1).toString() },
                                 style = lineStyle,
+                                softWrap = false,
                                 color = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp),
+                                modifier = Modifier.width(numberWidth).padding(end = 10.dp),
                             )
                         }
                         AsmSelectableLinkedText(asmHighlightDocumentMatches(annotated, lineOffsets[first], find, Color(0xFFFFC857)), lineStyle) { annotation ->
@@ -2668,7 +2677,7 @@ private fun AsmSourceCanvas(
     source: AsmSourceFile,
     semanticIndex: AsmSemanticIndex?,
     onOpenInEditor: (AsmEditorTarget) -> Unit,
-    onSaveProject: () -> Boolean,
+    onSaveProject: suspend () -> Boolean,
     onBuildProject: (() -> Unit)?,
     onRunInEmulator: (() -> Unit)?,
     modifier: Modifier,
@@ -2684,6 +2693,12 @@ private fun AsmSourceCanvas(
     }
     val lineOffsets = remember(source) { asmDocumentLineOffsets(source.lines) }
     val characterWidthPx = with(LocalDensity.current) { fs.body.toPx() * MONOSPACE_CHARACTER_WIDTH }
+    val numberWidth = with(LocalDensity.current) {
+        (fs.detail.toPx() * MONOSPACE_CHARACTER_WIDTH * source.lines.size.toString().length).toDp() + 16.dp
+    }.coerceAtLeast(ASM_LINE_NUMBER_WIDTH)
+    val addressWidth = with(LocalDensity.current) {
+        (fs.detail.toPx() * MONOSPACE_CHARACTER_WIDTH * 8).toDp() + 16.dp
+    }.coerceAtLeast(ASM_ADDRESS_GUTTER_WIDTH)
     val listState = rememberLazyListState()
     val horizontal = rememberScrollState()
     val addressAnchorsByLine = remember(index, source.id) {
@@ -2696,9 +2711,9 @@ private fun AsmSourceCanvas(
             state.buildReport?.takeIf { it.succeeded }?.symbols?.addressesFor(source.id).orEmpty()
         } else emptyMap()
     }
-    val minimumContentWidth = remember(source.id, fs.body) {
+    val minimumContentWidth = remember(source.id, fs.body, numberWidth, addressWidth) {
         val longestLine = source.lines.maxOfOrNull(String::length)?.coerceAtMost(MAX_MEASURED_CODE_COLUMNS) ?: 0
-        (ASM_LINE_NUMBER_WIDTH.value + ASM_ADDRESS_GUTTER_WIDTH.value + 24f +
+        (numberWidth.value + addressWidth.value + 24f +
             longestLine * fs.body.value * MONOSPACE_CHARACTER_WIDTH).dp
     }
     LaunchedEffect(pane.navigationSerial, source.id) {
@@ -2918,14 +2933,18 @@ private fun AsmSourceCanvas(
                                     fontSize = fs.detail,
                                     fontFamily = FontFamily.Monospace,
                                     color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp),
+                                    softWrap = false,
+                                    maxLines = 1,
+                                    modifier = Modifier.width(numberWidth).padding(end = 10.dp),
                                 )
                                 Text(
                                     addressAnchorsByLine[lineIndex]?.let { formatSnesAddress(it.snesAddress) }.orEmpty(),
                                     fontSize = fs.detail,
                                     fontFamily = FontFamily.Monospace,
                                     color = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.width(ASM_ADDRESS_GUTTER_WIDTH).padding(end = 10.dp),
+                                    softWrap = false,
+                                    maxLines = 1,
+                                    modifier = Modifier.width(addressWidth).padding(end = 10.dp),
                                 )
                             }
                         }
@@ -2973,6 +2992,10 @@ private fun AsmBuildProblemsStrip(
     val density = LocalDensity.current
     val errors = diagnostics.count { it.severity == AsmDiagnosticSeverity.ERROR }
     val warnings = diagnostics.count { it.severity == AsmDiagnosticSeverity.WARNING }
+    val firstError = diagnostics.firstOrNull {
+        it.severity == AsmDiagnosticSeverity.ERROR && it.lineIndex != null &&
+            it.fileId?.let { fileId -> state.workspace?.index?.file(fileId) != null } == true
+    }
     var expanded by remember(report?.generatedAt, diagnostics) {
         mutableStateOf(errors > 0 || report?.succeeded == false)
     }
@@ -3040,6 +3063,11 @@ private fun AsmBuildProblemsStrip(
                         fontSize = fs.detail,
                         fontWeight = FontWeight.SemiBold,
                         color = accent,
+                        textDecoration = if (firstError != null) TextDecoration.Underline else null,
+                        modifier = if (firstError != null) Modifier
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .clickable { state.openSource(firstError.fileId!!, firstError.lineIndex!!) }
+                            else Modifier,
                     )
                 }
                 if (expanded) {
@@ -3067,7 +3095,7 @@ private fun AsmBuildProblemsStrip(
                                     Modifier.fillMaxWidth()
                                         .then(
                                             if (navigableFileId != null && problem.lineIndex != null) {
-                                                Modifier.clickable {
+                                                Modifier.pointerHoverIcon(PointerIcon.Hand).clickable {
                                                     state.openSource(navigableFileId, problem.lineIndex)
                                                 }
                                             } else Modifier
@@ -3093,6 +3121,9 @@ private fun AsmBuildProblemsStrip(
                                         fontFamily = FontFamily.Monospace,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
+                                        textDecoration = if (navigableFileId != null && problem.lineIndex != null) {
+                                            TextDecoration.Underline
+                                        } else null,
                                     )
                                 }
                             }
@@ -3188,14 +3219,22 @@ private fun AsmEditableSourcePane(
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
-    var pageStartLine by remember(pane.id, source.id, state.editSessionSerial) {
-        mutableStateOf((pane.lineIndex / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES)
+    val sourceText = remember(source.id, state.sourceBufferRevision, state.editSessionSerial) {
+        state.sourceEditText(source.id)
     }
-    LaunchedEffect(pane.id, source.id, pane.lineIndex) {
-        val targetPage = (pane.lineIndex / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES
+    val totalLineCount = remember(sourceText) { sourceText.count { it == '\n' } + 1 }
+    var pageStartLine by remember(pane.id, source.id, state.editSessionSerial) {
+        mutableStateOf(asmEditPageStartForLine(pane.lineIndex, totalLineCount))
+    }
+    var pendingScrollOffset by remember(pane.id, source.id) { mutableStateOf<Double?>(null) }
+    LaunchedEffect(pane.id, source.id, pane.lineIndex, pane.navigationSerial, state.editSessionSerial) {
+        pendingScrollOffset = null
+        val targetPage = asmEditPageStartForLine(pane.lineIndex, totalLineCount)
         if (pane.lineIndex !in pageStartLine until (pageStartLine + ASM_EDIT_PAGE_LINES)) {
             pageStartLine = targetPage
+            pendingScrollOffset = with(density) {
+                (pane.lineIndex - ASM_EDIT_TARGET_CONTEXT_LINES).coerceAtLeast(0) * (fs.body * 1.4f).toPx().toDouble()
+            }
         }
     }
     val pageKey = AsmEditPageKey(pane.id, source.id, state.editSessionSerial, pane.navigationSerial, pageStartLine)
@@ -3356,8 +3395,9 @@ private fun AsmEditableSourcePane(
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     val lineCount = fieldValue.text.count { it == '\n' } + 1
-    val totalLineCount = state.sourceEditText(source.id).count { it == '\n' } + 1
-    val displayedEndLine = (page.startLine + lineCount).coerceAtMost(totalLineCount)
+    val numberWidth = with(density) {
+        (fs.body.toPx() * MONOSPACE_CHARACTER_WIDTH * totalLineCount.toString().length).toDp() + 20.dp
+    }.coerceAtLeast(ASM_LINE_NUMBER_WIDTH)
     val longestLine = fieldValue.text.lineSequence().maxOfOrNull(String::length)
         ?.coerceAtMost(MAX_MEASURED_CODE_COLUMNS) ?: 0
     val lineHeight = fs.body * 1.4f
@@ -3396,16 +3436,25 @@ private fun AsmEditableSourcePane(
     val warningLineColor = Color(0xFFE0A12B).copy(alpha = 0.14f)
     val selectedWarningLineColor = Color(0xFFE0A12B).copy(alpha = 0.22f)
     val warningEdgeColor = Color(0xFFE0A12B).copy(alpha = 0.9f)
-    LaunchedEffect(pageKey) {
-        val targetWithinPage = initialCursorLine.coerceIn(0, (lineCount - 1).coerceAtLeast(0))
-        if (targetWithinPage > 0) {
-            snapshotFlow { vertical.maxValue }.first { it > 0 }
-            // Leave a few source lines above linked definitions and diagnostics.
-            // Exact top alignment is easy to lose beneath fixed editor controls
-            // and also removes useful context around the target.
-            val contextualTarget = (targetWithinPage - ASM_EDIT_TARGET_CONTEXT_LINES).coerceAtLeast(0)
-            vertical.scrollTo((contextualTarget * lineHeightPx).toInt().coerceAtMost(vertical.maxValue))
-        } else vertical.scrollTo(0)
+    var revealedNavigation by remember(pane.id, source.id) { mutableStateOf<Pair<Long, Long>?>(null) }
+    val navigationKey = state.editSessionSerial to pane.navigationSerial
+    LaunchedEffect(pageKey, fieldLayout, vertical.maxValue, pendingScrollOffset) {
+        // Page changes must wait for this page's measured layout, not merely yield to
+        // another coroutine. Wheel/scrollbar positioning must not race caret navigation.
+        val layout = fieldLayout?.takeIf { it.layoutInput.text.text == fieldValue.text } ?: return@LaunchedEffect
+        val requested = pendingScrollOffset
+        when {
+            requested != null -> {
+                vertical.scrollTo((requested - page.startLine * lineHeightPx).roundToInt().coerceIn(0, vertical.maxValue))
+                pendingScrollOffset = null
+                revealedNavigation = navigationKey
+            }
+            revealedNavigation != navigationKey -> {
+                val contextualLine = (initialCursorLine - ASM_EDIT_TARGET_CONTEXT_LINES).coerceAtLeast(0)
+                vertical.scrollTo(layout.getLineTop(contextualLine.coerceAtMost(layout.lineCount - 1)).roundToInt())
+                revealedNavigation = navigationKey
+            }
+        }
     }
     var revealedFindNavigation by remember(source.id, page.startLine) { mutableStateOf<Long?>(null) }
     LaunchedEffect(pageKey, fieldLayout, find.selected) {
@@ -3421,14 +3470,34 @@ private fun AsmEditableSourcePane(
     val currentPageStart = rememberUpdatedState(page.startLine)
     val currentTotalLines = rememberUpdatedState(totalLineCount)
     var editorViewportHeightPx by remember(source.id) { mutableStateOf(0) }
-    val verticalAdapter = remember(vertical, lineHeightPx, source.id) {
+    val scrollbarSizePx = with(density) { ASM_SCROLLBAR_SIZE.roundToPx() }
+    val viewportHeightPx = (editorViewportHeightPx - scrollbarSizePx).coerceAtLeast(0)
+    fun scrollDocumentTo(requested: Double) {
+        val maximum = (totalLineCount * lineHeightPx + sourceTopPaddingPx * 2 - viewportHeightPx).coerceAtLeast(0f)
+        val target = requested.coerceIn(0.0, maximum.toDouble())
+        val localOffset = target - page.startLine * lineHeightPx
+        if (pendingScrollOffset == null && localOffset in 0.0..vertical.maxValue.toDouble()) {
+            vertical.dispatchRawDelta((localOffset - vertical.value).toFloat())
+        } else {
+            // Overlap windows around the viewport, preserving its absolute position.
+            // Replacing one whole page with the next used to skip a viewport of rows.
+            pendingScrollOffset = target
+            pageStartLine = ((target / lineHeightPx).toInt() - ASM_EDIT_PAGE_LINES / 2)
+                .coerceIn(0, (totalLineCount - ASM_EDIT_PAGE_LINES).coerceAtLeast(0))
+        }
+    }
+    val currentScrollRequest = rememberUpdatedState<(Double) -> Unit> { scrollDocumentTo(it) }
+    val currentViewportHeight = rememberUpdatedState(viewportHeightPx)
+    val verticalAdapter = remember(vertical, lineHeightPx, pane.id, source.id) {
         AsmPagedVerticalScrollbarAdapter(
             scrollState = vertical,
             lineHeightPx = lineHeightPx,
             totalLineCount = { currentTotalLines.value },
             pageStartLine = { currentPageStart.value },
-            viewportSizePx = { editorViewportHeightPx },
-            onPageStartLineChanged = { pageStartLine = it },
+            viewportSizePx = { currentViewportHeight.value },
+            contentPaddingPx = sourceTopPaddingPx * 2,
+            requestedOffset = { pendingScrollOffset },
+            onScrollRequested = { currentScrollRequest.value(it) },
         )
     }
     val scrollbarStyle = ScrollbarStyle(
@@ -3468,7 +3537,7 @@ private fun AsmEditableSourcePane(
         ) {
             val contentWidth = maxOf(
                 maxWidth - ASM_SCROLLBAR_SIZE,
-                (ASM_LINE_NUMBER_WIDTH.value + 28f + longestLine * fs.body.value * MONOSPACE_CHARACTER_WIDTH).dp,
+                (numberWidth.value + 28f + longestLine * fs.body.value * MONOSPACE_CHARACTER_WIDTH).dp,
             )
             Row(
                 Modifier.fillMaxSize()
@@ -3482,21 +3551,10 @@ private fun AsmEditableSourcePane(
                                 horizontal.dispatchRawDelta(delta.y * ASM_MOUSE_WHEEL_SCALE)
                                 change.consume()
                             }
-                            delta.y > 0f && vertical.value >= vertical.maxValue && displayedEndLine < totalLineCount -> {
-                                pageStartLine = page.startLine + lineCount
-                                scope.launch {
-                                    yield()
-                                    vertical.scrollTo(0)
-                                }
-                                change.consume()
-                            }
-                            delta.y < 0f && vertical.value == 0 && page.startLine > 0 -> {
-                                pageStartLine = (page.startLine - ASM_EDIT_PAGE_LINES).coerceAtLeast(0)
-                                scope.launch {
-                                    yield()
-                                    snapshotFlow { vertical.maxValue }.first { it > 0 }
-                                    vertical.scrollTo(vertical.maxValue)
-                                }
+                            delta.y != 0f -> {
+                                val current = pendingScrollOffset ?: verticalAdapter.scrollOffset
+                                scrollDocumentTo(current + delta.y * ASM_MOUSE_WHEEL_SCALE)
+                                if (delta.x != 0f) horizontal.dispatchRawDelta(delta.x * ASM_MOUSE_WHEEL_SCALE)
                                 change.consume()
                             }
                         }
@@ -3557,7 +3615,8 @@ private fun AsmEditableSourcePane(
                     fontFamily = FontFamily.Monospace,
                     textAlign = TextAlign.End,
                     color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.width(ASM_LINE_NUMBER_WIDTH).padding(end = 10.dp),
+                    softWrap = false,
+                    modifier = Modifier.width(numberWidth).padding(end = 10.dp),
                 )
                 CompositionLocalProvider(LocalContextMenuRepresentation provides ASM_CONTEXT_MENU_REPRESENTATION) {
                     ContextMenuDataProvider(
@@ -3805,7 +3864,7 @@ private fun AsmEditableSourcePane(
                         (result.items.size * ASM_COMPLETION_ROW_HEIGHT.value + 8f).dp,
                     )
                     val desiredX = with(density) {
-                        (ASM_LINE_NUMBER_WIDTH.toPx() + cursor.left - horizontal.value).toDp()
+                        (numberWidth.toPx() + cursor.left - horizontal.value).toDp()
                     }
                     val desiredBelow = with(density) {
                         (sourceTopPaddingPx + cursor.bottom - vertical.value).toDp()
@@ -3886,7 +3945,7 @@ private fun AsmEditableSourcePane(
                 if (cursor != null) {
                     val hintWidth = minOf(ASM_MACRO_HINT_WIDTH, (maxWidth - 16.dp).coerceAtLeast(180.dp))
                     val desiredX = with(density) {
-                        (ASM_LINE_NUMBER_WIDTH.toPx() + cursor.left - horizontal.value).toDp()
+                        (numberWidth.toPx() + cursor.left - horizontal.value).toDp()
                     }
                     val desiredBelow = with(density) {
                         (sourceTopPaddingPx + cursor.bottom - vertical.value).toDp()
@@ -3944,29 +4003,21 @@ private class AsmPagedVerticalScrollbarAdapter(
     private val totalLineCount: () -> Int,
     private val pageStartLine: () -> Int,
     private val viewportSizePx: () -> Int,
-    private val onPageStartLineChanged: (Int) -> Unit,
+    private val contentPaddingPx: Float,
+    private val requestedOffset: () -> Double?,
+    private val onScrollRequested: (Double) -> Unit,
 ) : V2ScrollbarAdapter {
     override val scrollOffset: Double
-        get() = pageStartLine() * lineHeightPx.toDouble() + scrollState.value
+        get() = requestedOffset() ?: (pageStartLine() * lineHeightPx.toDouble() + scrollState.value)
 
     override val contentSize: Double
-        get() = totalLineCount() * lineHeightPx.toDouble()
+        get() = totalLineCount() * lineHeightPx.toDouble() + contentPaddingPx
 
     override val viewportSize: Double
         get() = viewportSizePx().toDouble()
 
     override suspend fun scrollTo(scrollOffset: Double) {
-        val maximum = (contentSize - viewportSize).coerceAtLeast(0.0)
-        val target = scrollOffset.coerceIn(0.0, maximum)
-        val targetLine = (target / lineHeightPx).toInt()
-            .coerceIn(0, (totalLineCount() - 1).coerceAtLeast(0))
-        val newPageStart = (targetLine / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES
-        if (newPageStart != pageStartLine()) {
-            onPageStartLineChanged(newPageStart)
-            yield()
-        }
-        val localOffset = target - newPageStart * lineHeightPx
-        scrollState.scrollTo(localOffset.roundToInt().coerceIn(0, scrollState.maxValue))
+        onScrollRequested(scrollOffset)
     }
 }
 
@@ -4137,6 +4188,11 @@ private fun asmMacroHintText(hint: AsmMacroCallHint): AnnotatedString {
         append("  ·  argument ${hint.argumentIndex + 1}")
     }
 }
+
+/** A short tail still needs a full editing window above it, not an isolated few-line page. */
+internal fun asmEditPageStartForLine(line: Int, totalLines: Int): Int =
+    ((line.coerceAtLeast(0) / ASM_EDIT_PAGE_LINES) * ASM_EDIT_PAGE_LINES)
+        .coerceAtMost((totalLines - ASM_EDIT_PAGE_LINES).coerceAtLeast(0))
 
 internal fun asmSourceEditPage(text: String, requestedStartLine: Int, maxLines: Int): AsmSourceEditPage {
     require(maxLines > 0) { "maxLines must be positive" }
@@ -4816,7 +4872,6 @@ private fun AsmAssetCanvas(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AsmEditorLinkBar(
     links: List<AsmEditorLink>,
@@ -4824,36 +4879,41 @@ private fun AsmEditorLinkBar(
 ) {
     if (links.isEmpty()) return
     val fs = LocalEditorTheme.current.fontSize.value
+    var expanded by remember(links) { mutableStateOf(false) }
+    val roomLinks = links.all { it.target is AsmEditorTarget.Room }
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
+        Column(Modifier.fillMaxWidth()) {
             Text(
-                "Open in SMEDIT",
-                fontSize = fs.detail,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 2.dp, vertical = 7.dp),
+                if (links.size == 1) links.single().title else
+                    "${if (expanded) "▾" else "▸"} " +
+                        if (roomLinks) "Used by · ${links.size} rooms" else "Open in SMEDIT · ${links.size} links",
+                fontSize = fs.detail, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth().clickable {
+                    if (links.size == 1) onOpenInEditor(links.single().target) else expanded = !expanded
+                }.padding(horizontal = 12.dp, vertical = 8.dp),
             )
-            for (link in links) {
-                OutlinedButton(
-                    onClick = { onOpenInEditor(link.target) },
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 9.dp, vertical = 3.dp),
-                    shape = ASM_CONTROL_SHAPE,
-                ) {
-                    Column {
-                        Text(link.title, fontSize = fs.detail, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            link.detail,
-                            fontSize = fs.statusBar,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+            if (expanded) {
+                Text("References in the loaded ROM", fontSize = fs.detail,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                val listState = rememberLazyListState()
+                Box(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().padding(end = ASM_SCROLLBAR_SIZE)) {
+                        items(links.size) { index ->
+                            val link = links[index]
+                            Column(Modifier.fillMaxWidth().clickable { onOpenInEditor(link.target) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                Text(link.title, fontSize = fs.body, color = MaterialTheme.colorScheme.primary)
+                                Text(link.detail, fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
+                    VerticalScrollbar(rememberScrollbarAdapter(listState),
+                        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(ASM_SCROLLBAR_SIZE))
                 }
             }
         }

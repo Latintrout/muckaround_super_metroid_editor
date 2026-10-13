@@ -91,6 +91,7 @@ internal fun TilePropertiesPanel(
     onMoveSamusHere: ((Int, Int) -> Unit)?,
     onWorkspaceChanged: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
+    onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
     onDismiss: () -> Unit,
     onDrag: (Offset) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -955,10 +956,7 @@ internal fun TilePropertiesPanel(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(iName, fontSize = LocalEditorTheme.current.fontSize.value.body, modifier = Modifier.weight(1f))
-                            val definitionAddress = semanticAsmAddress(RomConstants.BANK_PLM, plm.id)
-                            if (definitionAddress != null && onNavigateToAsm != null) {
-                                AsmNavigationLink(definitionAddress, onNavigateToAsm)
-                            }
+                            AsmPlmNavigationLinks(plm, onNavigateToPlmPlacement, onNavigateToAsm)
                         }
                         Text(
                             "bit: 0x${plm.param.toString(16).uppercase().padStart(2, '0')} · " +
@@ -1013,10 +1011,7 @@ internal fun TilePropertiesPanel(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f),
                             )
-                            val definitionAddress = semanticAsmAddress(RomConstants.BANK_PLM, plm.id)
-                            if (definitionAddress != null && onNavigateToAsm != null) {
-                                AsmNavigationLink(definitionAddress, onNavigateToAsm)
-                            }
+                            AsmPlmNavigationLinks(plm, onNavigateToPlmPlacement, onNavigateToAsm)
                         }
                         // Save station spawn details
                         if (plm.id == 0xB76F && romParser != null) {

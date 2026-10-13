@@ -75,10 +75,12 @@ never be silently omitted from an export.
     label. **Tab** advances a caret to the next four-column stop or indents the
     selected rows; **Shift+Tab** removes up to one indentation level. Paste and
     multi-line replacement are deliberately never reformatted.
-    Saving persists both the source override and the `.smedit` project, reparses
-    the complete source index, and immediately checks the complete source tree
-    for unsafe data literals. Label navigation and references therefore reflect
-    the saved project text. Asar `!defines` such as `!SPF` are colored and
+    Saving persists both the source override and the `.smedit` project without
+    waiting for a full index rebuild. The bottom status bar shows **Indexing ASM…**
+    and then **Checking ASM…** while background work refreshes navigation and
+    checks saved files for unsafe data literals. Editing remains available;
+    newer typing stays unsaved, and obsolete jobs cannot replace a newer index
+    or build report. Asar `!defines` such as `!SPF` are colored and
     navigate to their declarations like ordinary source symbols. Resolvable
     references retain syntax colors without persistent underlines; hovering any
     navigable token changes the text cursor to a hand. Use **Cmd+D** on macOS or
@@ -188,9 +190,12 @@ is intentionally hidden from the editing workflow; the toolbar does not expose
 internal page ranges. Search, symbol, and diagnostic
 navigation highlights the complete destination row with surrounding context;
 the highlight then follows the editing caret. **Save** is deliberately a fast
-persistence boundary: it atomically writes the source override, reparses its
-index, saves the `.smedit` project, and performs fast source-literal validation.
-It does not wait for Asar. The button becomes `Build*` whenever unsaved or
+persistence boundary: it atomically writes the source override and saves a detached
+snapshot of the `.smedit` project. Disk writes run off the UI thread. Indexing and
+saved-file literal validation run afterward, coalescing multi-bank saves into one
+index rebuild. Source Save does not regenerate optional graphics PNGs or refresh
+the entire bundled-patch catalog; explicit Project Save retains graphics exports
+and pattern-library saving. It does not wait for Asar. The button becomes `Build*` whenever unsaved or
 newly saved source has not produced a successful build; an explicit **Build**,
 **Run**, preview, or export performs the complete validated build. **EMU** only
 opens or closes the emulator window; Run builds if needed and starts play. This keeps
@@ -205,13 +210,32 @@ open the exact source file with several lines of surrounding context rather than
 adding a permanent Problems tool window. Every located error row is also shaded
 red with an edge marker directly in source; warning rows use the corresponding
 amber treatment, while the ordinary caret/navigation row remains blue. Failed
-builds expand the drawer automatically, successful builds leave a compact status,
-and its top divider can be dragged to resize a scrollable multi-problem list; the
-chosen height is retained in global SMEDIT layout settings. Build diagnostics do
-not open the unrelated ASM workspace/download controls in the sidebar.
+builds expand the drawer automatically. Located error rows and the failed-build
+heading link to source (the heading opens the first located error); the disclosure
+arrow still collapses the drawer. Explicit file/line locations from room-data
+validation are retained alongside Asar locations. The top Build button uses a
+subtle error tint while the current build report is failed. Successful builds leave
+a compact status, and the drawer's top divider can be dragged to resize a scrollable
+multi-problem list; the chosen height is retained in global SMEDIT layout settings.
+Build diagnostics do not open the unrelated ASM workspace/download controls in
+the sidebar.
+
+Clicking Build from another editor page in ASM mode opens ASM when the build
+fails, revealing the first located error and the diagnostics drawer. General
+patch/planning failures still open the drawer even when they have no source line.
+This transition is recorded in global navigation history so Back returns to the
+previous editor page; a successful Build leaves the current page selected.
 
 Editable banks use a bounded 250-line text window over the whole saved buffer;
-the continuous scrollbar hides that implementation detail. Caret movement does
+the continuous scrollbar hides that implementation detail. Tail targets retain
+preceding context even when the file ends just after a window boundary. Wheel
+and scrollbar navigation preserve the absolute viewport across overlapping windows,
+with scroll restoration deferred until the new text is measured (not a competing
+caret-recentering coroutine). The line-number gutter scales with the font and digit
+count and never wraps. `AsmEditorViewportTest` exercises the rendered editor with
+a synthetic 15,754-line bank, including reopening, large fonts, focused boundary
+scrolling and end-to-end scrollbar dragging;
+it needs no ROM and cannot modify a real project. Caret movement does
 not reparse the complete bank, and an open Source search is refreshed when its
 query or saved source index changes rather than rescanning every bank on each
 keystroke.
@@ -377,8 +401,11 @@ The editor provides semantic bridges into the Atlas rather than making users
 retype addresses. Room headers, door lists, room-state records, layouts,
 backgrounds, FX, PLM/object sets, enemy sets and graphics, special X-Ray data,
 room ASM, and scroll data expose compact **ASM** links wherever the ROM stores a
-valid address. The tile inspector also links a selected door to its `$83`
-DoorDef and every item/object to its `$84` PLM header. Expanded enemy stats link
+valid address. The tile inspector links a selected door to its `$83`
+DoorDef. For an item/object, **ASM** instead targets its selected room/state's
+placement: the exact `%PLMPopEntry` line in editable Bank `$8F` source when
+verified. The adjacent dropdown offers **Behavior** for the shared `$84` PLM
+header (setup/instructions), independently of the placement. Expanded enemy stats link
 to the `$A0` species header, and the selected enemy/boss in the sprite catalog
 offers the same source jump. A link may land on exact source, the extracted
 asset that owns the byte, or clearly labeled nearby source context.
@@ -401,6 +428,11 @@ editor destination for an **exact** address anchor; nearby context never
 inherits a potentially false visual-editor link. Composite boss, Samus, and
 shared pause-map asset names are used only where the engine has no single
 semantic pointer for the complete visual source.
+Multiple reverse links are collapsed by default (**Used by · N rooms** for room
+consumers), with a bounded scrollable list when expanded. They describe the
+loaded-ROM index, not the current project's unbuilt changes. A single destination
+remains a compact direct link. Read-only source gutters grow with font size so
+five-digit line numbers and SNES addresses do not wrap.
 
 The ROM comparison has a different boundary from the extracted reference assets.
 It does not infer changes from project JSON. It invokes the same transactional
@@ -672,6 +704,11 @@ ROM plan remains the oracle, so the final output must be byte-identical. This
 lets patch families migrate incrementally rather than forcing an unsafe all-at-
 once conversion.
 
+The real-Asar combined-backend regression also includes an enabled legacy byte
+patch and a disabled conflicting byte patch. It compares the enabled legacy and
+Samus Physics results with Loaded ROM mode, checks unchanged-build cache reuse,
+and verifies that a later invalid patch is still reported as a build failure.
+
 ## Architecture
 
 - `AsmReferenceRepository` owns download, archive safety, transactional cache
@@ -763,6 +800,230 @@ export SMEDIT_TEST_ROM='/path/to/clean/unheadered/Super Metroid.sfc'
 ./gradlew :desktopApp:asmReferenceIntegrationTest
 ```
 
+## Reciprocal source/GUI ownership — first authoring slice
+
+The generated room backend above proved compilation/export parity; it was **not**
+yet reciprocal source editing. The target is one authoritative representation per
+resource, with GUI and source/raw views acting on the same document. Source-owned
+tables belong in authored ASM; graphical/level assets can instead own project
+data files referenced by ASM. Neither requires a second editable `db` dump of the
+built ROM. Room Data remains a last-successful-build inspection report.
+
+In ASM source mode, supported PLM lists now resolve their authority automatically
+against the immutable source/ROM baseline. There is no per-room **Link** step:
+
+| Authored ASM list | Room-editor changes | Authority / behavior |
+|---|---|---|
+| Unchanged | None | Normal room editing remains available; opening the field dialog does not take ownership. |
+| Unchanged | Objects, scroll commands, or state graph | Room editor. Existing additions, removals and state differences remain authoritative and are included by the established build backend. |
+| Changed, supported fixed layout | None | ASM. The room preview follows source automatically, including after save/reopen. |
+| Changed | Overlapping GUI resource/graph changes | Explicit conflict. Neither version is discarded; build stops until ownership is resolved. |
+
+Comparison uses decoded values, not whitespace, comments or literal spelling.
+Sharing is checked across every consumer, not only the currently selected room.
+Automatic ownership is derived from the documents rather than saved as another
+toggle. Source Undo back to the original values releases that automatic ownership.
+Build-time checks run independently of the GUI, so visiting Room Info first is
+not required for either protection or correct export.
+
+**Room Info → State Data → Placed Objects → Edit objects…** opens compact field
+controls for an unchanged or source-owned supported list. The dialog names the
+rooms/states sharing the list and the current fixed-size boundary. Changing
+a literal X/Y or parameter updates the actual `%PLMPopEntry` token in project
+`bank_8F.asm`, retaining surrounding labels, comments, other literal spellings and
+line endings. The **ASM** action opens that same editable declaration, not the
+built-ROM report. Editing a supported source field updates the room's PLM preview
+without building. GUI and source edits share the source document and undo/redo
+history. Normal project Save (including Cmd/Ctrl+S outside ASM) saves pending source
+buffers too; it does not trigger a build.
+
+Until first opened as placement source, GUI-managed rooms show **Objects · Room
+editor**. Their original Bank `$8F` list is a baseline, not a second edited version.
+For example, Landing Site may have a rewritten state graph, common item additions
+and state-specific exceptions—not merely a longer vanilla list. The migration
+below preserves those differences instead of flattening them into one shared table.
+
+### Selected-object navigation
+
+Click an item/PLM on the room canvas, then **ASM** next to its name. In source
+mode, navigation verifies the selected room/state's list identity and matches
+the full ID/X/Y/parameter tuple against the **current buffer**, including unsaved
+changes. It highlights the matching entry rather than stopping at the population
+label or opening the shared behavior definition. Identical duplicate records,
+invalid drafts, ownership conflicts and unmatched states are not guessed.
+
+For a supported GUI-managed room, this action now automatically migrates its
+complete effective object lists into project source, then opens the selected entry.
+This changes source/ownership **in memory**, without compiling, exporting or
+touching the base ROM. Project Save persists both the source and state identities.
+
+If safe migration is unavailable, ASM opens a compact **Placement** inspection: room,
+selected condition, PLM type, tile X/Y and parameter, plus the reason source
+navigation is unavailable. This is explicitly a read-only snapshot of the room
+preview at selection, not the last build and not another editable ASM dump.
+The actual migration refusal is shown; no guessed conversion occurs.
+**Behavior** still opens the shared implementation. Back/Forward preserves the
+captured placement context; snapshots are discarded when switching projects.
+Navigation never uses the source lens's last-valid cached preview as if it were
+current authored text.
+
+### Fixed-layout authoring boundary
+
+Earlier explicit links remain supported through the project's
+`asmWorkspace.plmSourceBindings` identities (label, original pointer, record count),
+**not another list of object values or PLM deltas**. No new binding is needed for
+automatic source recognition or field edits.
+The immutable original source supplies the initial identity/layout checks; the
+project's authored source owns the values. The existing ROM-only workflow is
+unchanged for unlinked resources. Linked resources require ASM mode.
+
+This intentionally bounded pilot supports the standard six-byte records expressed
+as single-line `%PLMPopEntry(ID, X, Y, Param)` calls and a zero-word terminator:
+
+- Decimal, `$` hexadecimal and `%` binary literals are editable through the GUI.
+  Known pinned source labels are decoded, but the GUI never silently replaces a
+  symbolic field with a literal. Edit that expression in ASM explicitly first.
+- Record count and source/state-pointer placement stay fixed. Add/remove,
+  relocation, per-state detachment and arbitrary expressions are next steps, not
+  implemented reciprocal capabilities. Existing unlinked room editing still
+  supports its usual additions/removals through the established build backend.
+- Invalid/incomplete source or a changed PLM macro keeps the session's last valid
+  preview, marks it out of date and blocks visual writes to that resource. A stale
+  object dialog cannot overwrite a newer source revision. On reopen there may be
+  no last-valid session preview; the source problem is still explicit.
+- For older explicit links, **Use room editor** requires original object values
+  first. Automatic source ownership instead releases on restoring the source
+  values. Neither action hides changed source behind a base-ROM preview.
+- Saving checks both workspace and authored override text against the buffer's
+  saved baseline. External changes are rejected, not overwritten. Automatic
+  external-file merging/reloading is not implemented.
+
+Builds verify the decoded model against actual Asar bytes **and** its emitted
+label address, confirm every existing state reference, then claim the complete
+table and state-pointer fields as source-owned, including unchanged bytes. Thus a
+patch cannot overwrite an unchanged byte in a linked list, and the GUI exporter
+cannot replay an independent PLM delta on top. Compiled source cache reuse retains
+these ownership claims. The project compiler does not guess custom engine layouts.
+
+Validation: `AsmPlmDocumentTest` covers lossless field edits and rejected formats;
+`AsmPlmSourceBridgeTest` covers reciprocal buffers, shared undo, invalid/stale
+drafts, ownership, persistence and external-edit rejection, plus exact placement
+navigation, GUI-owned fallbacks, state mismatch and inspection history. The strict
+`asmBuildIntegrationTest` includes a disposable real-ROM Landing Site test proving
+GUI → source → GUI → Asar output **without linking**, retained sharing, undo/reopen
+and patch-conflict rejection. Another fixture combines a rewritten Landing Site
+with common/per-state item edits and an independently source-edited Wasteland,
+then verifies that overlapping source/GUI edits fail without dropping either.
+Tests never edit the user's Sandbox or other live project.
+
+### Relocatable room-object source
+
+`AsmRoomObjectSource` is the next, bounded step beyond fixed original lists. On
+first **item → ASM** navigation for a supported GUI-owned room, the bridge:
+
+1. Resolves its stable state manifest and computes complete effective PLM lists
+   from the loaded ROM, common edits and state exceptions. Existing independent
+   source edits, changed record layouts and unsupported resource changes refuse
+   conversion without deleting either version.
+2. Appends authored `SmeditObjects_<room>_…` macros to editable `bank_8F.asm`.
+   State wrappers reference List macros; shared lists retain sharing. Single-state
+   rooms use direct `%PLMPopEntry` records. Common helpers share explicitly linked
+   objects across multiple states; state-local exceptions stay local.
+   Original vanilla declarations and surrounding source are unchanged.
+3. Verifies that decoding those macros reproduces every effective list, then
+   retires only the room/state `plmChanges` streams. Schema 11 stores
+   `RoomEdits.asmPlmSourceVersion = 1`, plus existing state identities—not a second
+   authoritative copy of the object values. Historical operations and unrelated
+   tile/enemy/FX edits remain intact.
+
+Both ASM edits and ordinary GUI object add/remove now change those macros. A
+state-local edit first forks a shared List, while **All states** updates each
+current list and uses a shared Common definition when multiple states need it.
+Added conditions clone their template's list, inheriting common additions/removals
+**and template exceptions**.
+Editing a shared field directly in ASM or the scalar dialog affects its consumers;
+that is deliberately different from a state-local placement operation.
+
+Single-state rooms do not need per-object Common helpers: All states and This state
+have the same membership there. Adding a condition shares its template's existing
+List; a subsequent state-local placement forks the List. An All-states addition
+in a multi-state room uses a shared helper. Identical bytes in independent lists
+are **not** evidence of intentional sharing and are never automatically merged.
+
+Migration, GUI placement/scalar edits, and source/project Save tidy the affected room's owned helper
+graph in the same source undo step. Unreferenced Common/List definitions and
+wrappers for deleted states are removed, and helpers used by only one state are
+inlined without changing entry order, literal spelling, values, or live List
+identities. Surviving names are not renumbered. Handwritten comments are retained
+(notes on removed helpers remain as
+comments); generated item-name comments are refreshed. Calls elsewhere in the bank
+or other indexed project sources, including unsaved/disabled custom modules,
+protect definitions. Unknown helper bodies are conservatively retained. This is
+a bounded source transformation, not an arbitrary Asar dead-code optimizer.
+The decoded resource graph must match before/after cleanup or the edit is refused.
+
+Malformed authored records block GUI placement/removal without queuing an edit or
+overwriting the draft. The status bar reports **Object edit blocked** in error
+color for 12 seconds; malformed PLM rows include `bank_8F.asm:<line>`. Correct the
+source and retry the placement. A successful edit replaces the stale error status.
+
+Older saved rooms receive this cleanup on their next GUI object edit or Save, even
+if the bank was already saved and no GUI placement changed. Build/Run preparation
+also saves managed source first. Merely opening or navigating does not rewrite
+authored text. Invalid drafts remain saveable and are not cleaned until repaired;
+Build still validates the complete tree. Cleanup is source-undoable, and newer
+typing during Save remains unsaved. Redo, save/reopen, and item → ASM navigation use
+the resulting document. Synthetic
+tests cover repeated add/remove, single-to-multi-state transitions, state exceptions,
+external consumers, comments/CRLF, and exact undo. The strict Asar integration test
+also builds Bubble Mountain before and after adding a condition and compares every
+compiled state list with the source model.
+
+Authored PLM entries and Common calls carry short `; PLM: <name>` comments, using
+the editor's item/door/scroll names (including project custom items), plus a field
+legend and list terminator comment. Unknown IDs remain identified by hex, not a
+guessed item name. GUI object edits refresh these names in the same undo step;
+handwritten comments, numeric spelling and original bank declarations are retained.
+Additional notes can follow a second semicolon. Comments never determine object
+values. Existing authored rooms acquire comments on their next GUI object edit or Save;
+merely opening a source file or typing ASM does not automatically rewrite it.
+
+At build time the shared room planner receives the decoded source lists. It
+allocates variable-sized, whole resources in bank `$8F` and rewires every state
+pointer. The generated placement plan calls the **authored macro**, not a copied
+editable dump. Asar must emit exactly the planned bytes, table sizes and pointers;
+whole-resource claims and final-ROM parity still protect against overlapping
+patches. A missing source document, unknown format version or leftover independent
+PLM deltas fails closed. ROM-only/headless builds cannot silently ignore the marker.
+Allocation addresses remain build results, not persisted source identities.
+
+Migration is one source-undo step that restores both text and the prior GUI PLM
+streams. It refuses undo across changed state membership. GUI object Undo/Redo
+uses source history and rejects stale revisions. A newly added state's declaration
+cannot be undone while that state still references it. Ordinary Project Save
+saves source too; bank-only saving is not a substitute for saving newly changed
+room-state/ownership metadata.
+
+Current boundaries: this conversion supports existing rooms in projects without
+added rooms. Custom scroll-command authoring, changed resource links, conflicting
+original-source edits and arbitrary macro expressions still need review. Save
+station placement/removal (which also owns spawn data), mixed tile/PLM operations
+and whole-room reset are guarded until their compound source transactions exist.
+Original fixed-layout declarations retain their earlier count/address restriction;
+the appended managed lists support growth/shrinkage and state-local detachment.
+This is **object-source migration, not full room-header/selector/level-data source
+authoring**. Room Data remains a read-only build report.
+
+Validation adds synthetic `AsmRoomObjectSourceTest` coverage and migration/undo/
+save/reopen bridge tests. The strict real-ROM integration compares migrated Landing
+Site states with the established ROM exporter, then exercises GUI edits, shared
+undo, a new condition, source-list growth, real Asar output and cache reuse. No test
+reads or modifies a user's live Sandbox project.
+
+Next: source-aware compound edits/custom scroll resources, a first asset-owned
+graphics example, and stable source identities for project-created rooms; then
+extend the same authority contract to the rest of the room graph.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -778,8 +1039,12 @@ Follow-up work can now be incremental:
 2. Continue the artifact sinks for semantic editors. Existing-room graphs now
    have an atomic byte-faithful generated-ASM backend, including variable-sized
    allocations and pointer changes. Replace that bridge incrementally with
-   typed labels/tables. The first PLM-list/state-pointer pilot and read-only
-   generated-source navigation are implemented; extend to rewritten state graphs,
+   typed labels/tables. The generated PLM-list/state-pointer pilot and read-only
+   result navigation are implemented. The separate reciprocal authoring pilot now
+   shares fixed-layout declarations and relocatable authored object macros with the
+   GUI, including state exceptions and copy-on-write. Prioritize compound edits,
+   custom scroll resources and one asset-owned graphics example before scaling
+   that authority contract. Then extend authoring to rewritten state graphs,
    then level data, enemies/GFX, FX, scrolls, doors, headers, and state selectors;
    then give project-created rooms stable source
    identities. Graphics, map, text, and sound encoders should follow the same

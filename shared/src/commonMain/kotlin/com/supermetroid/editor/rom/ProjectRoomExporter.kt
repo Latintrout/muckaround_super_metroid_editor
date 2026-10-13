@@ -10,6 +10,9 @@ import kotlin.math.min
 
 class ProjectRoomExportException(message: String) : IllegalStateException(message)
 
+/** Ephemeral decoded source input. Never serialized as another project object list. */
+data class SourcePlmResource(val identity: String, val entries: List<RomParser.PlmEntry>)
+
 data class ProjectRoomExportResult(
     val roomsPatched: Set<String>,
     /** Complete reserved ranges, including payload bytes whose value remains $FF. */
@@ -37,6 +40,7 @@ class ProjectRoomExporter(
     }.toMap(),
     freeSpaceAllocator: RomFreeSpaceAllocator? = null,
     private val onLog: (String) -> Unit = {},
+    private val sourcePlmSets: Map<Int, Map<String, SourcePlmResource>> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -137,6 +141,17 @@ class ProjectRoomExporter(
 
         for ((roomKey, roomEdits) in effectiveEdits) {
             if (!roomEdits.hasEdits) continue
+            if (roomEdits.asmPlmSourceVersion != 0) {
+                require(roomEdits.asmPlmSourceVersion == 1 && roomEdits.roomId in sourcePlmSets) {
+                    "Room $roomKey requires its decoded project ASM object source; ROM-only export cannot ignore it."
+                }
+                require(roomEdits.plmChanges.isEmpty() && roomEdits.states.all { it.plmChanges.isEmpty() }) {
+                    "Room $roomKey has both authored object source and independent GUI object changes."
+                }
+                require(roomEdits.customScrollCommands.isEmpty() && roomEdits.states.all { it.customScrollCommands.isEmpty() }) {
+                    "Room $roomKey has custom scroll commands outside its authored object source."
+                }
+            }
             val roomId = roomKey.toIntOrNull(16)
                 ?: failExport("Project room key '$roomKey' is not a hexadecimal room ID")
             val room = romParser.readRoomHeader(roomId)
@@ -228,6 +243,11 @@ class ProjectRoomExporter(
                 emptyMap()
             }
 
+            if (roomEdits.asmPlmSourceVersion != 0) {
+                applySourcePlms(roomKey, roomId, roomEdits, rewrittenStateOffsets)
+                roomsPatched.add(roomKey)
+            }
+
             if (roomEdits.states.any { it.levelResourceChanged }) {
                 applyLevelResourceLinks(roomKey, roomId, roomEdits, rewrittenStateOffsets)
                 roomsPatched.add(roomKey)
@@ -265,6 +285,32 @@ class ProjectRoomExporter(
             newRoomIds = materialized.roomIdsByProjectId,
             newRoomDoorDefPtrs = materialized.doorDefPtrsByProjectId,
         )
+    }
+
+    private fun applySourcePlms(roomKey: String, roomId: Int, edits: RoomEdits, rewritten: Map<String, Int>) {
+        val inputs = sourcePlmSets.getValue(roomId)
+        require(inputs.keys == edits.states.map { it.id }.toSet()) { "Room $roomKey source state membership changed." }
+        val states = romParser.inspectRoomStates(roomId).states
+        val pointers = mutableMapOf<String, Pair<Int, List<RomParser.PlmEntry>>>()
+        for (state in edits.states) {
+            val resource = inputs.getValue(state.id)
+            require(resource.entries.all { it.id in 1..0xFFFF && it.x in 0..255 && it.y in 0..255 && it.param in 0..0xFFFF }) {
+                "${resource.identity} requires standard six-byte PLM records."
+            }
+            val existing = pointers[resource.identity]
+            val pointer = if (existing != null) {
+                require(existing.second == resource.entries) { "Shared object source ${resource.identity} has inconsistent values." }
+                existing.first
+            } else {
+                val bytes = RomParser.serializePlmSet(resource.entries).map(Int::toByte).toByteArray()
+                val allocation = roomDataAllocator.allocate(bytes, listOf(0x8F), "Room $roomKey source PLMs ${resource.identity}")
+                    ?: failExport("Room $roomKey object source does not fit in bank \$8F")
+                (romParser.pcToSnes(allocation.pcOffset) and 0xFFFF).also { pointers[resource.identity] = it to resource.entries }
+            }
+            val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
+                ?: failExport("Room $roomKey source state ${state.id} has no state record")
+            writeU16(romData, offset + 20, pointer)
+        }
     }
 
     /** Repoint explicitly linked states before applying complete layout-resource edits. */

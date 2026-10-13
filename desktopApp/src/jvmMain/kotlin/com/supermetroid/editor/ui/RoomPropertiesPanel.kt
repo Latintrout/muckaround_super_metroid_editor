@@ -870,6 +870,9 @@ fun RoomPropertiesPanel(
                 sharingDescription("fxPtr", fxPtr),
         )
         PropertyRow("Placed Objects", "$plmCount objects · ${sharingDescription("plmSetPtr", plmSetPtr)}")
+        if (editorState.project.asmWorkspace.enabled && selectedIsActive) {
+            LinkedPlmSourcePanel(editorState, plmSetPtr, asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
+        }
         PropertyRow("Enemy Actors", "$enemyCount actors · ${sharingDescription("enemySetPtr", enemySetPtr)}")
         PropertyRow("Enemy Graphics", "$gfxCount slots · ${sharingDescription("enemyGfxPtr", enemyGfxPtr)}")
         val roomLogic = when {

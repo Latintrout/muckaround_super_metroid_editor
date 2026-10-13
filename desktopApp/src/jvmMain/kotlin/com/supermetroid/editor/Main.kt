@@ -88,6 +88,10 @@ import com.supermetroid.editor.rom.SpcData
 import com.supermetroid.editor.asm.AsmEditorTarget
 import com.supermetroid.editor.asm.AsmReferenceContract
 import com.supermetroid.editor.asm.AsmWorkspaceState
+import com.supermetroid.editor.asm.AsmPlmSourceCatalog
+import com.supermetroid.editor.asm.AsmPlmSourceBridge
+import com.supermetroid.editor.asm.AsmPlmPlacementTarget
+import com.supermetroid.editor.asm.AsmPlmPlacementSnapshot
 import com.supermetroid.editor.ui.AsmWorkspaceCanvas
 import com.supermetroid.editor.ui.AsmWorkspaceSidebar
 import com.supermetroid.editor.ui.BossTabCanvas
@@ -349,14 +353,18 @@ fun main() = application {
                     scope.launch {
                         editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
                         if (asmWorkspaceState.saveSource()) {
-                            val parser = romParser
-                            if (parser != null) editorState.saveProject(parser)
+                            editorState.saveProjectAsync()
                         }
                     }
                 } else {
                     val parser = romParser
                     if (parser?.roomCatalog?.editable == true) {
-                        editorState.saveProject(parser)
+                        scope.launch {
+                            if (asmWorkspaceState.saveAllSources()) {
+                                if (editorState.project.asmWorkspace.enabled) editorState.saveProjectAsync(parser, true)
+                                else editorState.saveProject(parser)
+                            }
+                        }
                     }
                 }
                 true
@@ -513,7 +521,51 @@ fun main() = application {
 
             fun openAsmAddress(snesAddress: Int) {
                 navigate {
-                    asmWorkspaceState.openAddress(snesAddress)
+                    val managedLine = if (editorState.hasManagedPlms() && snesAddress ushr 16 == 0x8F &&
+                        snesAddress and 0xFFFF == editorState.currentPlmSourcePointer()) {
+                        editorState.currentPlmStateId()?.let { editorState.asmPlmSourceBridge
+                            ?.managedView(editorState.currentRoomId, it)?.document?.lineIndex }
+                    } else null
+                    val sourceLine = managedLine ?: if (snesAddress ushr 16 == 0x8F) editorState.asmPlmSourceBridge
+                        ?.takeIf { snesAddress and 0xFFFF in it.catalog.consumers }
+                        ?.sourceLine(snesAddress and 0xFFFF) else null
+                    if (sourceLine != null) {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource("bank_8F.asm", sourceLine)
+                    } else asmWorkspaceState.openAddress(snesAddress)
+                    leftTab = TAB_ASM
+                }
+            }
+
+            fun openPlmPlacement(entry: RomParser.PlmEntry) {
+                navigate {
+                    val roomName = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
+                    var currentTarget = editorState.currentPlmSourcePointer()?.let { pointer ->
+                        editorState.asmPlmSourceBridge?.placementTarget(
+                            editorState.currentRoomId, editorState.currentStateIndex, pointer, entry,
+                        )
+                    } ?: AsmPlmPlacementTarget.Unavailable("No verified editable ASM placement source is available for this room state.")
+                    if (currentTarget is AsmPlmPlacementTarget.Unavailable && !editorState.hasManagedPlms() &&
+                        editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
+                        if (!editorState.ensureCurrentPlmSource(roomName)) currentTarget = AsmPlmPlacementTarget.Unavailable(
+                            editorState.plmSourceMigrationProblem ?: currentTarget.reason)
+                    }
+                    val target = if (editorState.hasManagedPlms()) editorState.currentPlmStateId()?.let {
+                        editorState.asmPlmSourceBridge?.managedPlacement(editorState.currentRoomId, it, entry)
+                    } ?: currentTarget else currentTarget
+                    when (target) {
+                        is AsmPlmPlacementTarget.Source -> {
+                            asmWorkspaceState.showProjectWorkspace()
+                            asmWorkspaceState.openSource("bank_8F.asm", target.lineIndex, columnIndex = target.columnIndex)
+                        }
+                        is AsmPlmPlacementTarget.Unavailable -> asmWorkspaceState.openPlmPlacement(
+                            AsmPlmPlacementSnapshot(
+                                editorState.currentRoomId,
+                                roomName,
+                                editorState.currentPlmStateName(), entry, target.reason,
+                            ),
+                        )
+                    }
                     leftTab = TAB_ASM
                 }
             }
@@ -593,6 +645,33 @@ fun main() = application {
             LaunchedEffect(editorState.romBuildInProgress, editorState.projectFilePath) {
                 if (!editorState.romBuildInProgress) asmWorkspaceState.refreshBuildReport()
             }
+            LaunchedEffect(asmWorkspaceState.projectWorkspace?.root, romParser) {
+                editorState.asmPlmSourceBridge = null
+                asmWorkspaceState.sourceSaveParticipant = null
+                val projectWorkspace = asmWorkspaceState.projectWorkspace
+                val parser = romParser
+                if (projectWorkspace != null && parser != null) {
+                    val catalog = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        runCatching { AsmPlmSourceCatalog.load(projectWorkspace.originalDirectory, parser) }
+                    }
+                    catalog.onSuccess {
+                        editorState.asmPlmSourceBridge = AsmPlmSourceBridge(it, asmWorkspaceState) { editorState.project }
+                            .also { bridge ->
+                                bridge.onMetadataChanged = editorState::notifyPlmSourceLinked
+                                bridge.describePlm = { entry -> editorState.customItemNameForPlm(entry.id)
+                                    ?: RomParser.plmDisplayName(entry.id, entry.param) }
+                            }
+                        editorState.refreshLinkedPlms()
+                    }.onFailure { editorState.postStatus("Object/source linking unavailable: ${it.message}") }
+                }
+            }
+            LaunchedEffect(
+                asmWorkspaceState.sourceBufferRevision, editorState.asmPlmSourceBridge,
+                editorState.currentRoomId, editorState.currentStateIndex,
+            ) {
+                kotlinx.coroutines.delay(120)
+                editorState.refreshLinkedPlms()
+            }
             LaunchedEffect(romParser) {
                 asmWorkspaceState.observeRom(romParser?.copyRomData())
             }
@@ -609,15 +688,23 @@ fun main() = application {
                 if (!editorState.project.asmWorkspace.enabled) return true
                 editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
                 if (!asmWorkspaceState.saveAllSources()) return false
-                return romParser?.let(editorState::saveProject) == true
+                return editorState.saveProjectAsync()
             }
 
             fun buildAsmProject() {
                 val parser = romParser ?: return
                 scope.launch {
                     if (saveAsmForExecution()) {
-                        asmWorkspaceState.validateProjectBuild {
+                        val succeeded = asmWorkspaceState.validateProjectBuild {
                             editorState.buildRomPreview(parser)
+                        }
+                        if (!succeeded && editorState.project.asmWorkspace.enabled &&
+                            editorState.project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE
+                        ) {
+                            navigate {
+                                asmWorkspaceState.showBuildFailure()
+                                leftTab = TAB_ASM
+                            }
                         }
                     }
                 }
@@ -716,11 +803,20 @@ fun main() = application {
                             }
                         }
                         if (editorState.project.asmWorkspace.enabled) {
+                            val buildFailed = asmWorkspaceState.buildReport?.let {
+                                !it.succeeded && !it.validationOnly
+                            } == true && !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress
                             OutlinedButton(
                                 onClick = ::buildAsmProject,
                                 enabled = romEditable && !asmWorkspaceState.busy &&
                                     !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress,
                                 shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (buildFailed) MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                                        else androidx.compose.ui.graphics.Color.Transparent,
+                                    contentColor = if (buildFailed) MaterialTheme.colorScheme.error
+                                        else MaterialTheme.colorScheme.primary,
+                                ),
                             ) {
                                 if (asmWorkspaceState.previewBusy) {
                                     CircularProgressIndicator(
@@ -811,7 +907,8 @@ fun main() = application {
                                     }
                                     if (asmWorkspaceState.saveAllSources()) {
                                         val parser = romParser
-                                        editorState.saveProject(parser)
+                                        if (editorState.project.asmWorkspace.enabled) editorState.saveProjectAsync(parser, true)
+                                        else editorState.saveProject(parser)
                                     }
                                 }
                             },
@@ -1285,6 +1382,7 @@ fun main() = application {
                                             },
                                             onNavigateToAsm = ::openAsmAddress,
                                             roomKeyboardNavigationEnabled = leftTab == TAB_ROOMS,
+                                            onNavigateToPlmPlacement = ::openPlmPlacement,
                                             showItemNames = showRoomItemNames,
                                             showMetaNames = showRoomMetaNames,
                                             highlightItems = highlightRoomItems,
@@ -1353,7 +1451,7 @@ fun main() = application {
                                         onOpenInEditor = ::openAsmEditorTarget,
                                         onSaveProject = {
                                             editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
-                                            romParser?.let(editorState::saveProject) ?: false
+                                            editorState.saveProjectAsync()
                                         },
                                         onBuildProject = ::buildAsmProject,
                                         onRunInEmulator = ::runProjectInEmulator,
@@ -1370,12 +1468,11 @@ fun main() = application {
                                 val es = editorState
                                 val statusTs = es.statusMessageTimestamp
                                 var showTransient by remember { mutableStateOf(false) }
-                                val statusIsError = es.statusMessage.startsWith("Export failed", ignoreCase = true) ||
-                                    es.statusMessage.startsWith("Export blocked", ignoreCase = true)
+                                val statusIsError = es.statusIsError
                                 LaunchedEffect(statusTs, statusIsError) {
                                     if (statusTs > 0L) {
                                         showTransient = true
-                                        // Export blockers need enough time to read and act on;
+                                        // Export/object-edit blockers need enough time to read and act on;
                                         // ordinary confirmations remain brief.
                                         delay(if (statusIsError) 12_000 else 4_000)
                                         showTransient = false
@@ -1494,7 +1591,19 @@ fun main() = application {
 
                                         val brush = es.brush
                                         val asmSourceStatus = asmWorkspaceState.sourceStatusSummary
-                                        if (leftTab == TAB_ASM && asmSourceStatus.isNotBlank()) {
+                                        if (asmWorkspaceState.sourceIndexingInProgress || es.projectSaveInProgress) {
+                                            Row(verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                                                Text(
+                                                    if (asmWorkspaceState.sourceIndexingInProgress) asmWorkspaceState.sourceIndexingStatus
+                                                        else "Saving project…",
+                                                    fontSize = fs.statusBar,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                )
+                                            }
+                                        } else if (leftTab == TAB_ASM && asmSourceStatus.isNotBlank()) {
                                             Text(
                                                 asmSourceStatus,
                                                 fontSize = fs.statusBar,

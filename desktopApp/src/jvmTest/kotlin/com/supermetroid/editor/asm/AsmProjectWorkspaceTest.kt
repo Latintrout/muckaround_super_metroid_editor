@@ -1,6 +1,10 @@
 package com.supermetroid.editor.asm
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -15,6 +19,105 @@ class AsmProjectWorkspaceTest {
     lateinit var tempDirectory: File
 
     @Test
+    fun `save persists immediately while indexing waits and keeps later typing and caret intact`() = runBlocking {
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val file = File(tempDirectory, "Fast Save.smedit").apply { writeText("{}") }
+        val created = repository.initialize(file.path, fakeReference(emptyList()))
+        val indexingStarted = CompletableDeferred<Unit>()
+        val releaseIndex = CompletableDeferred<Unit>()
+        val state = AsmWorkspaceState(projectRepository = repository, sourceIndexLoader = { path ->
+            indexingStarted.complete(Unit)
+            releaseIndex.await()
+            repository.load(path)
+        })
+        try {
+            state.bindProject(file.path, true)
+            state.openSource("bank_80.asm", 3, columnIndex = 4)
+            val saved = state.sourceEditText("bank_80.asm") + "\nSavedLabel:\n    RTS\n"
+            state.updateSourceEditText("bank_80.asm", saved)
+            assertTrue(state.saveSource("bank_80.asm"))
+            assertEquals(saved, File(created.workingDirectory, "src/bank_80.asm").readText())
+            assertEquals(saved, File(created.root, "overrides/src/bank_80.asm").readText())
+            assertFalse(state.busy)
+            assertFalse(state.hasUnsavedSourceChanges("bank_80.asm"))
+            assertTrue(state.sourceIndexingInProgress)
+            assertTrue(state.sourceBuildRequired)
+            withTimeout(5_000) { indexingStarted.await() }
+            val typed = "$saved; newer unsaved typing\n"
+            state.updateSourceEditText("bank_80.asm", typed)
+            val caret = state.selectedLineIndex to state.selectedColumnIndex
+            releaseIndex.complete(Unit)
+            state.awaitSourceIndexing()
+            assertEquals(typed, state.sourceEditText("bank_80.asm"))
+            assertTrue(state.hasUnsavedSourceChanges("bank_80.asm"))
+            assertEquals(caret, state.selectedLineIndex to state.selectedColumnIndex)
+            assertFalse(state.sourceIndexingInProgress)
+            assertEquals("SavedLabel", state.workspace?.index?.labels?.firstOrNull { it.name == "SavedLabel" }?.name)
+        } finally {
+            releaseIndex.complete(Unit)
+            state.awaitSourceIndexing()
+        }
+    }
+
+    @Test
+    fun `an older non-cooperative index job cannot replace the index from a newer save`() = runBlocking {
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val file = File(tempDirectory, "Index Generations.smedit").apply { writeText("{}") }
+        repository.initialize(file.path, fakeReference(emptyList()))
+        val oldStarted = CompletableDeferred<Unit>()
+        val releaseOld = CompletableDeferred<Unit>()
+        val oldFinished = CompletableDeferred<Unit>()
+        var count = 0
+        val state = AsmWorkspaceState(projectRepository = repository, sourceIndexLoader = { path ->
+            val snapshot = repository.load(path)
+            if (++count == 1) withContext(NonCancellable) {
+                oldStarted.complete(Unit)
+                releaseOld.await()
+                oldFinished.complete(Unit)
+            }
+            snapshot
+        })
+        try {
+            state.bindProject(file.path, true)
+            val initial = state.projectSourceText("bank_80.asm")
+            state.updateSourceEditText("bank_80.asm", "$initial\nOldLabel:\n    RTS\n")
+            assertTrue(state.saveSource("bank_80.asm"))
+            withTimeout(5_000) { oldStarted.await() }
+            val newest = "$initial\nNewLabel:\n    RTS\n"
+            state.updateSourceEditText("bank_80.asm", newest)
+            assertTrue(state.saveSource("bank_80.asm"))
+            state.awaitSourceIndexing()
+            releaseOld.complete(Unit)
+            withTimeout(5_000) { oldFinished.await() }
+            assertEquals(newest.trimEnd(), state.workspace?.index?.file("bank_80.asm")?.lines?.joinToString("\n")?.trimEnd())
+            assertEquals(newest, state.sourceEditText("bank_80.asm"))
+        } finally { releaseOld.complete(Unit) }
+    }
+
+    @Test
+    fun `background source validation cannot replace a newer completed build report`() = runBlocking {
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val file = File(tempDirectory, "Build During Index.smedit").apply { writeText("{}") }
+        repository.initialize(file.path, fakeReference(emptyList()))
+        val artifacts = AsmBuildArtifactRepository(repository, sourceFingerprintProvider = { "fixture" })
+        val release = CompletableDeferred<Unit>()
+        val state = AsmWorkspaceState(projectRepository = repository, buildArtifactRepository = artifacts,
+            sourceIndexLoader = { path -> release.await(); repository.load(path) })
+        try {
+            state.bindProject(file.path, true)
+            state.updateSourceEditText("bank_80.asm", state.projectSourceText("bank_80.asm") + "\n; saved change\n")
+            assertTrue(state.saveSource("bank_80.asm"))
+            artifacts.publishSuccess(file.path, ByteArray(0), listOf("newer build succeeded"), "fixture")
+            state.refreshBuildReport()
+            val built = state.buildReport
+            assertEquals(true, built?.succeeded)
+            release.complete(Unit)
+            state.awaitSourceIndexing()
+            assertEquals(built, state.buildReport)
+        } finally { release.complete(Unit); state.awaitSourceIndexing() }
+    }
+
+    @Test
     fun `source text changes round trip insert delete and replacement deltas`() {
         listOf(
             "abcde" to "abXYcde",
@@ -25,6 +128,33 @@ class AsmProjectWorkspaceTest {
             assertEquals(after, change.redo(before))
             assertEquals(before, change.undo(after))
         }
+    }
+
+    @Test
+    fun `failed build opens editable source from another ASM view with its located error`() = runBlocking {
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val file = File(tempDirectory, "Build Failure.smedit").apply { writeText("{}") }
+        repository.initialize(file.path, fakeReference(emptyList()))
+        val state = AsmWorkspaceState(projectRepository = repository)
+        state.bindProject(file.path, true)
+        state.showInstruction("LDA")
+
+        assertFalse(state.validateProjectBuild { error("bank_80.asm:3: Unsupported source record") })
+        val failure = requireNotNull(state.buildReport)
+        state.showBuildFailure()
+        assertEquals(AsmWorkspaceKind.PROJECT, state.workspaceKind)
+        assertEquals(AsmBrowserMode.SOURCE, state.browserMode)
+        assertEquals("bank_80.asm", state.selectedFileId)
+        assertEquals(2, state.selectedLineIndex)
+        assertEquals(failure, state.buildReport, "Opening the error must retain the failed report")
+
+        state.updateSourceEditText("bank_80.asm", state.projectSourceText("bank_80.asm") + "\n; changed")
+        state.showInstruction("STA")
+        assertFalse(state.validateProjectBuild { error("Patch writes overlap") })
+        state.showBuildFailure()
+        assertEquals(AsmBrowserMode.SOURCE, state.browserMode)
+        assertEquals("Patch writes overlap", state.displayedDiagnostics.single().message)
+        assertEquals(null, state.displayedDiagnostics.single().fileId, "A general patch failure has no invented source line")
     }
 
     @Test
@@ -64,6 +194,23 @@ class AsmProjectWorkspaceTest {
         assertFalse(File(restored.root, "overrides/src/bank_80.asm").exists())
         assertEquals(emptySet<String>(), restored.modifiedFileIds)
         assertEquals(emptySet<String>(), repository.sourceOverrideFileIds(projectFile.absolutePath))
+    }
+
+    @Test
+    fun `source save refuses an externally changed authored override before writing either copy`() {
+        val reference = fakeReference(emptyList())
+        val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
+        val file = File(tempDirectory, "External.smedit").apply { writeText("{}") }
+        val workspace = repository.initialize(file.path, reference)
+        val target = File(workspace.workingDirectory, "src/bank_80.asm")
+        val original = target.readText()
+        val authored = File(workspace.root, "overrides/src/bank_80.asm").apply { parentFile.mkdirs() }
+        authored.writeText("; external source\n$original")
+        assertThrows<IllegalArgumentException> {
+            repository.saveSource(file.path, "bank_80.asm", "$original\n; GUI change", expectedText = original)
+        }
+        assertEquals(original, target.readText())
+        assertEquals("; external source\n$original", authored.readText())
     }
 
     @Test

@@ -56,6 +56,8 @@ internal data class AsmProjectBuildWorkspace(
     val disabledProjectModuleFileIds: Set<String>,
 )
 
+internal data class AsmSavedSource(val modified: Boolean)
+
 /**
  * Owns authored asm/ plus the generated smedit/asm/ cache. Initial creation is transactional and
  * never mutates the global downloaded reference. An immutable original tree is
@@ -199,31 +201,44 @@ internal class AsmProjectWorkspaceRepository(
         }
     }
 
-    fun saveSource(projectFilePath: String, fileId: String, text: String): AsmProjectWorkspace {
-        // Resolve and validate the lightweight filesystem workspace first. A
-        // complete source-index parse is needed only once, after the atomic
-        // write, when the browser adopts the new saved tree.
+    fun saveSource(projectFilePath: String, fileId: String, text: String, expectedText: String? = null): AsmProjectWorkspace {
+        persistSource(projectFilePath, fileId, text, expectedText)
+        return checkNotNull(load(projectFilePath)) { "Project ASM workspace did not validate after saving $fileId" }
+    }
+
+    /** Durable save only. Browser indexing/validation is scheduled separately by the UI. */
+    fun persistSource(projectFilePath: String, fileId: String, text: String, expectedText: String? = null): AsmSavedSource {
         val current = requireNotNull(loadForBuild(projectFilePath)) { "Project ASM workspace is unavailable" }
         val sourceRoot = File(current.workingDirectory, "src")
         val target = resolveManagedSource(sourceRoot, fileId)
         require(target.isFile) { "ASM source does not exist: $fileId" }
+        require(expectedText == null || target.readText() == expectedText) {
+            "$fileId changed on disk since it was opened. No source was overwritten; reconcile the external edit first."
+        }
         if (isProjectModuleFileId(fileId)) {
             val module = resolveProjectModule(File(current.root, MODULES_DIRECTORY), fileId)
             require(module.isFile) { "Project ASM module does not exist: $fileId" }
+            require(expectedText == null || module.readText() == expectedText) {
+                "$fileId changed outside SMEDIT. No source was overwritten."
+            }
             writeTextAtomically(module, text)
             writeTextAtomically(target, text)
-            return checkNotNull(load(projectFilePath)) { "Project ASM workspace did not validate after saving $fileId" }
+            return AsmSavedSource(modified = true)
         }
-        writeTextAtomically(target, text)
         val original = resolveManagedSource(File(current.originalDirectory, "src"), fileId)
         val override = resolveManagedSource(File(current.root, "$OVERRIDES_DIRECTORY/src"), fileId)
-        if (original.readBytes().contentEquals(text.toByteArray())) {
+        require(expectedText == null || (if (override.isFile) override.readText() else original.readText()) == expectedText) {
+            "$fileId's authored override changed outside SMEDIT. No source was overwritten."
+        }
+        writeTextAtomically(target, text)
+        val modified = !original.readBytes().contentEquals(text.toByteArray())
+        if (!modified) {
             Files.deleteIfExists(override.toPath())
             deleteEmptyOverrideParents(override.parentFile, File(current.root, OVERRIDES_DIRECTORY))
         } else {
             writeTextAtomically(override, text)
         }
-        return checkNotNull(load(projectFilePath)) { "Project ASM workspace did not validate after saving $fileId" }
+        return AsmSavedSource(modified)
     }
 
     fun restoreSource(projectFilePath: String, fileId: String): AsmProjectWorkspace {

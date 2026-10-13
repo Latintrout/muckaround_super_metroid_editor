@@ -210,12 +210,33 @@ internal class RomExporter(
     private val onStatus: (String) -> Unit = {},
     private val logWritePlanDetails: Boolean = true,
     private val compiledAsmBase: AsmCompiledBuildBase? = null,
+    private val sourcePlmSets: Map<Int, Map<String, com.supermetroid.editor.rom.SourcePlmResource>> = emptyMap(),
     private val projectFilePath: String = "",
 ) {
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        val missingObjects = project.rooms.values.filter { it.asmPlmSourceVersion != 0 && it.roomId !in sourcePlmSets &&
+            project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }
+        if (missingObjects.isNotEmpty()) {
+            val message = "Authored room objects require their validated ASM build inputs."
+            onLog("ERROR: $message")
+            onStatus(message)
+            return null
+        }
+        for (binding in project.asmWorkspace.plmSourceBindings) {
+            val start = 0x70000 + binding.pointer
+            val end = start + binding.entryCount * 6 + 2
+            if (compiledAsmBase == null || (start until end).any { pc ->
+                    compiledAsmBase.sourceOwnedRanges.none { pc >= it.pcOffset && pc < it.pcOffset + it.length }
+                }) {
+                val message = "Source-linked objects (${binding.label}) require the validated ASM build path."
+                onLog("ERROR: $message")
+                onStatus(message)
+                return null
+            }
+        }
         hydratePatchSafetyMetadata()
         onLog("[EXPORT] Starting export — romPath=$romPath, romSize=${romParser.getRomData().size}")
         onLog("[EXPORT] Project spriteTileBlocks keys: ${project.customGfx.spriteTileBlocks.keys}")
@@ -432,6 +453,7 @@ internal class RomExporter(
                                 }.toMap(),
                                 freeSpaceAllocator = freeSpaceAllocator,
                                 onLog = onLog,
+                                sourcePlmSets = sourcePlmSets,
                             ).exportRooms()
                         }
                         roomsPatched.addAll(roomExportResult.roomsPatched)

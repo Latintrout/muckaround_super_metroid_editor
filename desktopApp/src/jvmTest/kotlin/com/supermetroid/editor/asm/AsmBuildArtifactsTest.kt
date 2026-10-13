@@ -20,6 +20,12 @@ class AsmBuildArtifactsTest {
             assertEquals(false, failure.succeeded)
             assertTrue(failure.diagnostics.single().message.contains("six-byte format"))
             assertNull(failure.diagnostics.single().fileId, "pipeline errors must not invent source lines")
+            repository.publishPipelineFailure(projectFile.path,
+                "Export preview failed safely: bank_8F.asm:15740: Expected %PLMPopEntry; unsupported object source: v")
+            val locatedFailure = requireNotNull(repository.load(projectFile.path)).diagnostics.single()
+            assertEquals("bank_8F.asm", locatedFailure.fileId)
+            assertEquals(15739, locatedFailure.lineIndex)
+            assertEquals("Expected %PLMPopEntry; unsupported object source: v", locatedFailure.message)
             repository.publishFailure(projectFile.path, listOf("src/bank_90.asm:8: error: Unknown command"))
             repository.publishPipelineFailure(projectFile.path, "Compilation failed")
             val sourceError = requireNotNull(repository.load(projectFile.path)).diagnostics.single()
@@ -122,6 +128,26 @@ class AsmBuildArtifactsTest {
         assertEquals(AsmDiagnosticSeverity.WARNING, diagnostics[1].severity)
         assertEquals("bank_81.asm", diagnostics[1].fileId)
         assertTrue(diagnostics[1].message.contains("Example warning"))
+    }
+
+    @Test
+    fun `pipeline checks retain explicit ASM locations across supported path formats`() {
+        for (path in listOf("bank_8F.asm", "src/bank_8F.asm", "/tmp/My Project/src/bank_8F.asm",
+            "C:\\My Project\\src\\bank_8F.asm")) {
+            val diagnostic = AsmBuildOutputParser.diagnostics(listOf(
+                "SMEDIT: error: Export preview failed safely: $path:15740: Unsupported object source: v",
+            )).single()
+            assertEquals("bank_8F.asm", diagnostic.fileId)
+            assertEquals(15739, diagnostic.lineIndex)
+            assertEquals("Unsupported object source: v", diagnostic.message)
+        }
+        for (message in listOf("ROM conflict at PC 0x8F15740", "bank_8F.asm:0: no valid location",
+            "bank_8F.asm:99999999999999999999: invalid location")) {
+            val diagnostic = AsmBuildOutputParser.pipelineDiagnostic(message)
+            assertEquals(message, diagnostic.message)
+            assertNull(diagnostic.fileId)
+            assertNull(diagnostic.lineIndex)
+        }
     }
 
     @Test

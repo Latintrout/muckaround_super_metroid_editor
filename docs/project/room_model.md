@@ -62,6 +62,38 @@ is conventionally used as an always-false selector that skips its state pointer.
 
 ## Current Boundary
 
+ASM projects automatically recognize supported source-only PLM edits against the
+immutable baseline; no per-room linking is required. For that bounded pilot the
+Bank `$8F` declaration is the sole authority: GUI scalar fields and source edits
+use one buffer, while the room canvas is a decoded preview. Earlier explicit
+bindings remain supported; automatic authority is derived from source, not saved
+as duplicate PLM deltas. When source is unchanged, existing room-editor edits and
+state graphs remain authoritative and retain the established build path. Both
+edited is an explicit conflict, not an implicit merge.
+
+For supported GUI-managed rooms, **item → ASM** now migrates the effective PLM lists
+to authored macros in `bank_8F.asm`. `asmPlmSourceVersion = 1` records ownership;
+room/state PLM delta streams are retired, not replayed after compilation. Stable
+state wrappers preserve shared/private lists. Single-state rooms use direct PLM
+entries; Common helpers share linked values across multiple states. GUI edits and Save
+prune unreferenced owned helpers and inline single-consumer helpers in the same
+undo step, preserving comments, live list identities, and external ASM references.
+Save also checks already-saved managed banks, so old unused helpers are cleaned
+without requiring a new placement edit; invalid drafts are preserved for repair.
+Equal-valued independent objects are never implicitly linked. GUI placement edits
+and ASM edit those same values; a state-local placement forks a shared list. New
+conditions inherit their template's complete list, including common changes and
+local exceptions. The shared planner
+allocates whole variable-sized resources, and the generated build input invokes
+the authored macros at checked addresses. Actual Asar output must match the plan.
+
+Original fixed-address links still have fixed-size restrictions. Managed lists
+support growth/shrinkage; custom scroll-command authoring, changed resource links,
+added-room projects and mixed source/GUI operations are guarded boundaries. Only
+objects have migrated: selectors, layouts and other resources keep their existing
+model/backend. This does **not** change the ordinary unlinked/ROM
+editing model described below. See the [source/GUI ownership contract](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
+
 Existing source rooms remain deltas keyed by their physical room-header address. Project-owned
 rooms have stable semantic identities and complete initial payloads, then use the same `RoomEdits`
 overlay after workspace materialization. `RoomEdits` optionally contains an ordered manifest of

@@ -198,6 +198,27 @@ resolve exported doors or treated as persistent identity.
 
 ## Version Fields
 
+Schema 11 adds `RoomEdits.asmPlmSourceVersion` (default 0; current authored format 1).
+It marks room PLM values as owned by the project's editable `bank_8F.asm` macros,
+using existing stable state IDs. Common/state `plmChanges` are empty after verified
+migration; source is not duplicated into a new JSON object list. Historical edit
+operations may remain, but are not replayed as independent object inputs. Missing
+source, unknown versions or competing deltas block builds, including ROM-only
+export. An older editor must reject this schema rather than silently lose source
+ownership. Project Save persists source and metadata together; the normal
+backup-on-schema-upgrade rule applies. Other room resources keep their existing
+representation.
+
+Schema 10 adds `asmWorkspace.plmSourceBindings`: source label, original bank-$8F
+pointer and fixed record count. These are ownership/layout identities, not copied
+PLM values. Linked GUI/source editing reads the authored bank document. The schema
+bump prevents older editors from silently dropping this authority contract;
+existing projects still load with no bindings, and the normal backup-on-upgrade
+save rule applies. Supported source-only PLM changes are now also recognized
+automatically against the baseline; those require no saved binding. Existing
+explicit bindings retain their ownership until released, and GUI-only room edits
+keep their current serialized representation. See the [reciprocal ASM/GUI pilot](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
+
 - `projectFormatVersion` is an internal serialization-safety marker. It lets the loader reject a
   project written by an incompatible future build. It is not a user-selectable V1/V2 room model.
 - `versionMajor`, `versionMinor`, and `buildName` label exported ROM/IPS filenames. They do not

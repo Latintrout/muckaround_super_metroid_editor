@@ -491,9 +491,11 @@ data class RoomEdits(
      *  On export, each is written to free space in $8F and the PLM param is set to the address. */
     val customScrollCommands: MutableMap<String, MutableList<ScrollCommand>> = mutableMapOf(),
     val saveStationSpawns: MutableList<SaveStationSpawnChange> = mutableListOf(),
+    /** PLMs are authored in project bank_8F.asm. Identity/format only; no duplicate object values. */
+    var asmPlmSourceVersion: Int = 0,
 ) {
     val hasEdits: Boolean get() =
-        stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
+        asmPlmSourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
             states.any { it.hasEdits } || operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||
@@ -880,6 +882,15 @@ data class ProjectAsmWorkspaceSettings(
      * semantic-edit and patch transaction over that compiled base.
      */
     var buildMode: ProjectRomBuildMode = ProjectRomBuildMode.PATCHED_ROM,
+    /** Source-owned PLM pilot. Bindings contain identity/layout only, never a second list of objects. */
+    val plmSourceBindings: MutableList<ProjectPlmSourceBinding> = mutableListOf(),
+)
+
+@Serializable
+data class ProjectPlmSourceBinding(
+    val label: String,
+    val pointer: Int,
+    val entryCount: Int,
 )
 
 /**
@@ -921,7 +932,8 @@ data class SmEditProject(
     val baseRom: ProjectBaseRom? = null,
 ) {
     companion object {
-        const val CURRENT_PROJECT_FORMAT_VERSION = 9
+        // Source ownership cannot be silently ignored by older editors.
+        const val CURRENT_PROJECT_FORMAT_VERSION = 11
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

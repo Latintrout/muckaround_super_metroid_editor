@@ -7,6 +7,9 @@ import com.supermetroid.editor.asm.ASM_ROOM_GRAPH_OWNER
 import com.supermetroid.editor.asm.AsmProjectCompiler
 import com.supermetroid.editor.asm.AsmPatchBackendRegistry
 import com.supermetroid.editor.asm.AsmProjectWorkspaceRepository
+import com.supermetroid.editor.asm.AsmPlmSourceCatalog
+import com.supermetroid.editor.asm.AsmRoomObjectSource
+import com.supermetroid.editor.asm.PLM_SOURCE_FILE
 import com.supermetroid.editor.asm.AsmSourceAssetMaterializer
 import com.supermetroid.editor.asm.AsmSourcePatchMaterializer
 import com.supermetroid.editor.asm.AsmSourceRoomMaterializer
@@ -24,7 +27,7 @@ import java.security.MessageDigest
 
 internal object ProjectFileService {
     private val asmProjectCompiler = AsmProjectCompiler()
-    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v3"
+    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v4"
     private const val MAX_PREPARED_ASM_BASES = 2
     private val preparedAsmBases = object : LinkedHashMap<String, AsmCompiledBuildBase>(
         MAX_PREPARED_ASM_BASES,
@@ -63,6 +66,17 @@ internal object ProjectFileService {
     /** Isolate non-writing previews from exporter metadata hydration. */
     fun snapshotProject(project: SmEditProject): SmEditProject =
         SmEditProjectFormat.decode(json, json.encodeToString(SmEditProject.serializer(), project))
+
+    /** Capture mutable editor data on its caller thread; decode/persist this detached snapshot on a worker. */
+    fun serializeProject(project: SmEditProject): String = json.encodeToString(SmEditProject.serializer(), project)
+
+    fun saveSerializedProject(
+        text: String,
+        projectFilePath: String,
+        onLog: (String) -> Unit,
+        romParser: RomParser? = null,
+        savePatternLibrary: Boolean = false,
+    ): Boolean = saveProject(SmEditProjectFormat.decode(json, text), projectFilePath, romParser, savePatternLibrary, onLog)
 
     fun saveProject(
         project: SmEditProject,
@@ -220,6 +234,8 @@ internal object ProjectFileService {
         onStatus: (String) -> Unit,
     ): AsmCompiledBuildBase? {
         if (project.asmWorkspace.buildMode == ProjectRomBuildMode.PATCHED_ROM) {
+            require(project.rooms.values.none { it.asmPlmSourceVersion != 0 }) { "Authored room objects require ASM source mode." }
+            require(project.asmWorkspace.plmSourceBindings.isEmpty()) { "Linked room objects require ASM source mode." }
             val sourceEdits = if (project.asmWorkspace.enabled && projectFilePath.isNotBlank()) {
                 AsmProjectWorkspaceRepository().sourceOverrideFileIds(projectFilePath)
             } else {
@@ -240,6 +256,17 @@ internal object ProjectFileService {
             onLog("[ASM-BUILD] $progress")
             onStatus(progress)
         }
+        // Automatic ownership must work even when this room was never visited and no binding was saved.
+        val linkedWorkspace = requireNotNull(AsmProjectWorkspaceRepository().loadForBuild(projectFilePath))
+        linkedWorkspace.let { tree ->
+            for (fileId in listOf(PLM_SOURCE_FILE, "macros.asm")) {
+                val override = File(tree.root, "overrides/src/$fileId")
+                val authored = override.takeIf { it.isFile } ?: File(tree.originalDirectory, "src/$fileId")
+                require(authored.readText() == File(tree.workingDirectory, "src/$fileId").readText()) {
+                    "$fileId changed outside SMEDIT. Reconcile the source and its workspace copy before building room objects."
+                }
+            }
+        }
         val preparedKey = preparedAsmCacheKey(project, sourceInputs)
         getPreparedAsmBase(preparedKey)?.let { cached ->
             // A different prepared build may have replaced the on-disk report.
@@ -255,13 +282,28 @@ internal object ProjectFileService {
             onStatus(message)
             return cached
         }
-        val initial = compiler.compile(
+        val linkedCatalog = AsmPlmSourceCatalog.load(linkedWorkspace.originalDirectory, romParser)
+        val linkedSource = File(linkedWorkspace.workingDirectory, "src/$PLM_SOURCE_FILE").readText()
+        val linkedMacros = File(linkedWorkspace.workingDirectory, "src/macros.asm").readText()
+        val managedRooms = project.rooms.values.filter { it.asmPlmSourceVersion != 0 }
+        if (managedRooms.isNotEmpty()) linkedCatalog.requireStandardMacro(linkedMacros)
+        val managedSource = AsmRoomObjectSource(linkedSource, linkedCatalog.symbols)
+        val sourcePlmSets = managedRooms.associate { it.roomId to managedSource.resources(it) }
+        // Resolve known collisions before spending time in Asar. GUI-only lists stay GUI-owned.
+        linkedCatalog.sourceBindings(project, linkedSource, linkedMacros)
+        fun protectLinkedObjects(base: AsmCompiledBuildBase): AsmCompiledBuildBase = linkedCatalog.protectBuild(
+            project,
+            linkedSource,
+            linkedMacros,
+            base,
+        )
+        val initial = protectLinkedObjects(compiler.compile(
             projectFilePath = projectFilePath,
             loadedRom = loadedRom,
         ) { progress ->
             onLog("[ASM-BUILD] $progress")
             onStatus(progress)
-        }
+        })
         onLog("[ASM-BUILD] Planning editor-owned source assets…")
         val planningLog = mutableListOf<String>()
         val planned = RomExporter(
@@ -271,6 +313,7 @@ internal object ProjectFileService {
             onStatus = {},
             logWritePlanDetails = false,
             compiledAsmBase = initial,
+            sourcePlmSets = sourcePlmSets,
         ).build() ?: throw AsmCompilationException(
             planningLog.lastOrNull { it.startsWith("ERROR:") }
                 ?.removePrefix("ERROR: ")
@@ -279,6 +322,14 @@ internal object ProjectFileService {
         val roomMaterialization = AsmSourceRoomMaterializer().materialize(
             project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size,
         )
+        val authoredResources = managedRooms.flatMap { room -> room.states.map { state ->
+            AsmRoomObjectSource.stateMacro(room.roomId, state.id) to managedSource.table(room.roomId, state.id).resource.name
+        } }.toMap()
+        val emitted = roomMaterialization.plmTables.filter { it.authoredMacro != null }
+        require(emitted.map { authoredResources.getValue(it.authoredMacro!!) }.toSet() == authoredResources.values.toSet() &&
+            emitted.sumOf { it.pointerPcOffsets.size } == authoredResources.size) {
+            "Authored object source could not be included atomically in this room build; no ROM was produced."
+        }
         val materialization = AsmSourceAssetMaterializer().materialize(
             projectFilePath = projectFilePath,
             report = planned.writeReport,
@@ -327,7 +378,7 @@ internal object ProjectFileService {
                         "${patchMaterialization.skippedWrites} write(s) remain on the ROM backend"
                 )
             }
-            val materializedCompile = compiler.compile(
+            val materializedCompile = protectLinkedObjects(compiler.compile(
                 projectFilePath = projectFilePath,
                 loadedRom = loadedRom,
                 materialization = materialization,
@@ -337,7 +388,7 @@ internal object ProjectFileService {
             ) { progress ->
                 onLog("[ASM-BUILD] $progress")
                 onStatus(progress)
-            }
+            })
             materializedCompile.copy(
                 compilerOutput = (initial.compilerOutput + materializedCompile.compilerOutput).distinct(),
                 expectedFinalParitySha256 = asmGeneratedParitySha256(planned.resultRom),
@@ -349,7 +400,7 @@ internal object ProjectFileService {
             .filter { it.contains("warn", ignoreCase = true) || it.contains("error", ignoreCase = true) }
             .forEach { onLog("[ASAR] $it") }
         onLog(
-            "[ASM-BUILD] Source base ready: ${compiled.sourceOwnedRanges.sumOf { it.length }} changed byte(s) " +
+            "[ASM-BUILD] Source base ready: ${compiled.sourceOwnedRanges.sumOf { it.length }} source-owned byte(s) " +
                 "across ${compiled.sourceOwnedRanges.size} authored range(s), " +
                 "${compiled.generatedAssetClaims.sumOf { it.length }} generated asset byte(s), " +
                 "${compiled.generatedRoomClaims.sumOf { it.length }} generated room byte(s), " +
