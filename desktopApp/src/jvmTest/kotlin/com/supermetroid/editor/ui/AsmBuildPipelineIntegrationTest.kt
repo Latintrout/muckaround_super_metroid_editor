@@ -81,7 +81,8 @@ class AsmBuildPipelineIntegrationTest {
         bridge.editManaged(room.roomId, newState, false, { it == bomb }, null)
         bridge.editManaged(room.roomId, state, true, { false }, bomb.copy(x = 20, param = 0x102))
         val authored = AsmRoomObjectSource(bridge.sourceText(), bridge.catalog.symbols)
-        assertNotNull(authored.table(room.roomId, state).objects.last().commonMacro)
+        assertNull(authored.table(room.roomId, state).objects.last().commonMacro)
+        assertTrue(!bridge.sourceText().contains("SmeditObjects_ACB3_Common_"))
         assertTrue(authored.table(room.roomId, state).document.entries.contains(bomb))
         assertTrue(!authored.table(room.roomId, newState).document.entries.contains(bomb))
         buildAndVerify()
@@ -130,6 +131,14 @@ class AsmBuildPipelineIntegrationTest {
         assertTrue(editor.undo())
         assertTrue(editor.workingPlms.none { it.id == 0xEEDF && it.x == 9 })
         assertTrue(editor.redo())
+        // A real legacy multi-state helper becomes direct rows before the same checked Asar build.
+        val commonEntry = RomParser.PlmEntry(0xEEDF, 9, 9, 0x101)
+        val legacyHelper = "SmeditObjects_91F8_Common_7"
+        val legacy = bridge.sourceText().replace(AsmRoomObjectSource.renderEntry(commonEntry), "%$legacyHelper()") +
+            "\nmacro $legacyHelper()\n    ${AsmRoomObjectSource.renderEntry(commonEntry)}\nendmacro\n"
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, legacy)
+        assertTrue(workspace.saveAllSources())
+        assertTrue(!bridge.sourceText().contains("SmeditObjects_91F8_Common_"))
         val newId = editor.addRoomState(landing.states.first().id,
             projectRoomStateCondition(ProjectRoomStateConditionKind.EVENT_SET, 0x0B), parser)
         editor.switchRoomState(newId, parser)

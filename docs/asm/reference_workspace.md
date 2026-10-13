@@ -926,9 +926,9 @@ first **item → ASM** navigation for a supported GUI-owned room, the bridge:
    source edits, changed record layouts and unsupported resource changes refuse
    conversion without deleting either version.
 2. Appends authored `SmeditObjects_<room>_…` macros to editable `bank_8F.asm`.
-   State wrappers reference List macros; shared lists retain sharing. Single-state
-   rooms use direct `%PLMPopEntry` records. Common helpers share explicitly linked
-   objects across multiple states; state-local exceptions stay local.
+   State wrappers reference List macros; shared lists retain sharing. Every list
+   contains direct `%PLMPopEntry` records, including multi-state rooms. There are
+   no generated per-object Common helpers; state-local exceptions stay local.
    Original vanilla declarations and surrounding source are unchanged.
 3. Verifies that decoding those macros reproduces every effective list, then
    retires only the room/state `plmChanges` streams. Schema 11 stores
@@ -937,28 +937,35 @@ first **item → ASM** navigation for a supported GUI-owned room, the bridge:
    tile/enemy/FX edits remain intact.
 
 Both ASM edits and ordinary GUI object add/remove now change those macros. A
-state-local edit first forks a shared List, while **All states** updates each
-current list and uses a shared Common definition when multiple states need it.
+state-local edit first forks a shared List, while **All states** writes the actual
+PLM row into each current list (once per physical list, not once per consumer).
+Duplicated rows retain the same pickup flag ID: they represent one collectible
+across room states, not multiple pickups.
 Added conditions clone their template's list, inheriting common additions/removals
 **and template exceptions**.
-Editing a shared field directly in ASM or the scalar dialog affects its consumers;
-that is deliberately different from a state-local placement operation.
+Editing a row directly in ASM or the scalar dialog changes that list and any
+states sharing the whole list. Equal rows in different lists are independent;
+editing one does not silently rewrite the others. Use **All states** in the room
+view to deliberately apply a change to every list. The scope indicator describes
+current membership: an identical item present once in every state shows All states,
+not a hidden per-object link.
 
-Single-state rooms do not need per-object Common helpers: All states and This state
-have the same membership there. Adding a condition shares its template's existing
-List; a subsequent state-local placement forks the List. An All-states addition
-in a multi-state room uses a shared helper. Identical bytes in independent lists
+In single-state rooms, All states and This state have the same membership. Adding
+a condition shares its template's existing List; a subsequent state-local placement
+forks the List. This direct-row form also matches the pinned vanilla bank `$8F`
+PLM declarations (`%PLMPopEntry`, followed by `dw $0000`). Identical bytes in independent lists
 are **not** evidence of intentional sharing and are never automatically merged.
 
-Migration, GUI placement/scalar edits, and source/project Save tidy the affected room's owned helper
-graph in the same source undo step. Unreferenced Common/List definitions and
-wrappers for deleted states are removed, and helpers used by only one state are
-inlined without changing entry order, literal spelling, values, or live List
-identities. Surviving names are not renumbered. Handwritten comments are retained
-(notes on removed helpers remain as
-comments); generated item-name comments are refreshed. Calls elsewhere in the bank
-or other indexed project sources, including unsaved/disabled custom modules,
-protect definitions. Unknown helper bodies are conservatively retained. This is
+Migration, GUI placement/scalar edits, and source/project Save tidy the affected
+room's owned helper graph in the same source undo step. Legacy Common calls expand
+to direct rows in every active list, including shared and independent multi-state
+lists. Unreferenced Common/List definitions and wrappers for deleted states are
+removed without changing entry order, literal spelling, values, or live List
+identities. Surviving list names are not renumbered. Handwritten comments are retained;
+generated item-name comments and the old helper-based header are refreshed. Calls
+elsewhere in the bank or other indexed project sources, including unsaved/disabled
+custom modules, protect legacy definitions even though managed lists now contain
+direct rows. Unknown helper bodies are conservatively retained. This is
 a bounded source transformation, not an arbitrary Asar dead-code optimizer.
 The decoded resource graph must match before/after cleanup or the edit is refused.
 
@@ -979,7 +986,7 @@ external consumers, comments/CRLF, and exact undo. The strict Asar integration t
 also builds Bubble Mountain before and after adding a condition and compares every
 compiled state list with the source model.
 
-Authored PLM entries and Common calls carry short `; PLM: <name>` comments, using
+Authored PLM entries carry short `; PLM: <name>` comments, using
 the editor's item/door/scroll names (including project custom items), plus a field
 legend and list terminator comment. Unknown IDs remain identified by hex, not a
 guessed item name. GUI object edits refresh these names in the same undo step;
@@ -1000,9 +1007,9 @@ Allocation addresses remain build results, not persisted source identities.
 Migration is one source-undo step that restores both text and the prior GUI PLM
 streams. It refuses undo across changed state membership. GUI object Undo/Redo
 uses source history and rejects stale revisions. A newly added state's declaration
-cannot be undone while that state still references it. Ordinary Project Save
-saves source too; bank-only saving is not a substitute for saving newly changed
-room-state/ownership metadata.
+cannot be undone while that state still references it. Source Save also persists
+the project's room-state/ownership metadata. Ordinary Project Save includes all
+dirty source banks and checks already-saved managed room blocks for cleanup.
 
 Current boundaries: this conversion supports existing rooms in projects without
 added rooms. Custom scroll-command authoring, changed resource links, conflicting

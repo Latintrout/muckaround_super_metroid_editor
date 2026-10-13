@@ -277,8 +277,10 @@ typed or compound conditions. Layouts are whole resources: the first change to a
 shared layout asks whether to edit every linked state or make the active state's complete layout
 unique. The compact shared/unique indicator, resource-owned operations, make-unique/copy/share/revert
 commands, and selection-to-state copying use that same rule. Collectible item placement separately
-offers **This state** and **All states**. All-state items are stored as room-wide PLM deltas, retain
-one collection-bit parameter, appear in conditions added later, and reject a different item already
+offers **This state** and **All states**. ROM-mode All-state items are stored as room-wide PLM deltas;
+ASM-owned lists instead contain direct `%PLMPopEntry` rows in each affected list, without per-object
+Common helpers. These copies retain one collection-bit parameter, appear in conditions added later,
+and reject a different item already
 occupying those coordinates in any branch. `ELSE Default` is a fallback condition, not inherited
 base content. Relinking for other non-layout resources,
 persistent-state action authoring, and separate-background/custom-code

@@ -122,7 +122,7 @@ class AsmPlmSourceBridgeTest {
         val cleaned = bridge.sourceText()
         assertFalse(cleaned.contains("Common_"))
         assertContains(cleaned, "authored note")
-        assertTrue(bridge.managedIsCommon(room.roomId, state, entry.copy(x = 7)), "A sole state needs no common helper to show All states")
+        assertTrue(bridge.managedIsInAllStates(room.roomId, state, entry.copy(x = 7)), "A sole state needs no common helper to show All states")
         val target = assertIs<AsmPlmPlacementTarget.Source>(bridge.managedPlacement(room.roomId, state, entry.copy(x = 7)))
         assertContains(cleaned.lines()[target.lineIndex], AsmRoomObjectSource.renderEntry(entry.copy(x = 7)))
         bridge.undoSource(cleaned)
@@ -202,12 +202,83 @@ class AsmPlmSourceBridgeTest {
         assertFalse(editor.statusIsError, "A successful placement clears the old blocker")
     }
 
+    @Test fun `saving legacy multi-state objects produces direct rows with local ASM and explicit all-state GUI edits`() = runBlocking {
+        val (_, bridge, project) = fixture()
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val room = project.rooms.getValue("91F8")
+        val first = room.states.first().id
+        val second = room.states.last().id
+        val local = RomParser.PlmEntry(0xEEE7, 8, 9, 12)
+        bridge.editManaged(room.roomId, first, false, { false }, local)
+        val gravity = RomParser.PlmEntry(0xEF0B, 0x38, 0x49, 0x57)
+        bridge.editManaged(room.roomId, first, true, { false }, gravity)
+        val expected = room.states.associate { it.id to bridge.managedView(room.roomId, it.id).document!!.entries }
+        val helper = "SmeditObjects_91F8_Common_2"
+        val legacy = bridge.sourceText()
+            .replace("; Values live here. Each list contains its PLMPopEntry rows; state wrappers select lists.",
+                "; Values live here. State wrappers share lists; Common macros are All states items.")
+            .replace(AsmRoomObjectSource.renderEntry(gravity), "%$helper()") +
+            "\nmacro $helper()\n    ${AsmRoomObjectSource.renderEntry(gravity)} ; my shared pickup note\nendmacro\n" +
+            "\nmacro SmeditObjects_91F8_Common_99()\n    ${AsmRoomObjectSource.renderEntry(local)}\nendmacro\n"
+        val path = File(directory, "Test.smedit").path
+        val repository = AsmProjectWorkspaceRepository(emptyList(), emptyList())
+        repository.saveSource(path, PLM_SOURCE_FILE, legacy)
+        val reopened = AsmWorkspaceState(projectRepository = repository)
+        reopened.bindProject(path, true)
+        val restored = AsmPlmSourceBridge(bridge.catalog, reopened) { project }
+        assertFalse(reopened.hasUnsavedSourceChanges(PLM_SOURCE_FILE))
+        assertTrue(reopened.saveAllSources())
+        val cleaned = restored.sourceText()
+        assertFalse(cleaned.contains("Common_"))
+        assertContains(cleaned, "; Values live here. Each list contains its PLMPopEntry rows; state wrappers select lists.")
+        assertEquals(2, cleaned.lineSequence().count {
+            it.contains("%PLMPopEntry(${'$'}EF0B, ${'$'}38, ${'$'}49, ${'$'}0057) ; PLM: Gravity Suit (Visible)")
+        })
+        for (state in room.states) {
+            assertEquals(expected[state.id], restored.managedView(room.roomId, state.id).document?.entries)
+            assertTrue(restored.managedIsInAllStates(room.roomId, state.id, gravity))
+            val target = assertIs<AsmPlmPlacementTarget.Source>(restored.managedPlacement(room.roomId, state.id, gravity))
+            assertContains(cleaned.lines()[target.lineIndex], AsmRoomObjectSource.renderEntry(gravity))
+        }
+        restored.undoSource(cleaned)
+        assertEquals(legacy, restored.sourceText())
+        restored.redoSource(legacy)
+        assertEquals(cleaned, restored.sourceText())
+
+        // Equal direct rows are not secretly coupled: editing one list leaves the other untouched.
+        val doc = assertNotNull(restored.managedView(room.roomId, first).document)
+        val changed = gravity.copy(id = 0xEEF7)
+        reopened.updateSourceEditText(PLM_SOURCE_FILE, doc.replace(doc.entries.indexOf(gravity), changed))
+        assertTrue(restored.managedView(room.roomId, first).document!!.entries.contains(changed))
+        assertTrue(restored.managedView(room.roomId, second).document!!.entries.contains(gravity))
+        assertFalse(restored.managedIsInAllStates(room.roomId, first, changed))
+        assertFalse(restored.managedIsInAllStates(room.roomId, second, gravity))
+
+        val common = gravity.copy(param = 0x58)
+        restored.editManaged(room.roomId, first, true, { it == gravity || it == changed }, common)
+        for (state in room.states) {
+            assertTrue(restored.managedIsInAllStates(room.roomId, state.id, common))
+            assertEquals(1, restored.managedView(room.roomId, state.id).document!!.entries.count { it == common })
+        }
+        assertTrue(restored.managedView(room.roomId, first).document!!.entries.contains(local))
+        assertFalse(restored.managedView(room.roomId, second).document!!.entries.contains(local))
+        restored.cloneManagedState(room.roomId, second, "new-state")
+        room.states += room.states.last().copy(id = "new-state")
+        assertEquals(restored.managedView(room.roomId, second).document?.entries,
+            restored.managedView(room.roomId, "new-state").document?.entries)
+        assertFalse(restored.sourceText().contains("Common_"))
+        assertTrue(reopened.saveAllSources())
+    }
+
     @Test fun `disabled custom module unsaved references protect helpers until removed`() = runBlocking {
         val (workspace, bridge, project) = fixture()
         val entry = RomParser.PlmEntry(0xEEDF, 8, 9, 12)
         project.getOrCreateRoom(0x91F8).plmChanges += PlmChange("add", entry.id, entry.x, entry.y, entry.param)
         bridge.migrateRoom(0x91F8, "Test room")
-        val common = AsmRoomObjectSource(bridge.sourceText()).table(0x91F8, "state-1").objects.last().commonMacro!!
+        val common = "SmeditObjects_91F8_Common_1"
+        val legacy = bridge.sourceText().replace(AsmRoomObjectSource.renderEntry(entry), "%$common()") +
+            "\nmacro $common()\n    ${AsmRoomObjectSource.renderEntry(entry)}\nendmacro\n"
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, legacy)
         assertTrue(workspace.createProjectModule("Test consumer"))
         val module = workspace.projectModuleFileIds.single()
         assertTrue(workspace.setProjectModuleEnabled(module, false))
@@ -231,12 +302,12 @@ class AsmPlmSourceBridgeTest {
         bridge.migrateRoom(room.roomId, "Test room")
         val original = room.states.single()
         val entry = assertNotNull(bridge.managedView(room.roomId, original.id).document).entries.single()
-        assertTrue(bridge.managedIsCommon(room.roomId, original.id, entry))
+        assertTrue(bridge.managedIsInAllStates(room.roomId, original.id, entry))
         bridge.cloneManagedState(room.roomId, original.id, "new-state")
         room.states.add(original.copy(id = "new-state"))
-        assertTrue(bridge.managedIsCommon(room.roomId, "new-state", entry))
+        assertTrue(bridge.managedIsInAllStates(room.roomId, "new-state", entry))
         bridge.editManaged(room.roomId, "new-state", false, { it == entry }, entry.copy(id = 0xEEDF))
-        assertFalse(bridge.managedIsCommon(room.roomId, "new-state", entry.copy(id = 0xEEDF)))
+        assertFalse(bridge.managedIsInAllStates(room.roomId, "new-state", entry.copy(id = 0xEEDF)))
         assertEquals(listOf(entry), bridge.managedView(room.roomId, original.id).document?.entries)
     }
 
@@ -248,13 +319,13 @@ class AsmPlmSourceBridgeTest {
         val before = bridge.sourceText()
         assertTrue(before.startsWith(source)) // Original bank's handwritten comment is untouched.
         assertContains(before, "%PLMPopEntry(${'$'}F300, ${'$'}08, ${'$'}09, ${'$'}000C) ; PLM: Test pickup (Visible)")
-        assertContains(before, "%SmeditObjects_91F8_Common_1() ; PLM: Test pickup (Visible)")
+        assertFalse(before.contains("Common_"))
         val document = assertNotNull(bridge.managedView(0x91F8, "state-1").document)
         val replacement = document.entries.last().copy(id = 0xEEF7)
         bridge.updateManaged(0x91F8, "state-1", document, document.entries.lastIndex, replacement)
         val after = bridge.sourceText()
         assertFalse(after.contains("Test pickup"))
-        assertContains(after, "%SmeditObjects_91F8_Common_1() ; PLM: Speed Booster (Visible)")
+        assertContains(after, "%PLMPopEntry(${'$'}EEF7, ${'$'}08, ${'$'}09, ${'$'}000C) ; PLM: Speed Booster (Visible)")
         val target = assertIs<AsmPlmPlacementTarget.Source>(bridge.managedPlacement(0x91F8, "state-2", replacement))
         assertContains(after.lines()[target.lineIndex], "%PLMPopEntry(${'$'}EEF7")
         assertEquals(after, bridge.sourceText()) // Reading/navigating never edits a bank.

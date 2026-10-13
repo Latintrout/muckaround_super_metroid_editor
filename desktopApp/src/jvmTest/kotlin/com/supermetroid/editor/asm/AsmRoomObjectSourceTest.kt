@@ -60,8 +60,8 @@ class AsmRoomObjectSourceTest {
         assertContains(source.text, "PLMPopEntry(type, tile X, tile Y, parameter)")
         assertContains(source.text, "; PLM: Missile (Visible)")
         for ((_, name) in additions.drop(1)) assertContains(source.text, "; PLM: $name")
-        assertFalse(source.contains("SmeditObjects_91F8_Common_1"))
-        assertContains(source.text, "%SmeditObjects_91F8_Common_2() ; PLM: Gravity Suit (Visible)")
+        assertFalse(source.text.contains("SmeditObjects_91F8_Common_"))
+        assertContains(source.text, "%PLMPopEntry(${'$'}EF0B, ${'$'}05, ${'$'}09, ${'$'}000C) ; PLM: Gravity Suit (Visible)")
         assertContains(source.text, "dw ${'$'}0000 ; End of PLM list")
         for ((stateId, expected) in migration.expected) {
             assertEquals(RomParser.serializePlmSet(expected), RomParser.serializePlmSet(source.table(room.roomId, stateId).document.entries))
@@ -86,7 +86,7 @@ class AsmRoomObjectSourceTest {
         assertEquals(annotated, AsmRoomObjectSource(annotated, symbols).withComments(room.roomId))
         val renamed = AsmRoomObjectSource(annotated, symbols + ("ItemId" to 0xEEE3)).withComments(room.roomId)
         assertContains(renamed, "; PLM: Power Bomb (Visible) ; my note; keep this too")
-        assertContains(renamed, "%SmeditObjects_91F8_Common_1() ; PLM: Power Bomb (Visible)")
+        assertContains(renamed, "%PLMPopEntry(ItemId, 8, %1001, ${'$'}000c) ; PLM: Power Bomb (Visible)")
     }
 
     @Test fun `custom descriptions cannot introduce executable source or extra lines`() {
@@ -110,7 +110,7 @@ class AsmRoomObjectSourceTest {
         for (state in room.states) {
             val table = source.table(room.roomId, state.id)
             assertEquals(listOf(missile, replacement), table.document.entries)
-            assertNotNull(table.objects.last().commonMacro)
+            assertNull(table.objects.last().commonMacro)
         }
         source = AsmRoomObjectSource(source.edit(room, "state-1", true, { it == replacement }, null))
         assertTrue(source.resources(room).values.all { it.entries == listOf(missile) })
@@ -143,7 +143,7 @@ class AsmRoomObjectSourceTest {
         val before = source.text
         repeat(10) {
             source = AsmRoomObjectSource(source.edit(room, "state-1", true, { false }, extra))
-            assertNotNull(source.table(room.roomId, "state-1").objects.last().commonMacro)
+            assertNull(source.table(room.roomId, "state-1").objects.last().commonMacro)
             source = AsmRoomObjectSource(source.edit(room, "state-1", true, { it == extra }, null))
             assertEquals(before, source.text)
         }
@@ -174,17 +174,53 @@ class AsmRoomObjectSourceTest {
         assertEquals(cleaned, decoded.tidy(room))
     }
 
-    @Test fun `cleanup keeps live sharing but inlines an object after a state-local exception`() {
+    @Test fun `multi-state cleanup expands legacy object helpers while preserving whole-list sharing`() {
         val room = RoomEdits(0x91F8)
         room.plmChanges += PlmChange("add", extra.id, extra.x, extra.y, extra.param)
         var source = migrated(room)
-        val common = assertNotNull(source.table(room.roomId, "state-1").objects.last().commonMacro)
+        val common = "SmeditObjects_91F8_Common_1"
+        val legacy = source.text.replace(AsmRoomObjectSource.renderEntry(extra), "%$common()") +
+            "\nmacro $common()\n    ${AsmRoomObjectSource.renderEntry(extra)} ; shared pickup note\nendmacro\n"
+        source = AsmRoomObjectSource(legacy)
+        val resources = source.resources(room)
+        val cleaned = source.tidy(room)
+        assertFalse(cleaned.contains("Common_"))
+        assertContains(cleaned, "shared pickup note")
+        source = AsmRoomObjectSource(cleaned)
+        assertEquals(resources, source.resources(room))
         assertEquals(source.text, source.tidy(room))
+        assertEquals(source.table(room.roomId, "state-1").resource, source.table(room.roomId, "state-2").resource)
         source = AsmRoomObjectSource(source.edit(room, "state-1", false, { it == extra }, null))
         assertFalse(source.contains(common))
         assertEquals(listOf(missile), source.table(room.roomId, "state-1").document.entries)
         assertEquals(listOf(missile, extra), source.table(room.roomId, "state-2").document.entries)
         assertNull(source.table(room.roomId, "state-2").objects.last().commonMacro)
+    }
+
+    @Test fun `legacy helpers expand into separate lists without breaking an external custom caller`() {
+        val room = RoomEdits(0x91F8)
+        room.plmChanges += PlmChange("add", extra.id, extra.x, extra.y, extra.param)
+        val shared = migrated(room)
+        val separate = AsmRoomObjectSource(shared.edit(room, "state-1", false, { false }, extra.copy(x = 20)))
+        val helper = "SmeditObjects_91F8_Common_2"
+        val legacy = separate.text.replace(AsmRoomObjectSource.renderEntry(extra), "%$helper() ; call note") +
+            "\nmacro $helper()\n    %PLMPopEntry(ItemId, 8, %1001, ${'$'}000c) ; pickup note\nendmacro\n"
+        val symbols = mapOf("ItemId" to extra.id)
+        val source = AsmRoomObjectSource(legacy, symbols)
+        val before = source.resources(room)
+        val cleaned = AsmRoomObjectSource(source.tidy(room, setOf(helper)), symbols)
+        assertEquals(before, cleaned.resources(room))
+        assertTrue(cleaned.contains(helper), "Custom ASM still needs its original helper definition")
+        for (state in room.states) {
+            val table = cleaned.table(room.roomId, state.id)
+            assertTrue(table.objects.all { it.commonMacro == null })
+            assertContains(cleaned.text.substring(table.resource.bodyStart, table.resource.bodyEnd),
+                "%PLMPopEntry(ItemId, 8, %1001, ${'$'}000c) ; pickup note")
+        }
+        assertEquals(cleaned.text, cleaned.tidy(room, setOf(helper)))
+        val unpinned = AsmRoomObjectSource(cleaned.tidy(room), symbols)
+        assertFalse(unpinned.contains(helper))
+        assertEquals(before, unpinned.resources(room))
     }
 
     @Test fun `cleanup respects other code external references unsupported bodies and handwritten notes`() {
@@ -227,8 +263,11 @@ class AsmRoomObjectSourceTest {
         assertEquals(listOf(missile, extra), source.table(room.roomId, originalState.id).document.entries)
         assertEquals(listOf(missile), source.table(room.roomId, "new-state").document.entries)
         source = AsmRoomObjectSource(source.edit(room, "new-state", true, { false }, extra.copy(x = 15)))
-        assertEquals(source.table(room.roomId, originalState.id).objects.last().commonMacro,
-            assertNotNull(source.table(room.roomId, "new-state").objects.last().commonMacro))
+        assertFalse(source.text.contains("Common_"))
+        for (state in room.states) {
+            assertEquals(extra.copy(x = 15), source.table(room.roomId, state.id).document.entries.last())
+            assertNull(source.table(room.roomId, state.id).objects.last().commonMacro)
+        }
     }
 
     @Test fun `deleting a conditional state releases its private list and simplifies the remaining default`() {
@@ -265,7 +304,7 @@ class AsmRoomObjectSourceTest {
         assertEquals(listOf(extra), source.resources(room).getValue("state-2").entries)
     }
 
-    @Test fun `token lenses and navigation point to actual common entry and permit list growth`() {
+    @Test fun `token lenses and navigation point to direct rows in a shared list and permit list growth`() {
         val room = RoomEdits(0x91F8)
         room.plmChanges += PlmChange("add", extra.id, extra.x, extra.y, extra.param)
         var source = migrated(room)

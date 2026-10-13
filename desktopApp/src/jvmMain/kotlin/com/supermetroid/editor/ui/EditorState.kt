@@ -4432,7 +4432,7 @@ class EditorState(
     fun configuredItemScope(plm: RomParser.PlmEntry): ItemStateScope? {
         if (!isEditorItemPlm(plm.id)) return null
         if (hasManagedPlms()) return if (currentPlmStateId()?.let {
-                asmPlmSourceBridge?.managedIsCommon(currentRoomId, it, plm)
+                asmPlmSourceBridge?.managedIsInAllStates(currentRoomId, it, plm)
             } == true) ItemStateScope.ALL_STATES else ItemStateScope.THIS_STATE
         val roomEdits = project.rooms[project.roomKey(currentRoomId)] ?: return null
         val selected = selectedStateEdits(roomEdits)

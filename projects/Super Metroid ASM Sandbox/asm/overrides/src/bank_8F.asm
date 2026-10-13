@@ -15620,24 +15620,8 @@ Freespace_Bank8F_E99B:                                                   ;8FE99B
 
 
 ; SMEDIT authored objects · Landing Site
-; Values live here. State wrappers share lists; Common macros are All states items.
+; Values live here. Each list contains its PLMPopEntry rows; state wrappers select lists.
 ; Placement addresses and state pointers are supplied by the checked build planner.
-
-macro SmeditObjects_91F8_Common_2()
-    %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
-endmacro
-
-macro SmeditObjects_91F8_Common_3()
-    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
-endmacro
-
-macro SmeditObjects_91F8_Common_5()
-    %PLMPopEntry($EEF7, $6D, $28, $0056) ; PLM: Speed Booster (Visible)
-endmacro
-
-macro SmeditObjects_91F8_Common_7()
-    %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
-endmacro
 
 macro SmeditObjects_91F8_List_1()
     %PLMPopEntry($B703, $1E, $28, $92B0) ; PLM: Scroll trigger
@@ -15648,12 +15632,12 @@ macro SmeditObjects_91F8_List_1()
     %PLMPopEntry($C848, $01, $26, $9002) ; PLM: Door Cap: Grey Right
     %PLMPopEntry($C842, $8E, $46, $9003) ; PLM: Door Cap: Grey Left
     %PLMPopEntry($C842, $8E, $16, $9004) ; PLM: Door Cap: Grey Left
-    %SmeditObjects_91F8_Common_2() ; PLM: Gravity Suit (Visible)
-    %SmeditObjects_91F8_Common_3() ; PLM: Hyper Beam (Visible)
-    %SmeditObjects_91F8_Common_5() ; PLM: Speed Booster (Visible)
-    %SmeditObjects_91F8_Common_7() ; PLM: Morph Ball (Visible)
-    %SmeditObjects_91F8_Common_1() ; PLM: Missile (Visible)
-    %SmeditObjects_91F8_Common_4() ; PLM: Hi-Jump Boots (Visible)
+    %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
+    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
+    %PLMPopEntry($EEF7, $6D, $28, $0056) ; PLM: Speed Booster (Visible)
+    %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
+    %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)
+    %PLMPopEntry($EEF3, $47, $37, $0058) ; PLM: Hi-Jump Boots (Visible)
     dw $0000
 endmacro
 
@@ -15669,12 +15653,12 @@ macro SmeditObjects_91F8_List_2()
     %PLMPopEntry($B647, $1E, $25, $8000) ; PLM: Scroll ext ↑
     %PLMPopEntry($C872, $8E, $46, $0000) ; PLM: Door Cap: Green Left
     %PLMPopEntry($C85A, $8E, $16, $0001) ; PLM: Door Cap: Yellow Left
-    %SmeditObjects_91F8_Common_2() ; PLM: Gravity Suit (Visible)
-    %SmeditObjects_91F8_Common_3() ; PLM: Hyper Beam (Visible)
-    %SmeditObjects_91F8_Common_5() ; PLM: Speed Booster (Visible)
-    %SmeditObjects_91F8_Common_7() ; PLM: Morph Ball (Visible)
-    %SmeditObjects_91F8_Common_1() ; PLM: Missile (Visible)
-    %SmeditObjects_91F8_Common_4() ; PLM: Hi-Jump Boots (Visible)
+    %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
+    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
+    %PLMPopEntry($EEF7, $6D, $28, $0056) ; PLM: Speed Booster (Visible)
+    %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
+    %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)
+    %PLMPopEntry($EEF3, $47, $37, $0058) ; PLM: Hi-Jump Boots (Visible)
     dw $0000
 endmacro
 
@@ -15689,12 +15673,12 @@ macro SmeditObjects_91F8_List_3()
     %PLMPopEntry($B647, $1E, $26, $8000) ; PLM: Scroll ext ↑
     %PLMPopEntry($B647, $1E, $25, $8000) ; PLM: Scroll ext ↑
     %PLMPopEntry($C872, $8E, $46, $0000) ; PLM: Door Cap: Green Left
-    %SmeditObjects_91F8_Common_2() ; PLM: Gravity Suit (Visible)
-    %SmeditObjects_91F8_Common_3() ; PLM: Hyper Beam (Visible)
-    %SmeditObjects_91F8_Common_7() ; PLM: Morph Ball (Visible)
+    %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
+    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
+    %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
     %PLMPopEntry($C8A2, $8E, $17, $0000) ; PLM: Door Cap: Blue Left
-    %SmeditObjects_91F8_Common_1() ; PLM: Missile (Visible)
-    %SmeditObjects_91F8_Common_4() ; PLM: Hi-Jump Boots (Visible)
+    %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)
+    %PLMPopEntry($EEF3, $47, $37, $0058) ; PLM: Hi-Jump Boots (Visible)
     dw $0000
 endmacro
 
@@ -15706,7 +15690,7 @@ endmacro
 
 
 ; SMEDIT authored objects · Bubble Mountain
-; Values live here. State wrappers share lists; Common macros are All states objects.
+; Values live here. Each list contains its PLMPopEntry rows; state wrappers select lists.
 ; Placement addresses and state pointers are supplied by the checked build planner.
 ; PLMPopEntry(type, tile X, tile Y, parameter): zero-based tiles; item parameter = pickup flag ID.
 
@@ -15725,11 +15709,3 @@ macro SmeditObjects_ACB3_State_73746174652d31()
     %SmeditObjects_ACB3_List_1()
 endmacro
 
-
-macro SmeditObjects_91F8_Common_1()
-    %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)
-endmacro
-
-macro SmeditObjects_91F8_Common_4()
-    %PLMPopEntry($EEF3, $47, $37, $0058) ; PLM: Hi-Jump Boots (Visible)
-endmacro

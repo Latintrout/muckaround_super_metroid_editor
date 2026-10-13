@@ -91,13 +91,13 @@ internal class AsmPlmSourceBridge(
         else view.document?.placementTarget(entry) ?: AsmPlmPlacementTarget.Unavailable("No current object source.")
     }
 
-    fun managedIsCommon(roomId: Int, stateId: String, entry: RomParser.PlmEntry): Boolean = runCatching {
+    /** Membership, not implicit linking: equal rows in independent lists remain independently editable. */
+    fun managedIsInAllStates(roomId: Int, stateId: String, entry: RomParser.PlmEntry): Boolean = runCatching {
         val room = project().rooms.getValue(project().roomKey(roomId))
         val source = managedSource()
         val table = source.table(roomId, stateId)
-        val obj = table.objects.singleOrNull { it.record.entry == entry } ?: return@runCatching false
-        room.states.size == 1 || obj.commonMacro != null ||
-            room.states.all { source.table(roomId, it.id).resource.name == table.resource.name }
+        if (table.objects.count { it.record.entry == entry } != 1) return@runCatching false
+        room.states.all { source.table(roomId, it.id).document.entries.count { it == entry } == 1 }
     }.getOrDefault(false)
 
     private fun externalObjectReferences(): Set<String> = workspace.projectSourceTextsExcept(PLM_SOURCE_FILE)

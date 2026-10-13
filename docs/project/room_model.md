@@ -74,14 +74,18 @@ edited is an explicit conflict, not an implicit merge.
 For supported GUI-managed rooms, **item → ASM** now migrates the effective PLM lists
 to authored macros in `bank_8F.asm`. `asmPlmSourceVersion = 1` records ownership;
 room/state PLM delta streams are retired, not replayed after compilation. Stable
-state wrappers preserve shared/private lists. Single-state rooms use direct PLM
-entries; Common helpers share linked values across multiple states. GUI edits and Save
-prune unreferenced owned helpers and inline single-consumer helpers in the same
-undo step, preserving comments, live list identities, and external ASM references.
-Save also checks already-saved managed banks, so old unused helpers are cleaned
+state wrappers preserve shared/private lists. Every list uses direct `%PLMPopEntry`
+rows, including multi-state rooms; **All states** writes each affected list once,
+retaining the same collection ID in its copies. GUI edits and Save expand legacy
+Common calls and prune unreferenced owned helpers in the same undo step, preserving
+comments, live list identities, and definitions still referenced by custom ASM.
+Save also checks already-saved managed banks, so old helper indirection is removed
 without requiring a new placement edit; invalid drafts are preserved for repair.
 Equal-valued independent objects are never implicitly linked. GUI placement edits
-and ASM edit those same values; a state-local placement forks a shared list. New
+and ASM edit those same values; a state-local placement forks a shared list. A raw
+row/scalar edit affects only that list and its whole-list consumers, not equal
+copies elsewhere. The All states indicator reports current item membership rather
+than an implicit link between independent rows. New
 conditions inherit their template's complete list, including common changes and
 local exceptions. The shared planner
 allocates whole variable-sized resources, and the generated build input invokes

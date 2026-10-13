@@ -10,7 +10,7 @@ import com.supermetroid.editor.rom.displaySummary
 import com.supermetroid.editor.rom.ensureStateManifest
 
 /** Authored, relocatable PLM macros. The planner owns addresses; these tokens own object values.
- * State wrappers preserve resource sharing; common-item macros share values across states.
+ * State wrappers preserve whole-list sharing; every object is readable directly in its list.
  * This bounded grammar is checked before Asar and again against its actual output. */
 internal class AsmRoomObjectSource(val text: String, private val symbols: Map<String, Int> = emptyMap()) {
     data class Macro(val name: String, val start: Int, val bodyStart: Int, val end: Int, val bodyEnd: Int)
@@ -35,6 +35,32 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
      * independent equal-valued entries/lists are never merged. Merely browsing does not call this. */
     fun tidy(room: RoomEdits, externalReferences: Set<String> = emptySet()): String {
         val before = resources(room)
+        val pruned = pruneHelpers(room, externalReferences)
+        val source = AsmRoomObjectSource(pruned, symbols)
+        // Expand legacy per-object helpers once per physical list, even when several states use it.
+        val uses = room.states.map { source.table(room.roomId, it.id) }
+            .distinctBy { it.resource.name }.flatMap { it.objects }
+            .filter { it.commonMacro != null }.groupBy { it.commonMacro!! }
+        val inlines = mutableListOf<Pair<IntRange, String>>()
+        for ((name, consumers) in uses) {
+            val helper = source.macro(name)
+            for (call in consumers) {
+                val notes = source.retainedComments(pruned.substring(helper.start, helper.bodyStart)) +
+                    source.retainedComments(pruned.substring(helper.bodyEnd, helper.end)) +
+                    source.retainedComments(pruned.substring(call.lineRange))
+                inlines += call.lineRange to (notes + pruned.substring(helper.bodyStart, helper.bodyEnd))
+            }
+        }
+        val expanded = source.replaceRanges(inlines)
+        // Keep definitions still called by custom ASM; do not duplicate notes already moved to rows.
+        val result = AsmRoomObjectSource(expanded, symbols).pruneHelpers(room, externalReferences, uses.keys)
+        check(AsmRoomObjectSource(result, symbols).resources(room) == before) {
+            "Room-object cleanup changed values or resource sharing; no source was replaced."
+        }
+        return result
+    }
+
+    private fun pruneHelpers(room: RoomEdits, externalReferences: Set<String>, expandedHelpers: Set<String> = emptySet()): String {
         val activeStates = room.states.map { stateMacro(room.roomId, it.id) }.toSet()
         val helperName = Regex("${prefix(room.roomId)}(?:(?:Common|List)_[0-9]+|State_[0-9a-f]+)")
         val helpers = macros.values.filter { helperName.matches(it.name) && it.name !in activeStates }.associateBy { it.name }
@@ -60,31 +86,9 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             }
         }
         val edits = helpers.values.filter { it.name !in live }.map {
-            removalRange(it) to retainedComments(text.substring(it.start, it.end))
+            removalRange(it) to if (it.name in expandedHelpers) "" else retainedComments(text.substring(it.start, it.end))
         }
-        var result = replaceRanges(edits)
-        val source = AsmRoomObjectSource(result, symbols)
-        val uses = room.states.flatMap { source.table(room.roomId, it.id).objects }
-            .filter { it.commonMacro != null }.groupBy { it.commonMacro!! }
-        val inlines = mutableListOf<Pair<IntRange, String>>()
-        for ((name, consumers) in uses) {
-            if (consumers.size != 1 || name in externalReferences) continue
-            val helper = source.macro(name)
-            val withoutDefinition = result.removeRange(helper.start, helper.end)
-            // A second textual reference may be in a custom macro or an inactive state wrapper.
-            if (HELPER_REFERENCE.findAll(withoutDefinition).count { it.value == name } != 1) continue
-            val call = consumers.single()
-            val notes = source.retainedComments(result.substring(helper.start, helper.bodyStart)) +
-                source.retainedComments(result.substring(helper.bodyEnd, helper.end)) +
-                source.retainedComments(result.substring(call.lineRange))
-            inlines += call.lineRange to (notes + result.substring(helper.bodyStart, helper.bodyEnd))
-            inlines += source.removalRange(helper) to ""
-        }
-        result = source.replaceRanges(inlines)
-        check(AsmRoomObjectSource(result, symbols).resources(room) == before) {
-            "Room-object cleanup changed values or resource sharing; no source was replaced."
-        }
-        return result
+        return replaceRanges(edits)
     }
 
     private fun replaceRanges(edits: List<Pair<IntRange, String>>): String {
@@ -113,12 +117,24 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
         }
     }
 
-    /** Annotate only authored object macros, never the original bank or a user's free-form comments.
-     * Invocations repeat the common object's name so a state list is readable on its own. */
+    /** Annotate authored rows (including legacy helpers), never the original bank or free-form notes. */
     fun withComments(roomId: Int, describe: (RomParser.PlmEntry) -> String = ::defaultDescription): String {
         val replacements = mutableListOf<Pair<IntRange, String>>()
         val commonPrefix = prefix(roomId) + "Common_"
         val listPrefix = prefix(roomId) + "List_"
+        val first = macros.values.firstOrNull { it.name.startsWith(prefix(roomId)) }
+        if (first != null) {
+            val start = text.lastIndexOf("; SMEDIT authored objects · ", first.start)
+            if (start >= 0) {
+                val header = text.substring(start, first.start)
+                if (header.lineSequence().all { it.isBlank() || it.trimStart().startsWith(';') }) {
+                    for (old in LEGACY_VALUES_HEADERS) {
+                        val match = Regex("(?m)^${Regex.escape(old)}(?=\\r?$)").find(header) ?: continue
+                        replacements += (start + match.range.first..start + match.range.last) to VALUES_HEADER
+                    }
+                }
+            }
+        }
         for (macro in macros.values.filter { it.name.startsWith(commonPrefix) || it.name.startsWith(listPrefix) }) {
             for ((range, code) in lines(macro)) {
                 val entry = if (ENTRY.matches(code)) parseEntry(range, code).entry else {
@@ -146,7 +162,7 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             }
         }
         var result = text
-        for ((range, replacement) in replacements.asReversed()) result = result.replaceRange(range, replacement)
+        for ((range, replacement) in replacements.sortedByDescending { it.first.first }) result = result.replaceRange(range, replacement)
         return result
     }
 
@@ -218,17 +234,12 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
         }
     }
 
-    /** Changing one state first forks its list, but common object definitions remain shared. */
+    /** Changing one state first forks its list; All states writes direct rows to each current list. */
     fun edit(room: RoomEdits, stateId: String, allStates: Boolean, remove: (RomParser.PlmEntry) -> Boolean,
              add: RomParser.PlmEntry?, externalReferences: Set<String> = emptySet()): String {
         add?.let(AsmPlmDocument::validateEntry)
         val states = if (allStates) room.states.map { it.id } else listOf(stateId)
         var result = text
-        var commonName: String? = null
-        if (allStates && add != null && room.states.size > 1) {
-            commonName = uniqueName(prefix(room.roomId) + "Common_")
-            result += "\n" + renderMacro(commonName, listOf(renderEntry(add)))
-        }
         val edited = mutableSetOf<String>()
         for (state in states) {
             var source = AsmRoomObjectSource(result, symbols)
@@ -245,7 +256,7 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             val replacements = table.objects.filter { remove(it.record.entry) }.map { it.lineRange to "" }.toMutableList()
             if (add != null) {
                 val terminator = source.lines(table.resource).last().first.first
-                replacements += (terminator until terminator) to "    ${commonName?.let { "%$it()" } ?: renderEntry(add)}\n"
+                replacements += (terminator until terminator) to "    ${renderEntry(add)}\n"
             }
             for ((range, replacement) in replacements.sortedByDescending { it.first.first }) result = result.replaceRange(range, replacement)
         }
@@ -261,6 +272,12 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
     private fun uniqueName(stem: String): String = generateSequence(1) { it + 1 }.map { stem + it }.first { it !in macros }
 
     companion object {
+        private const val VALUES_HEADER = "; Values live here. Each list contains its PLMPopEntry rows; state wrappers select lists."
+        private val LEGACY_VALUES_HEADERS = listOf(
+            "; Values live here. State wrappers select lists; Common helpers share objects across states.",
+            "; Values live here. State wrappers share lists; Common macros are All states objects.",
+            "; Values live here. State wrappers share lists; Common macros are All states items.",
+        )
         private const val NAME_COMMENT = "; PLM: "
         private val HELPER_REFERENCE = Regex("\\bSmeditObjects_[A-Za-z0-9_]+\\b")
         // Deliberately conservative: mentions inside strings/comments also protect custom references.
@@ -305,25 +322,18 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
                 return result.asReversed().filter { !isItem(it.id) || seen.add(it.x to it.y) }.asReversed()
             }
             val runtime = parser.parseRoomStatesWithData(room.roomId)
-            val common = (if (states.size > 1) apply(emptyList(), room.plmChanges) else emptyList()).mapIndexed { index, entry ->
-                entry to (prefix(room.roomId) + "Common_" + (index + 1))
-            }.toMap()
             val expected = linkedMapOf<String, List<RomParser.PlmEntry>>()
             val resources = linkedMapOf<Pair<Int, List<String>>, String>()
             val body = StringBuilder("\n; SMEDIT authored objects · ${name.replace('\n', ' ').replace('\r', ' ')}\n")
-            body.appendLine("; Values live here. State wrappers select lists; Common helpers share objects across states.")
+            body.appendLine(VALUES_HEADER)
             body.appendLine("; Placement addresses and state pointers are supplied by the checked build planner.")
             body.appendLine("; PLMPopEntry(type, tile X, tile Y, parameter): zero-based tiles; item parameter = pickup flag ID.")
-            common.forEach { (entry, macro) -> body.appendLine(renderMacro(macro, listOf(renderEntry(entry)))) }
             for (state in states) {
                 val base = runtime.getOrNull(state.baseSourceStateIndex() ?: -1) ?: error("${state.id} has no supported source state.")
                 val entries = apply(apply(parser.parsePlmSet(base.plmSetPtr), room.plmChanges), state.plmChanges)
                 entries.forEach(AsmPlmDocument::validateEntry)
                 expected[state.id] = entries
-                val lines = entries.map { entry ->
-                    val overridden = state.plmChanges.any { it.plmId == entry.id && it.x == entry.x && it.y == entry.y }
-                    common[entry]?.takeUnless { overridden }?.let { "%$it()" } ?: renderEntry(entry)
-                }
+                val lines = entries.map(::renderEntry)
                 val key = base.plmSetPtr to lines
                 val resource = resources.getOrPut(key) {
                     (prefix(room.roomId) + "List_" + (resources.size + 1)).also { macro ->

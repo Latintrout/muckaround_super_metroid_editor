@@ -86,7 +86,7 @@ private fun LinkedPlmListDialog(bridge: AsmPlmSourceBridge, pointer: Int, manage
                     val consumers = bridge.catalog.consumers[pointer].orEmpty()
                     Text("${consumers.size} state(s) share this list: " + consumers.map { it.roomName }.distinct().joinToString(), fontSize = fs.detail)
                 }
-                Text(if (managed != null) "Changes edit the authored list in Bank \$8F. Shared fields update all their consumers; add/remove objects in the room view or ASM. Tile X/Y are zero-based."
+                Text(if (managed != null) "Changes edit this list in Bank \$8F. States sharing the list update together; use All states in the room view to change every list. Tile X/Y are zero-based."
                     else "Changes edit Bank \$8F directly. Tile X/Y are zero-based; list size stays fixed. Undo in ASM to restore room-editor ownership.", fontSize = fs.detail)
                 view.problem?.let {
                     Text("Preview out of date: $it", color = MaterialTheme.colorScheme.error, fontSize = fs.body)
