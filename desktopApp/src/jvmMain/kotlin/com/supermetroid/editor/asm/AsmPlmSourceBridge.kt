@@ -2,7 +2,11 @@ package com.supermetroid.editor.asm
 
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.ProjectRomBuildMode
+import com.supermetroid.editor.data.ProjectPaths
 import com.supermetroid.editor.rom.RomParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 internal data class AsmPlmSourceView(
     val document: AsmPlmDocument?,
@@ -13,16 +17,52 @@ internal data class AsmPlmSourceView(
 internal class AsmPlmSourceBridge(
     val catalog: AsmPlmSourceCatalog,
     private val workspace: AsmWorkspaceState,
+    registerSaveParticipant: Boolean = true,
     private val project: () -> SmEditProject,
 ) : AsmSourceSaveParticipant {
     var onMetadataChanged: () -> Unit = {}
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
-    private var sourceRevision: Pair<Long, AsmPlmSourceCatalog.SourceRevision>? = null
-    private var managedRevision: Pair<Long, AsmRoomObjectSource>? = null
+    private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
+    private var managedRevision: Pair<String, AsmRoomObjectSource>? = null
     private val lastManaged = mutableMapOf<Pair<Int, String>, AsmPlmDocument>()
+    private var projectedText: String? = null
+    private var projectedMacros: String? = null
+    private val projections = mutableMapOf<Int, AsmRoomProjection>()
 
-    init { workspace.sourceSaveParticipant = this }
+    private fun projectionRepository(): AsmRoomProjectionRepository? = workspace.projectWorkspace?.root?.parentFile?.let {
+        AsmRoomProjectionRepository(File(ProjectPaths.asmCacheIn(it), "projections"))
+    }
+
+    /** Capture on the UI thread; load/repair disposable projections on a worker, then publish only if still current. */
+    suspend fun preloadProjections() {
+        val owner = project()
+        val text = sourceText()
+        val macros = workspace.projectSourceText("macros.asm")
+        val rooms = owner.rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
+        val repository = projectionRepository() ?: return
+        val loaded = withContext(Dispatchers.Default) { runCatching { repository.load(text, macros, rooms, catalog) }.getOrDefault(emptyMap()) }
+        if (project() !== owner || sourceText() != text || workspace.projectSourceText("macros.asm") != macros) return
+        projectedText = text
+        projectedMacros = macros
+        projections.clear()
+        projections.putAll(loaded.filter { (id, projection) ->
+            owner.rooms[owner.roomKey(id)]?.let { runCatching { roomObjectIdentity(it) == projection.identity }.getOrDefault(false) } == true
+        })
+    }
+
+    override fun afterSaved(fileId: String, text: String): (() -> Unit)? {
+        if (fileId != PLM_SOURCE_FILE && fileId != "macros.asm") return null
+        val repository = projectionRepository() ?: return null
+        val source = if (fileId == PLM_SOURCE_FILE) text else workspace.projectSourceText(PLM_SOURCE_FILE)
+        val macros = if (fileId == "macros.asm") text else workspace.projectSourceText("macros.asm")
+        val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
+        // Only publish durable saved text; unsaved buffers must never masquerade as a startup snapshot.
+        if (workspace.hasUnsavedSourceChanges(PLM_SOURCE_FILE) || workspace.hasUnsavedSourceChanges("macros.asm")) return null
+        return { repository.load(source, macros, rooms, catalog); Unit }
+    }
+
+    init { if (registerSaveParticipant) workspace.sourceSaveParticipant = this }
 
     override val sourceFileIds: Set<String> get() = if (project().rooms.values.any { it.asmPlmSourceVersion != 0 }) {
         setOf(PLM_SOURCE_FILE)
@@ -30,12 +70,7 @@ internal class AsmPlmSourceBridge(
 
     override fun prepare(fileId: String, text: String): () -> String {
         if (fileId != PLM_SOURCE_FILE || fileId !in sourceFileIds) return { text }
-        val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map { room ->
-            room.copy(plmChanges = room.plmChanges.toMutableList(),
-                customScrollCommands = room.customScrollCommands.mapValuesTo(linkedMapOf()) { it.value.toMutableList() },
-                states = room.states.map { state -> state.copy(plmChanges = state.plmChanges.toMutableList(),
-                    customScrollCommands = state.customScrollCommands.mapValuesTo(linkedMapOf()) { it.value.toMutableList() }) }.toMutableList())
-        }
+        val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
         val macrosText = workspace.projectSourceText("macros.asm")
         val readers = workspace.projectSourceReadersExcept(PLM_SOURCE_FILE)
         val describe = describePlm
@@ -69,21 +104,37 @@ internal class AsmPlmSourceBridge(
 
     private fun managedSource(): AsmRoomObjectSource {
         catalog.requireStandardMacro(workspace.projectSourceText("macros.asm"))
-        return managedRevision?.takeIf { it.first == workspace.sourceBufferRevision }?.second
-            ?: AsmRoomObjectSource(workspace.projectSourceText(PLM_SOURCE_FILE), catalog.symbols)
-                .also { managedRevision = workspace.sourceBufferRevision to it }
+        val text = sourceText()
+        return managedRevision?.takeIf { it.first == text }?.second
+            ?: AsmRoomObjectSource(text, catalog.symbols).also { managedRevision = text to it }
     }
 
-    fun managedView(roomId: Int, stateId: String): AsmPlmSourceView = try {
+    fun managedView(roomId: Int, stateId: String): AsmPlmSourceView { return try {
         val room = project().rooms.getValue(project().roomKey(roomId))
+        val identity = roomObjectIdentity(room)
+        val macros = workspace.projectSourceText("macros.asm")
+        val text = sourceText()
+        catalog.requireStandardMacro(macros)
+        if (projectedText == text && projectedMacros == macros) {
+            projections[roomId]?.takeIf { it.identity == identity }?.documents?.get(stateId)?.let { document ->
+                lastManaged[roomId to stateId] = document
+                return AsmPlmSourceView(document, null)
+            }
+        } else {
+            projectedText = text
+            projectedMacros = macros
+            projections.clear()
+        }
         val source = managedSource()
         source.resources(room)
-        val document = source.table(roomId, stateId).document
+        val documents = room.states.associate { it.id to source.table(roomId, it.id).document }
+        projections[roomId] = AsmRoomProjection(identity, documents)
+        val document = requireNotNull(documents[stateId]) { "Missing authored state $stateId" }
         lastManaged[roomId to stateId] = document
         AsmPlmSourceView(document, null)
     } catch (problem: Exception) {
         AsmPlmSourceView(lastManaged[roomId to stateId], problem.message ?: "Invalid room-object source")
-    }
+    } }
 
     fun managedPlacement(roomId: Int, stateId: String, entry: RomParser.PlmEntry): AsmPlmPlacementTarget {
         val view = managedView(roomId, stateId)
@@ -94,10 +145,10 @@ internal class AsmPlmSourceBridge(
     /** Membership, not implicit linking: equal rows in independent lists remain independently editable. */
     fun managedIsInAllStates(roomId: Int, stateId: String, entry: RomParser.PlmEntry): Boolean = runCatching {
         val room = project().rooms.getValue(project().roomKey(roomId))
-        val source = managedSource()
-        val table = source.table(roomId, stateId)
-        if (table.objects.count { it.record.entry == entry } != 1) return@runCatching false
-        room.states.all { source.table(roomId, it.id).document.entries.count { it == entry } == 1 }
+        if (managedView(roomId, stateId).let { it.problem != null || it.document?.entries?.count { row -> row == entry } != 1 }) return@runCatching false
+        room.states.all { managedView(roomId, it.id).let { view ->
+            view.problem == null && view.document?.entries?.count { row -> row == entry } == 1
+        } }
     }.getOrDefault(false)
 
     private fun externalObjectReferences(): Set<String> = workspace.projectSourceTextsExcept(PLM_SOURCE_FILE)
@@ -188,9 +239,10 @@ internal class AsmPlmSourceBridge(
         val current = project()
         if (!current.asmWorkspace.enabled || current.asmWorkspace.buildMode != ProjectRomBuildMode.ASM_SOURCE)
             return AsmPlmAuthorityView(AsmPlmAuthority.UNAVAILABLE, explanation = "Room objects use the loaded-ROM workflow.")
-        val revision = sourceRevision?.takeIf { it.first == workspace.sourceBufferRevision }?.second ?: catalog.SourceRevision(
-            workspace.projectSourceText(PLM_SOURCE_FILE), workspace.projectSourceText("macros.asm"),
-        ).also { sourceRevision = workspace.sourceBufferRevision to it }
+        val source = sourceText()
+        val macros = workspace.projectSourceText("macros.asm")
+        val revision = sourceRevision?.takeIf { it.first == source && it.second == macros }?.third ?: catalog.SourceRevision(source, macros)
+            .also { sourceRevision = Triple(source, macros, it) }
         return revision.authority(current, pointer)
     }
 

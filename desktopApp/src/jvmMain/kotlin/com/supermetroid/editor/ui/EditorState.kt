@@ -585,6 +585,9 @@ class EditorState(
     private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, Pair<String, String>>()
     internal var plmSourceMigrationProblem: String? = null
         private set
+    internal var objectPreviewLoading by mutableStateOf(false)
+    internal var objectPreviewProblem by mutableStateOf<String?>(null)
+        private set
 
     internal fun hasManagedPlms(): Boolean = (project.rooms[project.roomKey(currentRoomId)]?.asmPlmSourceVersion ?: 0) != 0
     internal fun currentPlmStateId(): String? = selectedStateEdits(project.rooms[project.roomKey(currentRoomId)])?.id
@@ -657,9 +660,18 @@ class EditorState(
 
     internal fun refreshLinkedPlms() {
         if (hasManagedPlms()) {
-            val stateId = currentPlmStateId() ?: return
-            val view = asmPlmSourceBridge?.managedView(currentRoomId, stateId) ?: return
-            val entries = view.document?.entries ?: return
+            val stateId = currentPlmStateId()
+            val view = stateId?.let { asmPlmSourceBridge?.managedView(currentRoomId, it) }
+            if (view == null) {
+                objectPreviewProblem = if (stateId == null) "Missing source-owned room state" else null
+                if (_workingPlms.isNotEmpty()) {
+                    _workingPlms.clear()
+                    _editVersionState.value++
+                }
+                return
+            }
+            objectPreviewProblem = view.problem
+            val entries = view.document?.entries.orEmpty()
             if (_workingPlms != entries) {
                 _workingPlms.clear()
                 _workingPlms.addAll(entries)
@@ -667,6 +679,7 @@ class EditorState(
             }
             return
         }
+        objectPreviewProblem = null
         val pointer = currentPlmSourcePointer() ?: return
         val bridge = asmPlmSourceBridge ?: return
         val entries = bridge.view(pointer).document?.entries ?: return
@@ -3553,6 +3566,8 @@ class EditorState(
 
     private fun resetForLoadedProject(seedPatches: Boolean) {
         asmPlmSourceBridge = null
+        objectPreviewLoading = false
+        objectPreviewProblem = null
         dirty = false
         patchesSeeded = false
         if (seedPatches) {
@@ -3782,7 +3797,8 @@ class EditorState(
         // through the state selector instead of being merged into one view.
         _workingPlms.clear()
         val plms = romParser.parsePlmSet(room.plmSetPtr)
-        _workingPlms.addAll(plms)
+        // A source-owned room must not temporarily masquerade as the vanilla ROM's object list.
+        if (!hasManagedPlms()) _workingPlms.addAll(plms)
         originalPlmCount = plms.size
 
         // Parse door entries for this room

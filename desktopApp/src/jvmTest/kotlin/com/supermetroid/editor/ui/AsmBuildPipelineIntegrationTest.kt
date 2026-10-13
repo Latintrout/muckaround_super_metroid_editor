@@ -48,9 +48,10 @@ class AsmBuildPipelineIntegrationTest {
         room.plmChanges += PlmChange("add", 0xEF23, 0x1A, 0x0A, 0x100)
         room.plmChanges += PlmChange("add", 0xEEE7, 0x1C, 0x09, 0x101)
         val workspace = AsmWorkspaceState()
-        workspace.bindProject(fixture.projectFile.path, true)
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
         val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
         bridge.migrateRoom(room.roomId, "Bubble Mountain")
+        bridge.preloadProjections()
         val state = room.states.single().id
         val bomb = RomParser.PlmEntry(0xEEE7, 0x1C, 0x09, 0x101)
         repeat(3) {

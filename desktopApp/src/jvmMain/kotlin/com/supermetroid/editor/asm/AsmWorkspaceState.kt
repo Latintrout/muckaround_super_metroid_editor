@@ -20,6 +20,7 @@ internal enum class AsmBrowserMode { SOURCE, GENERATED_ROOMS, PLM_PLACEMENT, ASS
 internal interface AsmSourceSaveParticipant {
     val sourceFileIds: Set<String>
     fun prepare(fileId: String, text: String): () -> String
+    fun afterSaved(fileId: String, text: String): (() -> Unit)? = null
 }
 
 internal sealed interface AsmWorkspaceLocation {
@@ -103,6 +104,7 @@ internal class AsmWorkspaceState(
     private val projectRepository: AsmProjectWorkspaceRepository = AsmProjectWorkspaceRepository(),
     private val buildArtifactRepository: AsmBuildArtifactRepository = AsmBuildArtifactRepository(projectRepository),
     private val sourceIndexLoader: suspend (String) -> AsmProjectWorkspace? = { projectRepository.load(it) },
+    private val installedReferenceLoader: suspend () -> AsmReferenceWorkspace? = { repository.loadInstalled() },
 ) {
     var workspace by mutableStateOf<AsmReferenceWorkspace?>(null)
         private set
@@ -239,8 +241,13 @@ internal class AsmWorkspaceState(
         get() = forwardStacks.getOrPut(activeSourcePaneId, ::mutableListOf)
     private var pendingSnesAddress: Int? = null
     private var referenceWorkspace: AsmReferenceWorkspace? = null
+    var referenceLoading by mutableStateOf(false)
+        private set
+    private var referenceLoadGeneration = 0L
     private var boundProjectFilePath: String = ""
     private var boundProjectEnabled: Boolean = false
+    private var progressiveProjectLoading = false
+    private var projectBindingGeneration = 0L
     private val sourceBuffers = mutableStateMapOf<String, String>()
     private val savedSourceTexts = mutableMapOf<String, String>()
     private val dirtySourceFileIds = mutableStateMapOf<String, Unit>()
@@ -250,6 +257,8 @@ internal class AsmWorkspaceState(
     var sourceIndexingInProgress by mutableStateOf(false)
         private set
     var sourceIndexingStatus by mutableStateOf("")
+        private set
+    var sourceIndexFailure by mutableStateOf<String?>(null)
         private set
     private var sourceIndexingJob: Job? = null
     private var sourceIndexingGeneration = 0L
@@ -398,21 +407,24 @@ internal class AsmWorkspaceState(
         isProjectModule(fileId) && fileId !in disabledProjectModuleFileIds
 
     suspend fun loadInstalled() {
-        if (busy) return
-        busy = true
-        progress = "Opening ASM reference…"
-        error = null
+        if (referenceLoading) return
+        referenceLoading = true
+        val generation = ++referenceLoadGeneration
         try {
-            referenceWorkspace = withContext(Dispatchers.IO) { repository.loadInstalled() }
-            workspace = referenceWorkspace
-            workspaceKind = AsmWorkspaceKind.REFERENCE
-            if (boundProjectEnabled) loadBoundProjectWorkspace()
-            ensureSelection()
-        } catch (problem: Exception) {
-            error = problem.message ?: "Could not open the ASM reference"
+            val installed = withContext(Dispatchers.IO) { installedReferenceLoader() }
+            if (generation != referenceLoadGeneration) return
+            referenceWorkspace = installed
+            // A late global-reference load may not reset a project already opened by the other effect.
+            if (!boundProjectEnabled) {
+                workspace = referenceWorkspace
+                workspaceKind = AsmWorkspaceKind.REFERENCE
+            } else if (projectWorkspace == null) loadBoundProjectWorkspace()
+            if (!boundProjectEnabled) ensureSelection()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (problem: Exception) {
+            if (generation == referenceLoadGeneration) error = problem.message ?: "Could not open the ASM reference"
         } finally {
-            busy = false
-            progress = null
+            referenceLoading = false
         }
     }
 
@@ -432,12 +444,15 @@ internal class AsmWorkspaceState(
         runReferenceOperation { update -> repository.refreshAssets(romBytes, romName, update) }
     }
 
-    suspend fun bindProject(projectFilePath: String, enabled: Boolean) {
+    suspend fun bindProject(projectFilePath: String, enabled: Boolean, progressive: Boolean = false) {
         val changedProject = boundProjectFilePath != projectFilePath
         boundProjectFilePath = projectFilePath
         boundProjectEnabled = enabled
+        progressiveProjectLoading = progressive
+        projectBindingGeneration++
         if (changedProject) {
             clearEditSessions()
+            projectWorkspace = null
             plmPlacementSnapshot = null
             // A captured placement belongs to one project; it cannot be reinterpreted in another.
             (backStacks.values + forwardStacks.values).forEach { stack ->
@@ -449,6 +464,7 @@ internal class AsmWorkspaceState(
             showRoomBuildWrites = false
         }
         if (!enabled || projectFilePath.isBlank()) {
+            clearEditSessions()
             projectWorkspace = null
             buildReport = null
             roomDataSnapshot = null
@@ -458,26 +474,34 @@ internal class AsmWorkspaceState(
             return
         }
         loadBoundProjectWorkspace()
-        refreshBuildReport()
+        refreshBuildReport(validateSources = !progressive)
     }
 
-    suspend fun refreshBuildReport() {
+    suspend fun refreshBuildReport(validateSources: Boolean = true) {
         val projectFilePath = boundProjectFilePath
-        generatedRoomInput = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
-            withContext(Dispatchers.IO) { buildArtifactRepository.loadGeneratedRooms(projectFilePath) }
+        if (!boundProjectEnabled || projectFilePath.isBlank()) {
+            generatedRoomInput = null
+            roomDataSnapshot = null
+            buildReport = null
+            return
         }
-        roomDataSnapshot = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
-            withContext(Dispatchers.IO) { buildArtifactRepository.loadRoomData(projectFilePath) }
-        }
-        buildReport = if (!boundProjectEnabled || projectFilePath.isBlank()) null else {
-            withContext(Dispatchers.IO) {
-                val sourceRoot = projectWorkspace?.workingDirectory?.let { java.io.File(it, "src") }
-                val validation = sourceRoot?.let {
-                    AsmSourceLinter.lintTree(it, disabledProjectModuleFileIds)
+        val generation = projectBindingGeneration
+        val revision = sourceBufferRevision
+        val previousReport = buildReport
+        val sourceRoot = projectWorkspace?.workingDirectory?.let { java.io.File(it, "src") }
+        val disabled = disabledProjectModuleFileIds
+        val result = withContext(Dispatchers.IO) {
+                val validation = sourceRoot?.takeIf { validateSources }?.let {
+                    AsmSourceLinter.lintTree(it, disabled)
                 }.orEmpty()
-                AsmSourceLinter.report(validation) ?: buildArtifactRepository.load(projectFilePath)
-            }
+                Triple(buildArtifactRepository.loadGeneratedRooms(projectFilePath),
+                    buildArtifactRepository.loadRoomData(projectFilePath),
+                    AsmSourceLinter.report(validation) ?: buildArtifactRepository.load(projectFilePath))
         }
+        if (projectFilePath != boundProjectFilePath || generation != projectBindingGeneration || !boundProjectEnabled) return
+        generatedRoomInput = result.first
+        roomDataSnapshot = result.second
+        if (sourceBufferRevision == revision && buildReport === previousReport) buildReport = result.third
     }
 
     suspend fun enableProjectWorkspace(projectFilePath: String): Boolean {
@@ -840,12 +864,23 @@ internal class AsmWorkspaceState(
     fun projectSourceTextsExcept(fileId: String): Sequence<String> =
         projectSourceReadersExcept(fileId).asSequence().map { it() }
 
-    fun projectSourceReadersExcept(fileId: String): List<() -> String> =
-        projectWorkspace?.referenceWorkspace?.index?.files.orEmpty()
-            .filter { it.id != fileId }.map { source ->
-                val buffered = sourceBuffers[source.id]
-                { buffered ?: source.file.readText() }
-            }
+    fun projectSourceReadersExcept(fileId: String): List<() -> String> {
+        val project = projectWorkspace ?: return emptyList()
+        val originals = java.io.File(project.originalDirectory, "src")
+        val sources = originals.walkTopDown().filter { it.isFile && it.extension.equals("asm", true) }
+            .associate { it.relativeTo(originals).invariantSeparatorsPath to it }.toMutableMap()
+        project.projectModuleFileIds.forEach { id ->
+            sources[id] = java.io.File(project.root, "modules/${id.removePrefix(ASM_PROJECT_MODULE_PREFIX)}")
+        }
+        return sources.filterKeys { it != fileId }.map { (id, original) ->
+            // This cannot depend on the IDE index: it may be partial or still rebuilding.
+            // Unchanged buffers also cannot hide a newer external authored edit.
+            val buffered = sourceBuffers[id]?.takeIf { id in dirtySourceFileIds }
+            val override = java.io.File(project.root, "overrides/src/$id")
+            val reader: () -> String = { buffered ?: (if (override.isFile) override else original).readText() }
+            reader
+        }
+    }
 
     fun previewProjectSourceReplacement(
         query: String,
@@ -959,6 +994,9 @@ internal class AsmWorkspaceState(
             savedSourceTexts[selectedId] = savedText
             if (sourceBuffers[selectedId] == savedText) dirtySourceFileIds.remove(selectedId)
             else dirtySourceFileIds[selectedId] = Unit
+            sourceSaveParticipant?.afterSaved(selectedId, savedText)?.let { publish ->
+                CoroutineScope(currentCoroutineContext()).launch(Dispatchers.IO) { runCatching { publish() } }
+            }
             sourceBufferRevision++
             sourceIndexPendingFiles += selectedId
             scheduleSourceIndexing()
@@ -983,12 +1021,14 @@ internal class AsmWorkspaceState(
     }
 
     /** Saving returns after persistence. Index jobs coalesce and may not replace newer buffers/reports. */
-    private suspend fun scheduleSourceIndexing() {
+    private suspend fun scheduleSourceIndexing(startup: Boolean = false) {
         sourceIndexingJob?.cancel()
         val generation = ++sourceIndexingGeneration
         val projectPath = boundProjectFilePath
         sourceIndexingInProgress = true
         sourceIndexingStatus = "Indexing ASM…"
+        sourceIndexFailure = null
+        if (error?.startsWith("ASM index update failed:") == true) error = null
         sourceIndexingJob = CoroutineScope(currentCoroutineContext()).launch {
             try {
                 delay(75) // A multi-bank save needs one index rebuild, not one per file.
@@ -997,7 +1037,7 @@ internal class AsmWorkspaceState(
                 if (generation != sourceIndexingGeneration || projectPath != boundProjectFilePath) return@launch
                 projectWorkspace = indexed
                 if (workspaceKind == AsmWorkspaceKind.PROJECT) workspace = indexed.referenceWorkspace
-                val files = sourceIndexPendingFiles.toList()
+                val files = if (startup) indexed.referenceWorkspace.index.files.map { it.id } else sourceIndexPendingFiles.toList()
                 val revision = sourceBufferRevision
                 sourceIndexingStatus = "Checking ASM…"
                 val diagnostics = withContext(Dispatchers.Default) {
@@ -1021,7 +1061,8 @@ internal class AsmWorkspaceState(
                 throw cancelled
             } catch (problem: Exception) {
                 if (generation == sourceIndexingGeneration && projectPath == boundProjectFilePath) {
-                    error = "ASM saved; index update failed: ${problem.message}"
+                    sourceIndexFailure = problem.message ?: "Could not update the source index"
+                    error = "ASM index update failed: $sourceIndexFailure"
                 }
             } finally {
                 if (generation == sourceIndexingGeneration) {
@@ -1034,12 +1075,17 @@ internal class AsmWorkspaceState(
 
     suspend fun awaitSourceIndexing() { sourceIndexingJob?.join() }
 
+    suspend fun rebuildSourceIndex() {
+        if (projectWorkspace != null && boundProjectEnabled) scheduleSourceIndexing(startup = true)
+    }
+
     private fun cancelSourceIndexing() {
         sourceIndexingGeneration++
         sourceIndexingJob?.cancel()
         sourceIndexingJob = null
         sourceIndexingInProgress = false
         sourceIndexingStatus = ""
+        sourceIndexFailure = null
         sourceIndexPendingFiles.clear()
         savedSourceDiagnostics.clear()
     }
@@ -1442,6 +1488,7 @@ internal class AsmWorkspaceState(
 
     private suspend fun runReferenceOperation(operation: ((String) -> Unit) -> AsmReferenceWorkspace) {
         if (busy) return
+        referenceLoadGeneration++
         busy = true
         error = null
         try {
@@ -1461,7 +1508,19 @@ internal class AsmWorkspaceState(
 
     private suspend fun loadBoundProjectWorkspace() {
         if (boundProjectFilePath.isBlank()) return
-        val result = withContext(Dispatchers.IO) { projectRepository.load(boundProjectFilePath) }
+        val path = boundProjectFilePath
+        val generation = projectBindingGeneration
+        val progressive = progressiveProjectLoading
+        val result = try {
+            withContext(Dispatchers.IO) {
+                if (progressive) projectRepository.loadRoomWorkspace(path) else projectRepository.load(path)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (problem: Exception) {
+            if (path == boundProjectFilePath && generation == projectBindingGeneration) error = "Cannot open project source: ${problem.message}"
+            return
+        }
+        if (path != boundProjectFilePath || generation != projectBindingGeneration || !boundProjectEnabled) return
         if (result == null) {
             projectWorkspace = null
             if (workspaceKind == AsmWorkspaceKind.PROJECT) showReferenceWorkspace()
@@ -1469,6 +1528,7 @@ internal class AsmWorkspaceState(
         } else {
             projectWorkspace = result
             activateProjectWorkspace(result)
+            if (progressive) scheduleSourceIndexing(startup = true)
         }
     }
 

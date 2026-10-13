@@ -91,6 +91,13 @@ local exceptions. The shared planner
 allocates whole variable-sized resources, and the generated build input invokes
 the authored macros at checked addresses. Actual Asar output must match the plan.
 
+Source-owned object previews load independently of the full ASM IDE index. Verified
+typed snapshots under generated `smedit/asm/projections/` accelerate reopening; they
+are not a second persisted authority and never supply the ROM build's object values.
+Relevant source, definitions, ROM identity, and state membership invalidate them;
+unrelated editor changes do not. Missing/corrupt snapshots rebuild from source,
+and invalid drafts cannot borrow an old cache as a current editable model.
+
 Original fixed-address links still have fixed-size restrictions. Managed lists
 support growth/shrinkage; custom scroll-command authoring, changed resource links,
 added-room projects and mixed source/GUI operations are guarded boundaries. Only

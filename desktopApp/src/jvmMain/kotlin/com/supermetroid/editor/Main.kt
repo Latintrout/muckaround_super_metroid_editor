@@ -640,29 +640,40 @@ fun main() = application {
                 asmWorkspaceState.bindProject(
                     projectFilePath = editorState.projectFilePath,
                     enabled = editorState.project.asmWorkspace.enabled,
+                    progressive = true,
                 )
             }
             LaunchedEffect(editorState.romBuildInProgress, editorState.projectFilePath) {
-                if (!editorState.romBuildInProgress) asmWorkspaceState.refreshBuildReport()
+                if (!editorState.romBuildInProgress) asmWorkspaceState.refreshBuildReport(validateSources = false)
             }
             LaunchedEffect(asmWorkspaceState.projectWorkspace?.root, romParser) {
+                val owner = editorState.project
+                val projectPath = editorState.projectFilePath
+                editorState.objectPreviewLoading = false
                 editorState.asmPlmSourceBridge = null
                 asmWorkspaceState.sourceSaveParticipant = null
                 val projectWorkspace = asmWorkspaceState.projectWorkspace
                 val parser = romParser
                 if (projectWorkspace != null && parser != null) {
+                    editorState.objectPreviewLoading = true
                     val catalog = withContext(kotlinx.coroutines.Dispatchers.Default) {
                         runCatching { AsmPlmSourceCatalog.load(projectWorkspace.originalDirectory, parser) }
                     }
+                    if (editorState.project !== owner || editorState.projectFilePath != projectPath) return@LaunchedEffect
                     catalog.onSuccess {
-                        editorState.asmPlmSourceBridge = AsmPlmSourceBridge(it, asmWorkspaceState) { editorState.project }
+                        val bridge = AsmPlmSourceBridge(it, asmWorkspaceState, registerSaveParticipant = false) { editorState.project }
                             .also { bridge ->
                                 bridge.onMetadataChanged = editorState::notifyPlmSourceLinked
                                 bridge.describePlm = { entry -> editorState.customItemNameForPlm(entry.id)
                                     ?: RomParser.plmDisplayName(entry.id, entry.param) }
                             }
+                        bridge.preloadProjections()
+                        if (editorState.project !== owner || editorState.projectFilePath != projectPath) return@LaunchedEffect
+                        editorState.asmPlmSourceBridge = bridge
+                        asmWorkspaceState.sourceSaveParticipant = bridge
                         editorState.refreshLinkedPlms()
                     }.onFailure { editorState.postStatus("Object/source linking unavailable: ${it.message}") }
+                    editorState.objectPreviewLoading = false
                 }
             }
             LaunchedEffect(
@@ -1591,12 +1602,20 @@ fun main() = application {
 
                                         val brush = es.brush
                                         val asmSourceStatus = asmWorkspaceState.sourceStatusSummary
-                                        if (asmWorkspaceState.sourceIndexingInProgress || es.projectSaveInProgress) {
+                                        if (asmWorkspaceState.sourceIndexFailure != null) {
+                                            Text("Index unavailable · Retry", fontSize = fs.statusBar,
+                                                color = MaterialTheme.colorScheme.error, maxLines = 1,
+                                                modifier = Modifier.clickable { scope.launch { asmWorkspaceState.rebuildSourceIndex() } })
+                                        } else if (es.objectPreviewProblem != null) {
+                                            Text("Object preview out of date", fontSize = fs.statusBar,
+                                                color = MaterialTheme.colorScheme.error, maxLines = 1)
+                                        } else if (asmWorkspaceState.sourceIndexingInProgress || es.projectSaveInProgress || es.objectPreviewLoading) {
                                             Row(verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
                                                 Text(
-                                                    if (asmWorkspaceState.sourceIndexingInProgress) asmWorkspaceState.sourceIndexingStatus
+                                                    if (es.objectPreviewLoading) "Loading room objects…"
+                                                        else if (asmWorkspaceState.sourceIndexingInProgress) asmWorkspaceState.sourceIndexingStatus
                                                         else "Saving project…",
                                                     fontSize = fs.statusBar,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

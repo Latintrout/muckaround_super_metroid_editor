@@ -82,6 +82,57 @@ class AsmPlmSourceBridgeTest {
         assertTrue(restored.catalog.sourceBindings(restoredProject, reopened.projectSourceText(PLM_SOURCE_FILE), macros).isEmpty())
     }
 
+    @Test fun `cached projections stay live in both directions and unrelated source edits reuse the room model`() = runBlocking {
+        val (workspace, bridge, project) = fixture()
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        bridge.preloadProjections()
+        val initial = assertNotNull(bridge.managedView(0x91F8, "state-1").document)
+        workspace.updateSourceEditText("main.asm", workspace.projectSourceText("main.asm") + "; unrelated edit\n")
+        assertSame(initial, bridge.managedView(0x91F8, "state-1").document)
+        bridge.editManaged(0x91F8, "state-1", true, { false }, RomParser.PlmEntry(0xEF0B, 8, 9, 12))
+        val gui = assertNotNull(bridge.managedView(0x91F8, "state-1").document)
+        assertEquals(2, gui.entries.size)
+        val changed = gui.entries.last().copy(id = 0xEEE7)
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, gui.replace(1, changed))
+        assertEquals(changed, bridge.managedView(0x91F8, "state-1").document!!.entries.last())
+        assertTrue(workspace.saveAllSources())
+        val reopened = AsmWorkspaceState(projectRepository = AsmProjectWorkspaceRepository(emptyList(), emptyList()))
+        reopened.bindProject(File(directory, "Test.smedit").path, true, progressive = true)
+        val restored = AsmPlmSourceBridge(bridge.catalog, reopened) { project }
+        restored.preloadProjections()
+        val saved = assertNotNull(restored.managedView(0x91F8, "state-1").document)
+        assertEquals(changed, saved.entries.last())
+        reopened.updateSourceEditText(PLM_SOURCE_FILE, saved.text.replace("    dw", "    invalid draft\n    dw"))
+        val invalid = restored.managedView(0x91F8, "state-1")
+        assertNotNull(invalid.problem)
+        assertSame(saved, invalid.document)
+        assertIs<AsmPlmPlacementTarget.Unavailable>(restored.managedPlacement(0x91F8, "state-1", changed))
+        reopened.awaitSourceIndexing()
+    }
+
+    @Test fun `partial indexes and stale clean buffers do not hide external helper consumers`() = runBlocking {
+        val (workspace, bridge, project) = fixture()
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val entry = assertNotNull(bridge.managedView(0x91F8, "state-1").document).entries.single()
+        val helper = "SmeditObjects_91F8_Common_9"
+        val legacy = bridge.sourceText().replace(AsmRoomObjectSource.renderEntry(entry), "%$helper()") +
+            "\nmacro $helper()\n    ${AsmRoomObjectSource.renderEntry(entry)}\nendmacro\n"
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, legacy)
+        // Seed a clean buffer, then modify its authored file externally without updating the mirror.
+        workspace.projectSourceText("main.asm")
+        val root = assertNotNull(workspace.projectWorkspace).root
+        File(root, "overrides/src/main.asm").apply { parentFile.mkdirs(); writeText("; external caller mentions $helper\n") }
+        bridge.editManaged(0x91F8, "state-1", true, { it == entry }, null)
+        assertTrue(AsmRoomObjectSource(bridge.sourceText()).contains(helper))
+        assertTrue(workspace.saveAllSources())
+        val partial = AsmWorkspaceState(projectRepository = AsmProjectWorkspaceRepository(emptyList(), emptyList()))
+        partial.bindProject(File(directory, "Test.smedit").path, true, progressive = true)
+        val next = AsmPlmSourceBridge(bridge.catalog, partial) { project }
+        next.editManaged(0x91F8, "state-1", true, { false }, null)
+        assertTrue(AsmRoomObjectSource(next.sourceText()).contains(helper))
+        partial.awaitSourceIndexing()
+    }
+
     @Test fun `source-only room edits keep invalid draft visible and never resume independent GUI deltas`() = runBlocking {
         val (workspace, bridge, project) = fixture()
         bridge.migrateRoom(0x91F8, "Landing Site")

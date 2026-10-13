@@ -9,6 +9,7 @@ import java.nio.file.StandardOpenOption
 import java.time.Instant
 import java.util.Properties
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 internal enum class AsmWorkspaceKind { REFERENCE, PROJECT }
 
@@ -45,6 +46,7 @@ internal data class AsmProjectWorkspace(
     val modifiedFileIds: Set<String>,
     val projectModuleFileIds: List<String>,
     val disabledProjectModuleFileIds: Set<String>,
+    val indexComplete: Boolean = true,
 )
 
 /** Minimal workspace view for compilation. It avoids rebuilding the browser's
@@ -67,11 +69,12 @@ internal class AsmProjectWorkspaceRepository(
     private val assetRanges: List<AsmAssetRange> = AsmAssetManifest.loadBundled(),
     private val starterModules: List<AsmStarterModule> = DEFAULT_ASM_STARTER_MODULES,
 ) {
-    fun load(projectFilePath: String): AsmProjectWorkspace? {
+    fun load(projectFilePath: String, fileIds: Set<String>? = null): AsmProjectWorkspace? {
         synchronizeProjectModules(projectFilePath)
+        synchronizeSourceMirrors(projectFilePath, fileIds)
         val buildWorkspace = loadForBuild(projectFilePath) ?: return null
         val metadata = readMetadata(File(cacheRoot(buildWorkspace.root), METADATA_FILE)) ?: return null
-        val workspace = referenceWorkspace(buildWorkspace.workingDirectory, metadata.reference)
+        val workspace = referenceWorkspace(buildWorkspace.workingDirectory, metadata.reference, fileIds)
         val projectModuleFileIds = readProjectModuleOrder(buildWorkspace.workingDirectory)
         val disabledProjectModuleFileIds = buildWorkspace.disabledProjectModuleFileIds
         return AsmProjectWorkspace(
@@ -85,8 +88,13 @@ internal class AsmProjectWorkspaceRepository(
             ).filterNotTo(linkedSetOf(), disabledProjectModuleFileIds::contains),
             projectModuleFileIds = projectModuleFileIds,
             disabledProjectModuleFileIds = disabledProjectModuleFileIds,
+            indexComplete = fileIds == null,
         )
     }
+
+    /** Enough source for room rendering/editing; the rest of the IDE index can follow independently. */
+    fun loadRoomWorkspace(projectFilePath: String): AsmProjectWorkspace? =
+        load(projectFilePath, setOf("main.asm", "macros.asm", PLM_SOURCE_FILE))
 
     fun loadForBuild(projectFilePath: String): AsmProjectBuildWorkspace? {
         val root = projectRoot(projectFilePath) ?: return null
@@ -207,7 +215,7 @@ internal class AsmProjectWorkspaceRepository(
     }
 
     /** Durable save only. Browser indexing/validation is scheduled separately by the UI. */
-    fun persistSource(projectFilePath: String, fileId: String, text: String, expectedText: String? = null): AsmSavedSource {
+    fun persistSource(projectFilePath: String, fileId: String, text: String, expectedText: String? = null): AsmSavedSource = withSourceLock(projectFilePath) {
         val current = requireNotNull(loadForBuild(projectFilePath)) { "Project ASM workspace is unavailable" }
         val sourceRoot = File(current.workingDirectory, "src")
         val target = resolveManagedSource(sourceRoot, fileId)
@@ -223,7 +231,7 @@ internal class AsmProjectWorkspaceRepository(
             }
             writeTextAtomically(module, text)
             writeTextAtomically(target, text)
-            return AsmSavedSource(modified = true)
+            return@withSourceLock AsmSavedSource(modified = true)
         }
         val original = resolveManagedSource(File(current.originalDirectory, "src"), fileId)
         val override = resolveManagedSource(File(current.root, "$OVERRIDES_DIRECTORY/src"), fileId)
@@ -238,7 +246,7 @@ internal class AsmProjectWorkspaceRepository(
         } else {
             writeTextAtomically(override, text)
         }
-        return AsmSavedSource(modified)
+        AsmSavedSource(modified)
     }
 
     fun restoreSource(projectFilePath: String, fileId: String): AsmProjectWorkspace {
@@ -429,19 +437,44 @@ internal class AsmProjectWorkspaceRepository(
         }
     }
 
-    private fun referenceWorkspace(root: File, metadata: AsmReferenceMetadata): AsmReferenceWorkspace {
-        val index = AsmSourceParser().parse(File(root, "src"), File(root, "data"), assetRanges)
+    private fun referenceWorkspace(root: File, metadata: AsmReferenceMetadata, fileIds: Set<String>? = null): AsmReferenceWorkspace {
+        val index = AsmSourceParser().parse(File(root, "src"), File(root, "data"), assetRanges, fileIds)
         return AsmReferenceWorkspace(root, metadata, index)
     }
 
-    private fun synchronizeProjectModules(projectFilePath: String) {
-        val root = projectRoot(projectFilePath) ?: return
+    private fun synchronizeProjectModules(projectFilePath: String) = withSourceLock(projectFilePath) {
+        val root = projectRoot(projectFilePath) ?: return@withSourceLock
         val workingSourceRoot = File(cacheRoot(root), "$WORKING_DIRECTORY/src")
-        if (!workingSourceRoot.isDirectory) return
+        if (!workingSourceRoot.isDirectory) return@withSourceLock
         val modulesDirectory = File(root, MODULES_DIRECTORY)
         // The cache is never an alternate authority. In particular, deleting an
         // authored module must not resurrect it from an old generated mirror.
         syncProjectModules(modulesDirectory, workingSourceRoot)
+    }
+
+    /** Authored overrides/original snapshot are authority; generated mirrors are recoverable caches. */
+    private fun synchronizeSourceMirrors(projectFilePath: String, fileIds: Set<String>?) = withSourceLock(projectFilePath) {
+        val root = projectRoot(projectFilePath) ?: return@withSourceLock
+        val cache = cacheRoot(root)
+        val original = File(cache, "$ORIGINAL_DIRECTORY/src")
+        val working = File(cache, "$WORKING_DIRECTORY/src")
+        if (!original.isDirectory || !working.isDirectory) return@withSourceLock
+        original.walkTopDown().filter { it.isFile && it.extension.equals("asm", true) }.forEach { source ->
+            val id = source.relativeTo(original).invariantSeparatorsPath
+            if (fileIds != null && id !in fileIds) return@forEach
+            val target = resolveManagedSource(working, id)
+            val override = resolveManagedSource(File(root, "$OVERRIDES_DIRECTORY/src"), id)
+            val authoritative = if (override.isFile) override else source
+            val expected = authoritative.readBytes()
+            val previous = target.takeIf(File::isFile)?.readBytes()
+            if (previous != null && previous.contentEquals(expected)) return@forEach
+            if (previous != null) {
+                val recoveryRoot = File(cache, "recovery")
+                val recovery = resolveManagedSource(recoveryRoot, "$id.${AsmVerifiedCache.hash(previous)}.asm")
+                if (!recovery.exists()) writeBytesAtomically(recovery, previous)
+            }
+            writeBytesAtomically(target, expected)
+        }
     }
 
     private fun ensureProjectModuleDirectory(modulesDirectory: File) {
@@ -634,6 +667,11 @@ internal class AsmProjectWorkspaceRepository(
 
     private fun cacheRoot(asmRoot: File): File = ProjectPaths.asmCacheIn(asmRoot.parentFile)
 
+    private inline fun <T> withSourceLock(projectFilePath: String, action: () -> T): T {
+        val key = projectRoot(projectFilePath)?.canonicalPath ?: projectFilePath
+        return synchronized(SOURCE_LOCKS.computeIfAbsent(key) { Any() }) { action() }
+    }
+
     private fun modifiedSourceFiles(original: File, working: File): Set<String> {
         val originalRoot = File(original, "src")
         val workingRoot = File(working, "src")
@@ -810,6 +848,7 @@ internal class AsmProjectWorkspaceRepository(
     )
 
     private companion object {
+        val SOURCE_LOCKS = ConcurrentHashMap<String, Any>()
         const val LAYOUT_VERSION = 1
         const val METADATA_FILE = ".smedit-project-asm.properties"
         const val ORIGINAL_DIRECTORY = "original"

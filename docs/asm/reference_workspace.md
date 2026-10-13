@@ -916,6 +916,45 @@ with common/per-state item edits and an independently source-edited Wasteland,
 then verifies that overlapping source/GUI edits fail without dropping either.
 Tests never edit the user's Sandbox or other live project.
 
+### Fast room projections and startup
+
+The desktop opens a small room-source workspace (`main.asm`, `macros.asm`, and
+`bank_8F.asm`) before the full IDE index. Room objects can render and be edited
+while the remaining banks, references, and diagnostics initialize in the background.
+The bottom status bar reports **Loading room objects…**, **Indexing ASM…**, and
+**Checking ASM…** without adding another toolbar. A failed index retains the usable
+room workspace and offers **Index unavailable · Retry** in that same bar. A late
+global-reference load never locks project editing or replaces the project view.
+
+`smedit/asm/projections/` contains disposable decoded views and immutable baseline
+symbol lookups. Room snapshots include source/dependency SHA-256 keys, a codec version,
+payload checksums, ROM identity, and stable room/state identities. Symbol lookups
+are keyed to the complete immutable source snapshot. Cached scalar
+tokens are checked against the current source. Missing, truncated, incompatible,
+or checksum-invalid snapshots are rebuilt; cache write failures do not prevent
+valid previews. Only a few generations per cache family are retained. No preview
+cache is an editable authority or a ROM-build input. Builds retain their independent
+source decoding, allocation, Asar output, and final-ROM parity checks.
+
+The live object model is keyed to its relevant source, macro definitions, and state
+membership rather than the global editor/index revision. Editing another bank or
+changing unrelated room content therefore does not reparse the PLM view. ASM edits
+invalidate the affected model; GUI edits still change those same source values.
+Invalid drafts retain the session's last valid preview, mark it **out of date**, and
+block visual mutations. With no valid source preview, the canvas does not silently
+substitute vanilla ROM items.
+
+Before source is indexed, generated bank mirrors are reconciled with their authored
+overrides or immutable original snapshot. Differing old mirror contents are preserved
+under `smedit/asm/recovery/`; authored files are never overwritten by this recovery.
+Per-project synchronization serializes short mirror/save transactions, not the full
+index rebuild. External helper consumers are read from authored sources and unsaved
+buffers, including disabled modules, even while the IDE index is incomplete.
+
+Future resource codecs can reuse `AsmVerifiedCache` with their own format version
+and complete dependency keys. Their cached models must remain disposable, must be
+validated, and must not bypass the resource's normal source/build ownership checks.
+
 ### Relocatable room-object source
 
 `AsmRoomObjectSource` is the next, bounded step beyond fixed original lists. On

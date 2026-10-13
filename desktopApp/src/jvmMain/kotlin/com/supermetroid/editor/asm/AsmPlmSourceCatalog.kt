@@ -4,6 +4,7 @@ import com.supermetroid.editor.data.ProjectPlmSourceBinding
 import com.supermetroid.editor.data.ProjectRomBuildMode
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.rom.RomParser
+import kotlinx.serialization.Serializable
 import com.supermetroid.editor.rom.baseSourceStateIndex
 import java.io.File
 
@@ -18,7 +19,11 @@ internal class AsmPlmSourceCatalog(
     val symbols: Map<String, Int>,
     val parser: RomParser,
     val consumers: Map<Int, List<AsmPlmConsumer>>,
+    val sourceFingerprint: String = AsmVerifiedCache.fingerprint(mapOf(
+        "source" to originalText, "macros" to originalMacros, "symbols" to symbols.toSortedMap().toString(),
+    )),
 ) {
+    val romFingerprint = AsmVerifiedCache.hash(parser.getRomData())
     private val bindings = mutableMapOf<Int, ProjectPlmSourceBinding>()
     private val originalSource = AsmPlmDocument.Companion.Source(originalText)
     private val originalDocuments = mutableMapOf<Int, AsmPlmDocument>()
@@ -172,14 +177,24 @@ internal class AsmPlmSourceCatalog(
     }
 
     companion object {
+        @Serializable private data class SymbolSnapshot(val symbols: Map<String, Int>)
+
         fun load(originalDirectory: File, parser: RomParser): AsmPlmSourceCatalog {
             val src = File(originalDirectory, "src")
-            val index = AsmSourceParser().parse(src, File(originalDirectory, "data"), emptyList())
-            val symbols = index.labels.mapNotNull { label ->
-                index.addressAtlas.exactAt(label.fileId, label.lineIndex).firstOrNull()?.let {
-                    label.name to (it.snesAddress and 0xFFFF)
-                }
-            }.toMap()
+            val texts = src.walkTopDown().filter { it.isFile && it.extension.equals("asm", true) }
+                .associate { it.relativeTo(src).invariantSeparatorsPath to it.readText() }
+            val fingerprint = AsmVerifiedCache.fingerprint(texts)
+            val cache = AsmVerifiedCache(File(originalDirectory.parentFile, "projections"))
+            val symbols = cache.loadOrBuild("plm-symbols", "symbols-v1:$fingerprint", SymbolSnapshot.serializer(),
+                validate = { snapshot -> require(snapshot.symbols.all { it.key.isNotBlank() && it.value in 0..0xFFFF }) },
+            ) {
+                val index = AsmSourceParser().parse(src, File(originalDirectory, "data"), emptyList(), texts.keys, texts)
+                SymbolSnapshot(index.labels.mapNotNull { label ->
+                    index.addressAtlas.exactAt(label.fileId, label.lineIndex).firstOrNull()?.let {
+                        label.name to (it.snesAddress and 0xFFFF)
+                    }
+                }.toMap())
+            }.symbols
             val consumers = linkedMapOf<Int, MutableList<AsmPlmConsumer>>()
             for (room in parser.roomCatalog.rooms) {
                 val roomId = room.getRoomIdAsInt()
@@ -188,7 +203,7 @@ internal class AsmPlmSourceCatalog(
                     consumers.getOrPut(pointer, ::mutableListOf) += AsmPlmConsumer(roomId, room.name, stateIndex, pc)
                 }
             }
-            return AsmPlmSourceCatalog(File(src, PLM_SOURCE_FILE).readText(), File(src, "macros.asm").readText(), symbols, parser, consumers)
+            return AsmPlmSourceCatalog(texts.getValue(PLM_SOURCE_FILE), texts.getValue("macros.asm"), symbols, parser, consumers, fingerprint)
         }
 
         private fun plmMacro(text: String): String = Regex("(?ms)^macro PLMPopEntry\\([^\\n]*\\).*?^endmacro\\b")

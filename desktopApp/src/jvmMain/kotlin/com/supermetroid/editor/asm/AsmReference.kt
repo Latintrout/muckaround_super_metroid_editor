@@ -464,11 +464,13 @@ internal class AsmSourceParser {
     private val structRegex = Regex("""^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)\b""", RegexOption.IGNORE_CASE)
     private val endStructRegex = Regex("""^\s*endstruct\b""", RegexOption.IGNORE_CASE)
 
-    fun parse(sourceDirectory: File, dataDirectory: File, ranges: List<AsmAssetRange>): AsmReferenceIndex {
+    fun parse(sourceDirectory: File, dataDirectory: File, ranges: List<AsmAssetRange>,
+              fileIds: Set<String>? = null, sourceTexts: Map<String, String>? = null): AsmReferenceIndex {
         require(sourceDirectory.isDirectory) { "ASM source directory is missing: $sourceDirectory" }
         val mainFile = File(sourceDirectory, "main.asm")
         require(mainFile.isFile) { "ASM entry point is missing: $mainFile" }
-        val mainLines = mainFile.readLines()
+        fun lines(fileId: String, file: File) = sourceTexts?.get(fileId)?.reader()?.readLines() ?: file.readLines()
+        val mainLines = lines("main.asm", mainFile)
         val descriptions = linkedMapOf<String, String>()
         val orderedNames = mutableListOf<String>()
         mainLines.forEach { line ->
@@ -481,6 +483,7 @@ internal class AsmSourceParser {
 
         val allAsm = sourceDirectory.walkTopDown()
             .filter { it.isFile && it.extension.equals("asm", ignoreCase = true) }
+            .filter { fileIds == null || it.relativeTo(sourceDirectory).invariantSeparatorsPath.let { id -> id in fileIds || id == "main.asm" } }
             .toList()
         val relativeNames = allAsm.associateBy { it.relativeTo(sourceDirectory).invariantSeparatorsPath }
         val sourceNames = buildList {
@@ -496,7 +499,7 @@ internal class AsmSourceParser {
         val macros = mutableListOf<AsmMacro>()
         val files = sourceNames.mapNotNull { relativeName ->
             val source = relativeNames[relativeName] ?: return@mapNotNull null
-            val lines = source.readLines()
+            val lines = lines(relativeName, source)
             val sections = mutableListOf<AsmSection>()
             val scopePaths = MutableList<List<String>>(lines.size) { emptyList() }
             val scopePath = mutableListOf<String>()
