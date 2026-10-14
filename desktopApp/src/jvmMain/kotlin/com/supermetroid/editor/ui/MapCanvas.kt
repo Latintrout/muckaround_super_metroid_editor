@@ -863,14 +863,14 @@ fun MapCanvas(
                                                         val edited = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(rh, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                                                         if (edited != null) buildCompositeImage(edited, activeOvs, showGrid, scrollDataForSave, rWidthScreens, rHeightScreens,
                                                             customItems = customItems, showItemNames = showItemNames, showMetaNames = showMetaNames,
-                                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces)
+                                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces, roomId = room?.getRoomIdAsInt())
                                                         else buildCompositeImage(rd, activeOvs, showGrid, scrollDataForSave, rWidthScreens, rHeightScreens,
                                                             customItems = customItems, showItemNames = showItemNames, showMetaNames = showMetaNames,
-                                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces)
+                                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces, roomId = room?.getRoomIdAsInt())
                                                     } else {
                                                         buildCompositeImage(rd, activeOvs, showGrid, scrollDataForSave, rWidthScreens, rHeightScreens,
                                                             customItems = customItems, showItemNames = showItemNames, showMetaNames = showMetaNames,
-                                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces)
+                                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces, roomId = room?.getRoomIdAsInt())
                                                     }
                                                     ImageIO.write(img, "PNG", file)
                                                 }
@@ -1026,7 +1026,7 @@ fun MapCanvas(
                             val compositeImage = remember(data, activeOverlays.toSet(), showGrid, scrollDataForOverlay?.contentHashCode(), layer2Data?.contentHashCode(), customItems, showItemNames, showMetaNames, highlightItems, showEnemyNames, showFlatSlopeSurfaces) {
                                 buildCompositeImage(data, activeOverlays, showGrid, scrollDataForOverlay, rWidthScreens, rHeightScreens,
                                     layer2Pixels = layer2Data, customItems = customItems, showItemNames = showItemNames, showMetaNames = showMetaNames,
-                                    highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces)
+                                    highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces, roomId = room?.getRoomIdAsInt())
                             }
 
                             val hScrollState = rememberScrollState()
@@ -1150,7 +1150,7 @@ fun MapCanvas(
                                         val r = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(rh, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                                         if (r != null) return@remember buildCompositeImage(r, activeOverlays, showGrid, scrollDataForOverlay, rWidthScreens, rHeightScreens,
                                             layer2Pixels = layer2Data, customItems = customItems, showItemNames = showItemNames, showMetaNames = showMetaNames,
-                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces)
+                                            highlightItems = highlightItems, showEnemyNames = showEnemyNames, showFlatSlopeSurfaces = showFlatSlopeSurfaces, roomId = room?.getRoomIdAsInt())
                                     }
                                 }
                                 compositeImage

@@ -10,7 +10,7 @@ import java.awt.image.BufferedImage
  * Test that we can read Phantoon's body from ROM by:
  * 1. Loading the room tileset (variable tiles contain the body graphics)
  * 2. Parsing the BG2 tilemap at $A7:E0AA
- * 3. Rendering the assembled body and comparing to E4BF.png
+ * 3. Comparing independent tilemap assembly to the production renderer, without image fixtures
  */
 class PhantoonAssemblyTest {
 
@@ -109,7 +109,7 @@ class PhantoonAssemblyTest {
     }
 
     @Test
-    fun `render assembled Phantoon body from tileset and compare to PNG`() {
+    fun `independent ROM tilemap assembly matches the native Phantoon body`() {
         val parser = loadTestRom() ?: return
         val rom = parser.getRomData()
         val tileGfx = TileGraphics(parser)
@@ -206,43 +206,13 @@ class PhantoonAssemblyTest {
         ImageIO.write(img, "png", File(outDir, "phantoon_body_assembled.png"))
         println("Saved assembled image to build/test-output/phantoon_body_assembled.png")
 
-        // Load E4BF.png and compare
-        val pngFile = File("../desktopApp/src/jvmMain/resources/enemies/E4BF.png")
-        if (pngFile.exists()) {
-            val refImg = ImageIO.read(pngFile)
-            println("Reference PNG: ${refImg.width}x${refImg.height}")
-
-            // Compare colors: for each non-transparent pixel in the reference,
-            // find the closest pixel in the assembled image (allowing small positional shift)
-            val refPixels = IntArray(refImg.width * refImg.height)
-            refImg.getRGB(0, 0, refImg.width, refImg.height, refPixels, 0, refImg.width)
-
-            // E4BF.png is 70px wide; assembled is 80px wide with a 5-pixel X offset
-            val xOff = PhantoonSpritemap.BODY_PNG_X_OFFSET
-            var matchCount = 0
-            var totalCompared = 0
-            for (y in 0 until minOf(refImg.height, imgH)) {
-                for (x in 0 until refImg.width) {
-                    val ax = x + xOff
-                    if (ax >= imgW) continue
-                    val refArgb = refPixels[y * refImg.width + x]
-                    val asmArgb = assembled[y * imgW + ax]
-                    val refA = (refArgb ushr 24) and 0xFF
-                    val asmA = (asmArgb ushr 24) and 0xFF
-                    if (refA < 128 && asmA < 128) continue
-                    totalCompared++
-
-                    val dr = Math.abs(((refArgb shr 16) and 0xFF) - ((asmArgb shr 16) and 0xFF))
-                    val dg = Math.abs(((refArgb shr 8) and 0xFF) - ((asmArgb shr 8) and 0xFF))
-                    val db = Math.abs((refArgb and 0xFF) - (asmArgb and 0xFF))
-                    if (dr <= 10 && dg <= 10 && db <= 10) matchCount++
-                }
-            }
-
-            val matchPct = if (totalCompared > 0) matchCount * 100.0 / totalCompared else 0.0
-            println("Color match: $matchCount/$totalCompared (${String.format("%.1f", matchPct)}%)")
-            assertTrue(matchPct > 99.0, "Assembled image should match reference PNG by >99% (with offset=$xOff)")
-        }
+        // Independent tilemap assembly must agree pixel-for-pixel with the production renderer.
+        val renderer = PhantoonSpritemap(parser)
+        assertTrue(renderer.load())
+        val native = requireNotNull(renderer.renderComponent(PhantoonSpritemap.BODY_TILEMAPS.single()))
+        assertEquals(imgW, native.width)
+        assertEquals(imgH, native.height)
+        assertArrayEquals(assembled, native.pixels)
     }
 
     data class TilemapEntry(

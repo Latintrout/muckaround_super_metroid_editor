@@ -1,7 +1,6 @@
 package com.supermetroid.editor.rom
 
 import org.junit.jupiter.api.Test
-import java.io.File
 
 /**
  * Test which enemies can be auto-rendered using the OAM spritemap system.
@@ -17,21 +16,16 @@ class AllEnemyRenderTest {
         val rom = rp.getRomData()
         val smap = EnemySpritemap(rp)
 
-        // Get all enemy IDs from the reference PNGs directory
-        val pngDir = File("../desktopApp/src/jvmMain/resources/enemies")
-        val pngIds = if (pngDir.exists()) {
-            pngDir.listFiles()?.filter { it.extension == "png" && it.nameWithoutExtension != "unknown" }
-                ?.mapNotNull { it.nameWithoutExtension.toIntOrNull(16) }
-                ?.sorted() ?: emptyList()
-        } else emptyList()
+        // The diagnostic follows the ROM catalogs; image files are not a species registry.
+        val speciesIds = (RomParser.ENEMY_CATALOG.map { it.first } + EnemySpriteGraphics.EDITOR_ENEMIES.map { it.speciesId }).distinct().sorted()
 
-        println("Found ${pngIds.size} enemy PNGs")
+        println("Found ${speciesIds.size} catalog species")
         println()
 
         val renderable = mutableListOf<Int>()
         val failed = mutableListOf<Pair<Int, String>>()
 
-        for (speciesId in pngIds) {
+        for (speciesId in speciesIds) {
             val name = RomParser.enemyName(speciesId)
             val headerPc = rp.snesToPc(0xA00000 or speciesId)
             if (headerPc < 0 || headerPc + 0x3A > rom.size) {

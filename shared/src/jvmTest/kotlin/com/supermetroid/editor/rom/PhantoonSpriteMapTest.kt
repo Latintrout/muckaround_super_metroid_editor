@@ -26,67 +26,27 @@ class PhantoonSpriteMapTest {
     }
 
     @Test
-    fun `E4BF PNG has expected dimensions and non-trivial content`() {
-        val pngFile = File("../desktopApp/src/jvmMain/resources/enemies/E4BF.png")
-        if (!pngFile.exists()) {
-            println("E4BF.png not found, skipping")
-            return
-        }
-        val img = javax.imageio.ImageIO.read(pngFile)
-        assertEquals(70, img.width, "E4BF.png width")
-        assertEquals(96, img.height, "E4BF.png height")
-
-        val pixels = IntArray(img.width * img.height)
-        img.getRGB(0, 0, img.width, img.height, pixels, 0, img.width)
-        val nonTransparent = pixels.count { ((it ushr 24) and 0xFF) > 128 }
-        assertTrue(nonTransparent > 1000, "E4BF.png should have substantial visible content, found $nonTransparent pixels")
+    fun `native body has source dimensions and substantial visible content`() {
+        val renderer = PhantoonSpritemap(TestRomHelper.requireRomParser())
+        assertTrue(renderer.load())
+        val body = requireNotNull(renderer.renderComponent(PhantoonSpritemap.BODY_TILEMAPS.single()))
+        assertEquals(80, body.width)
+        assertEquals(96, body.height)
+        assertTrue(body.pixels.count { it ushr 24 != 0 } > 1000)
     }
 
     @Test
-    fun `palette extracted from E4BF PNG has 11-12 unique non-transparent colors`() {
-        val pngFile = File("../desktopApp/src/jvmMain/resources/enemies/E4BF.png")
-        if (!pngFile.exists()) return
-        val img = javax.imageio.ImageIO.read(pngFile)
-        val pixels = IntArray(img.width * img.height)
-        img.getRGB(0, 0, img.width, img.height, pixels, 0, img.width)
-
-        val palette = EnemySpriteGraphics.extractPaletteFromArgb(pixels)
-        val nonZero = palette.count { it != 0 }
-        println("Extracted palette: $nonZero non-transparent colors")
-        for (i in palette.indices) {
-            if (palette[i] != 0) {
-                println("  [$i] ARGB=0x${(palette[i].toLong() and 0xFFFFFFFFL).toString(16).padStart(8, '0')}")
-            }
+    fun `all native Phantoon components use only the exact source palette`() {
+        val renderer = PhantoonSpritemap(TestRomHelper.requireRomParser())
+        assertTrue(renderer.load())
+        val palette = requireNotNull(renderer.getPalette()).toSet()
+        for (definition in PhantoonSpritemap.COMPONENT_TILEMAPS) {
+            val component = requireNotNull(renderer.renderComponent(definition))
+            val opaque = component.pixels.filter { it ushr 24 != 0 }
+            assertTrue(opaque.isNotEmpty(), definition.name)
+            assertTrue(opaque.all { it in palette }, definition.name)
+            assertTrue(opaque.toSet().size <= 15, definition.name)
         }
-        assertTrue(nonZero in 10..15, "Phantoon palette should have 10-15 non-transparent colors, found $nonZero")
-    }
-
-    @Test
-    fun `all 4 Phantoon component PNGs combined produce at most 15 unique opaque colors`() {
-        val speciesIds = listOf("E4BF", "E4FF", "E53F", "E57F")
-        val allColors = mutableSetOf<Int>()
-
-        for (id in speciesIds) {
-            val pngFile = File("../desktopApp/src/jvmMain/resources/enemies/$id.png")
-            if (!pngFile.exists()) { println("$id.png not found"); continue }
-            val img = javax.imageio.ImageIO.read(pngFile)
-            val pixels = IntArray(img.width * img.height)
-            img.getRGB(0, 0, img.width, img.height, pixels, 0, img.width)
-            val unique = pixels.filter { ((it ushr 24) and 0xFF) > 128 }
-                .map { it or (0xFF shl 24) }
-                .toSet()
-            println("$id.png: ${img.width}x${img.height}, ${unique.size} unique opaque colors")
-            for (c in unique.sorted()) {
-                println("  ARGB=0x${(c.toLong() and 0xFFFFFFFFL).toString(16).padStart(8, '0')}")
-            }
-            allColors.addAll(unique)
-        }
-
-        println("\nCombined unique opaque colors: ${allColors.size}")
-        for (c in allColors.sorted()) {
-            println("  ARGB=0x${(c.toLong() and 0xFFFFFFFFL).toString(16).padStart(8, '0')}")
-        }
-        assertTrue(allColors.size <= 15, "SNES palette has at most 15 non-transparent colors, found ${allColors.size}")
     }
 
     @Test

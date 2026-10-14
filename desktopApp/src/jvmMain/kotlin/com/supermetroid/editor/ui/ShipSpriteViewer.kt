@@ -31,6 +31,6 @@ internal fun ShipSpriteViewer(parser: RomParser?, editor: EditorState, modifier:
         Text("Samus' Ship", fontSize = LocalEditorTheme.current.fontSize.value.heading, color = MaterialTheme.colorScheme.onSurface)
         SpriteOptionSelector(animations.map { it.name }, selected, { selected = it }, Modifier.fillMaxWidth())
         NativeSpriteSourceControls(parser, editor, NativeSpriteTarget("ADB600", NativeSpriteAssets.shipPalette(parser), 1), { editing = it })
-        AnimationPlayer(animations.getOrNull(selected), Modifier.weight(1f), previewSize = 440, showExportButtons = false)
+        NativeSpriteAnimationPlayer(animations.getOrNull(selected), Modifier.weight(1f), previewSize = 440)
     }
 }

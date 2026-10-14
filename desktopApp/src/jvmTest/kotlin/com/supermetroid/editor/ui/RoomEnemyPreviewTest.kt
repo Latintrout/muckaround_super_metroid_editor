@@ -73,6 +73,66 @@ class RoomEnemyPreviewTest {
     }
 
     @Test
+    fun `static boss placement adjustments never change population data`() {
+        val preview = AnchoredEnemySprite(BufferedImage(56, 88, BufferedImage.TYPE_INT_ARGB), 28, 64)
+        val enemy = RomParser.EnemyEntry(0xE2BF, 200, 200, 0, 0)
+        assertEquals(200 to 248, roomEnemyDisplayPosition(enemy, 512, 512, preview))
+        assertEquals(200 to 184, roomEnemyDisplayPosition(enemy.copy(id = 0xEEFF), 512, 512, preview))
+        assertEquals(432 to 184, roomEnemyDisplayPosition(enemy.copy(id = 0xEF7F), 512, 512, preview))
+        assertEquals(200, enemy.x); assertEquals(200, enemy.y)
+    }
+
+    @Test
+    fun `empty initial Phantoon and Draygon states still get centered overlay portraits`() {
+        val parser = TestRomHelper.requireRomParser()
+        EnemySpriteCache.setRomParser(parser)
+        try {
+            for ((roomId, species) in listOf(0xCD13 to 0xE4BF, 0xDA60 to 0xDE3F)) {
+                val room = requireNotNull(parser.readRoomHeader(roomId))
+                val original = parser.parseEnemyPopulation(room.enemySetPtr)
+                assertFalse(original.any { it.id == species }, "The initial state is the boss-dead state")
+                val entries = roomEnemyPreviewEntries(original, roomId)
+                val boss = entries.single { it.id == species }
+                val preview = requireNotNull(EnemySpriteCache.getPreview(boss))
+                val data = requireNotNull(MapRenderer(parser).renderRoom(room))
+                val (x, y) = roomEnemyDisplayPosition(boss, data.width, data.height, preview)
+                assertEquals(data.width / 2, x - preview.originX + preview.image.width / 2)
+                assertEquals(data.height / 2, y - preview.originY + preview.image.height / 2)
+                assertEquals(original, data.enemyEntries, "The real room population stays unchanged")
+                assertEquals(entries, roomEnemyPreviewEntries(entries, roomId), "No duplicate portrait")
+                val image = buildCompositeImage(data, setOf(TileOverlay.ENEMIES), false, roomId = roomId)
+                val withoutPortrait = buildCompositeImage(data, setOf(TileOverlay.ENEMIES), false)
+                assertFalse(image.getRGB(0, 0, data.width, data.height, null, 0, data.width)
+                    .contentEquals(withoutPortrait.getRGB(0, 0, data.width, data.height, null, 0, data.width)), "The fallback must actually paint into the empty-state room")
+                ImageIO.write(image, "png", File(TestRomHelper.outputDir(), "boss-initial-${roomId.toString(16)}.png"))
+            }
+            assertTrue(roomEnemyPreviewEntries(emptyList(), 0x91F8).isEmpty())
+        } finally { EnemySpriteCache.setRomParser(null) }
+    }
+
+    @Test
+    fun `Golden Four uses real projectile pieces and hides the leftover enemy slots`() {
+        val parser = TestRomHelper.requireRomParser()
+        EnemySpriteCache.setRomParser(parser)
+        try {
+            val room = requireNotNull(parser.readRoomHeader(TourianStatueSprites.ROOM_ID))
+            val data = requireNotNull(MapRenderer(parser).renderRoom(room))
+            assertEquals(3, data.enemyEntries.count { it.id == TourianStatueSprites.SPECIES })
+            val single = data.copy(enemyEntries = data.enemyEntries.filter { it.id != TourianStatueSprites.SPECIES || it.extra2 == 0 })
+            fun render(value: RoomRenderData) = buildCompositeImage(value, setOf(TileOverlay.ENEMIES), false)
+            val allImage = render(data)
+            val singleImage = render(single)
+            assertArrayEquals(singleImage.getRGB(0, 0, data.width, data.height, null, 0, data.width), allImage.getRGB(0, 0, data.width, data.height, null, 0, data.width))
+            val background = MapRenderer(parser).also { it.renderRoom(room) }.renderLayer2(room)
+            val image = buildCompositeImage(data, setOf(TileOverlay.ENEMIES, TileOverlay.LAYER2), false, layer2Pixels = background)
+            ImageIO.write(image, "png", File(TestRomHelper.outputDir(), "golden-four-room.png"))
+            val full = requireNotNull(TourianStatueSprites(parser).renderComplete())
+            val scene = BufferedImage(full.width, full.height, BufferedImage.TYPE_INT_ARGB).apply { setRGB(0, 0, width, height, full.pixels, 0, width) }
+            ImageIO.write(scene, "png", File(TestRomHelper.outputDir(), "golden-four-full.png"))
+        } finally { EnemySpriteCache.setRomParser(null) }
+    }
+
+    @Test
     fun `Mother Brain phase two adds neither a second sprite nor an overlapping name`() {
         val parser = TestRomHelper.requireRomParser()
         EnemySpriteCache.setRomParser(parser)
@@ -118,7 +178,7 @@ class RoomEnemyPreviewTest {
                         assertTrue(left < data.width && left + preview.image.width > 0)
                         assertTrue(top < data.height && top + preview.image.height > 0)
                     }
-                    val image = buildCompositeImage(data, activeOverlays = setOf(TileOverlay.ENEMIES), showGrid = false)
+                    val image = buildCompositeImage(data, activeOverlays = setOf(TileOverlay.ENEMIES), showGrid = false, roomId = room.roomId)
                     ImageIO.write(image, "png", File(TestRomHelper.outputDir(), "boss-room-${room.roomId.toString(16)}-$index.png"))
                 }
             }

@@ -43,7 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.SmPatch
 import com.supermetroid.editor.rom.RomParser
-import javax.imageio.ImageIO
+import com.supermetroid.editor.rom.PhantoonSpritemap
+import java.awt.image.BufferedImage
 
 // ─── Phantoon AI data model ─────────────────────────────────────
 
@@ -157,12 +158,20 @@ val ALL_PHANTOON_FIELDS: List<PhantoonField> = PHANTOON_SECTIONS.flatMap { it.fi
 
 // ─── Sprite loader ──────────────────────────────────────────────
 
-private object PhantoonSprites {
-    fun load(id: String) = try {
-        javaClass.getResourceAsStream("/enemies/$id.png")?.use {
-            ImageIO.read(it)?.toComposeImageBitmap()
+internal fun phantoonBehaviorSprites(parser: RomParser?): List<BufferedImage> {
+    if (parser == null) return emptyList()
+    val renderer = PhantoonSpritemap(parser)
+    if (!renderer.load()) return emptyList()
+    val parts = listOf(renderer.renderFullBody(),
+        renderer.renderComponent(PhantoonSpritemap.EYE_TILEMAPS.first()),
+        renderer.renderComponent(PhantoonSpritemap.TENTACLE_TILEMAPS.first()),
+        renderer.renderComponent(PhantoonSpritemap.MOUTH_TILEMAPS.first()))
+    return parts.map { part ->
+        requireNotNull(part)
+        BufferedImage(part.width, part.height, BufferedImage.TYPE_INT_ARGB).apply {
+            setRGB(0, 0, width, height, part.pixels, 0, width)
         }
-    } catch (_: Exception) { null }
+    }
 }
 
 // ─── Main composable ────────────────────────────────────────────
@@ -198,7 +207,10 @@ fun PhantoonEditor(
             .verticalScroll(rememberScrollState())
             .padding(20.dp)
     ) {
-        PhantoonHeader()
+        val previewParser = remember(romParser, editorState.spriteVersion, editorState.paletteVersion) {
+            romParser?.let { editorState.nativeSprites.previewParser(it) }
+        }
+        PhantoonHeader(previewParser)
         Spacer(Modifier.height(20.dp))
 
         for ((idx, section) in PHANTOON_SECTIONS.withIndex()) {
@@ -224,11 +236,12 @@ fun PhantoonEditor(
 // ─── Header with sprites ────────────────────────────────────────
 
 @Composable
-private fun PhantoonHeader() {
-    val bodySprite = remember { PhantoonSprites.load("E4BF") }
-    val eyeSprite = remember { PhantoonSprites.load("E4FF") }
-    val tentacleSprite = remember { PhantoonSprites.load("E53F") }
-    val mouthSprite = remember { PhantoonSprites.load("E57F") }
+private fun PhantoonHeader(parser: RomParser?) {
+    val sprites = remember(parser) { phantoonBehaviorSprites(parser).map { it.toComposeImageBitmap() } }
+    val bodySprite = sprites.getOrNull(0)
+    val eyeSprite = sprites.getOrNull(1)
+    val tentacleSprite = sprites.getOrNull(2)
+    val mouthSprite = sprites.getOrNull(3)
 
     Surface(
         modifier = Modifier.fillMaxWidth(),

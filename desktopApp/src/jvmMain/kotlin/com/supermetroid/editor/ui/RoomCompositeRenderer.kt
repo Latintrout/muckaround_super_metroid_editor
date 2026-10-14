@@ -11,13 +11,14 @@ import com.supermetroid.editor.rom.ShipSpritemap
 import com.supermetroid.editor.rom.PirateSpritemap
 import com.supermetroid.editor.rom.RoomBossPreview
 import com.supermetroid.editor.rom.CrawlerSpritemap
+import com.supermetroid.editor.rom.TourianStatueSprites
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
 
 /**
  * Assembles and caches enemy sprites from ROM data (OAM spritemaps + tile data + palette).
- * Falls back to bundled PNG resources if ROM assembly fails.
+ * No bundled-image fallback: missing native data remains an explicit marker.
  *
  * Call [setRomParser] when a ROM is loaded to enable native rendering.
  * The cache is keyed by species ID hex string (e.g. "D47F").
@@ -52,13 +53,17 @@ internal object EnemySpriteCache {
         val key = if (initParam == 0) hexId else "$hexId:$initParam"
         return cache.getOrPut(key) {
             val id = hexId.toIntOrNull(16) ?: return@getOrPut null
-            assembleFromRom(id, initParam)
-                ?: if (id in RoomBossPreview.SPECIES) null else if (initParam == 0) loadPngFallback(hexId) else preview(hexId, 0)
+            assembleFromRom(id, initParam) ?: if (initParam != 0) preview(hexId, 0) else null
         }
     }
 
     fun getPreview(enemy: RomParser.EnemyEntry): AnchoredEnemySprite? {
         val hexId = enemy.id.toString(16).uppercase().padStart(4, '0')
+        if (enemy.id == TourianStatueSprites.SPECIES) {
+            return cache.getOrPut("g4:objects") {
+                romParser?.let { TourianStatueSprites(it).renderObjects() }?.let(::assembledSpriteToImage)
+            }
+        }
         if (enemy.id == ShipSpritemap.TOP_SPECIES || enemy.id == ShipSpritemap.BOTTOM_SPECIES) {
             val pad = enemy.id == ShipSpritemap.BOTTOM_SPECIES && enemy.extra3 != 0
             return cache.getOrPut("ship:$hexId:$pad") {
@@ -118,16 +123,20 @@ internal object EnemySpriteCache {
             }
         }
 
-        val defaultSmap = smap.findDefaultSpritemap(speciesId)
-            ?: smap.findAnimationFrames(speciesId, maxFrames = 1).firstOrNull()?.spritemap
-            ?: return null
-        val assembled = smap.renderSpritemap(defaultSmap, renderTd, palette) ?: return null
-        if (!isValidSprite(assembled)) return null
-
-        return assembledSpriteToImage(assembled)
+        smap.findDefaultSpritemap(speciesId)?.let { map ->
+            smap.renderSpritemap(map, renderTd, palette)?.takeIf(::isValidSprite)?.let {
+                return assembledSpriteToImage(it)
+            }
+        }
+        // Some init functions expose extended maps that the plain default-map scanner cannot render.
+        return smap.findAnimationFrames(speciesId).firstNotNullOfOrNull { frame ->
+            smap.renderRenderableFrame(frame.renderableFrame, renderTd, palette)
+                ?.takeIf { sprite -> sprite.pixels.any { it ushr 24 != 0 } }?.let(::assembledSpriteToImage)
+        }
     }
 
     private fun isValidSprite(sprite: EnemySpritemap.AssembledSprite): Boolean {
+        if (sprite.pixels.none { it ushr 24 != 0 }) return false
         val totalPixels = sprite.width * sprite.height
         if (totalPixels <= 64) return true
         val nonTransparent = sprite.pixels.count { (it ushr 24) > 0 }
@@ -140,10 +149,6 @@ internal object EnemySpriteCache {
         return AnchoredEnemySprite(img, sprite.originX, sprite.originY)
     }
 
-    private fun loadPngFallback(hexId: String): AnchoredEnemySprite? {
-        val stream = EnemySpriteCache::class.java.getResourceAsStream("/enemies/$hexId.png")
-        return stream?.use { ImageIO.read(it) }?.let { AnchoredEnemySprite(it, it.width / 2, it.height / 2) }
-    }
 }
 
 internal object ItemSpriteSheetCache {
@@ -224,6 +229,14 @@ internal const val SCREEN_PX = 16 * 16  // 256 — one screen in pixels
 internal fun hiddenRoomEnemyCompanions(enemies: List<RomParser.EnemyEntry>): Set<Int> =
     enemies.flatMap { RoomBossPreview.COMPANIONS[it.id].orEmpty() }.toSet()
 
+/** These rooms initially select an empty boss-dead state. Supply only a non-editable overlay portrait. */
+internal fun roomEnemyPreviewEntries(enemies: List<RomParser.EnemyEntry>, roomId: Int?): List<RomParser.EnemyEntry> {
+    val species = when (roomId) { 0xCD13 -> 0xE4BF; 0xDA60 -> 0xDE3F; else -> return enemies }
+    if (enemies.any { it.id == species }) return enemies
+    val portrait = RomParser.EnemyEntry(species, 0, 0, 0, 0)
+    return if (EnemySpriteCache.getPreview(portrait) != null) enemies + portrait else enemies
+}
+
 /** Only the preview moves; stored population coordinates and export data are untouched. */
 internal fun roomEnemyDisplayPosition(enemy: RomParser.EnemyEntry, width: Int, height: Int, preview: AnchoredEnemySprite?): Pair<Int, Int> {
     if (enemy.id !in RoomBossPreview.SPECIES || preview == null) return enemy.x to enemy.y
@@ -232,8 +245,15 @@ internal fun roomEnemyDisplayPosition(enemy: RomParser.EnemyEntry, width: Int, h
     val top = enemy.y - preview.originY
     val outside = enemy.x <= 0 || enemy.y <= 0 || enemy.x >= width || enemy.y >= height ||
         left + image.width <= 0 || top + image.height <= 0 || left >= width || top >= height
-    return if (outside) (width / 2 + preview.originX - image.width / 2) to (height / 2 + preview.originY - image.height / 2)
+    val position = if (outside) (width / 2 + preview.originX - image.width / 2) to (height / 2 + preview.originY - image.height / 2)
         else enemy.x to enemy.y
+    return when (enemy.id) {
+        0xE2BF -> position.first to position.second + 48
+        0xEEFF -> position.first to position.second - 16
+        // Its init spawn is a statue position on the left; the active pose falls from the right door.
+        0xEF7F -> (width - 80).coerceAtLeast(width / 2) to position.second - 16
+        else -> position
+    }
 }
 
 /**
@@ -496,6 +516,7 @@ internal fun buildCompositeImage(
     highlightItems: Boolean = true,
     showEnemyNames: Boolean = true,
     showFlatSlopeSurfaces: Boolean = true,
+    roomId: Int? = null,
 ): BufferedImage {
     val img = BufferedImage(data.width, data.height, BufferedImage.TYPE_INT_ARGB)
 
@@ -836,7 +857,7 @@ internal fun buildCompositeImage(
     }
 
     // Draw enemy sprites / markers (positioned at enemy pixel coordinates)
-    if (activeOverlays.contains(TileOverlay.ENEMIES) && data.enemyEntries.isNotEmpty()) {
+    if (activeOverlays.contains(TileOverlay.ENEMIES)) {
         val g2 = g as java.awt.Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
         g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
@@ -844,9 +865,12 @@ internal fun buildCompositeImage(
         g.font = labelFont
         val fm = g.fontMetrics
         val markerColor = java.awt.Color(0xFF, 0x66, 0x44)
-        val hiddenCompanions = hiddenRoomEnemyCompanions(data.enemyEntries)
-        for (enemy in data.enemyEntries) {
+        val enemies = roomEnemyPreviewEntries(data.enemyEntries, roomId)
+        val hiddenCompanions = hiddenRoomEnemyCompanions(enemies)
+        val hasStatueSpawner = enemies.any { it.id == TourianStatueSprites.SPECIES && it.extra2 == 0 }
+        for (enemy in enemies) {
             if (enemy.id in hiddenCompanions) continue
+            if (hasStatueSpawner && enemy.id == TourianStatueSprites.SPECIES && enemy.extra2 != 0) continue
             val preview = EnemySpriteCache.getPreview(enemy)
             val (ex, ey) = roomEnemyDisplayPosition(enemy, data.width, data.height, preview)
             if (ex < 0 || ex >= data.width || ey < 0 || ey >= data.height) continue

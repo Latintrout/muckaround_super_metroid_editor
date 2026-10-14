@@ -327,6 +327,15 @@ class EnemySpritemap(private val romParser: RomParser) {
         val initPc = romParser.snesToPc((aiBank shl 16) or initAiPtr)
         if (initPc < 0 || initPc + 20 > rom.size) return null
 
+        // This shared init AI selects through an indirect table; scanning its opcodes as map data
+        // produces a huge invalid pose. Use the source's species-specific, left-facing idle entry.
+        val wallSpitterSlot = when (speciesId) { 0xE6FF -> 0xA896D7; 0xE73F -> 0xA896DF; else -> null }
+        if (wallSpitterSlot != null && aiBank == 0xA8) {
+            val list = 0xA80000 or romParser.readUInt16At(romParser.snesToPc(wallSpitterSlot))
+            val map = 0xA80000 or romParser.readUInt16At(romParser.snesToPc(list + 2))
+            return parseSpritemap(map)
+        }
+
         SOURCE_VERIFIED_DEFAULT_INSTRUCTION_LISTS[speciesId and 0xFFFF]
             ?.takeIf { (it ushr 16) == aiBank }
             ?.let { verifiedList ->

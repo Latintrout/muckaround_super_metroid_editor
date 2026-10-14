@@ -8,7 +8,7 @@ import java.awt.image.BufferedImage
 
 /**
  * Deep investigation of Phantoon assembly: compare tileset palette vs SNES palette,
- * render body with both, and check positional alignment with E4BF.png.
+ * render body with both, and verify exact agreement with the production renderer.
  */
 class PhantoonAssemblyTest2 {
 
@@ -134,49 +134,13 @@ class PhantoonAssemblyTest2 {
             println("Tile 0x${t.toString(16)}: $nonZero/64 non-zero pixels, unique indices: $uniqueIndices")
         }
 
-        // Compare the active-palette assembly against the legacy PNG.
-        val pngFile = File("../desktopApp/src/jvmMain/resources/enemies/E4BF.png")
-        if (!pngFile.exists()) return
-        val refImg = ImageIO.read(pngFile)
-        val refPixels = IntArray(refImg.width * refImg.height)
-        refImg.getRGB(0, 0, refImg.width, refImg.height, refPixels, 0, refImg.width)
-
-        println("\nSearching for best alignment offset...")
-        var bestOffX = 0
-        var bestOffY = 0
-        var bestMatch = 0
-
-        for (offY in -8..8) {
-            for (offX in -16..16) {
-                var matches = 0
-                for (py in 0 until refImg.height) {
-                    for (px in 0 until refImg.width) {
-                        val ax = px + offX
-                        val ay = py + offY
-                        if (ax < 0 || ax >= imgW || ay < 0 || ay >= imgH) continue
-                        val refArgb = refPixels[py * refImg.width + px]
-                        val asmArgb = assembled2[ay * imgW + ax]
-                        val refA = (refArgb ushr 24) and 0xFF
-                        val asmA = (asmArgb ushr 24) and 0xFF
-                        if (refA < 128 && asmA < 128) { matches++; continue }
-                        if (refA < 128 || asmA < 128) continue
-
-                        val dr = Math.abs(((refArgb shr 16) and 0xFF) - ((asmArgb shr 16) and 0xFF))
-                        val dg = Math.abs(((refArgb shr 8) and 0xFF) - ((asmArgb shr 8) and 0xFF))
-                        val db = Math.abs((refArgb and 0xFF) - (asmArgb and 0xFF))
-                        if (dr <= 10 && dg <= 10 && db <= 10) matches++
-                    }
-                }
-                if (matches > bestMatch) {
-                    bestMatch = matches
-                    bestOffX = offX
-                    bestOffY = offY
-                }
-            }
-        }
-
-        val total = refImg.width * refImg.height
-        println("Best offset: ($bestOffX, $bestOffY) — $bestMatch/$total matches (${bestMatch * 100 / total}%)")
+        // Independent tilemap assembly must agree pixel-for-pixel with the production renderer.
+        val renderer = PhantoonSpritemap(parser)
+        assertTrue(renderer.load())
+        val native = requireNotNull(renderer.renderComponent(PhantoonSpritemap.BODY_TILEMAPS.single()))
+        assertEquals(imgW, native.width)
+        assertEquals(imgH, native.height)
+        assertArrayEquals(assembled2, native.pixels)
     }
 
     data class TilemapEntry(

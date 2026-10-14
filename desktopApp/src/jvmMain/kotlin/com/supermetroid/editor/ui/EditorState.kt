@@ -1287,19 +1287,6 @@ class EditorState(
 
     // ── Enemy / Boss sprite graphics ──────────────────────────────────────────
 
-    /**
-     * Load the effective ARGB pixels for an enemy sprite.
-     * Returns custom project PNG if present, otherwise decodes the embedded resource PNG.
-     * @param speciesIdHex e.g. "E4BF"
-     */
-    // ── Enemy sprite delegates ────────────────────────────────────────────
-
-    fun getEnemySpritePixels(speciesIdHex: String) = enemySprite.getEnemySpritePixels(speciesIdHex)
-    fun hasCustomEnemySprite(speciesIdHex: String) = enemySprite.hasCustomEnemySprite(speciesIdHex)
-    fun exportEnemySprite(speciesIdHex: String, filePath: String) = enemySprite.exportEnemySprite(speciesIdHex, filePath)
-    fun importEnemySprite(speciesIdHex: String, filePath: String) = enemySprite.importEnemySprite(speciesIdHex, filePath)
-    fun saveEnemySpritePixels(speciesIdHex: String, pixels: IntArray, w: Int, h: Int) = enemySprite.saveEnemySpritePixels(speciesIdHex, pixels, w, h)
-    fun resetEnemySprite(speciesIdHex: String) = enemySprite.resetEnemySprite(speciesIdHex)
     fun loadEnemyTileData(romParser: RomParser, speciesId: Int) = enemySprite.loadEnemyTileData(romParser, speciesId)
     fun applyEnemyTileSheetEdits(romParser: RomParser, speciesId: Int, pixels: IntArray, w: Int, h: Int) = enemySprite.applyEnemyTileSheetEdits(romParser, speciesId, pixels, w, h)
     fun hasCustomEnemyTiles(speciesId: Int) = enemySprite.hasCustomEnemyTiles(speciesId)

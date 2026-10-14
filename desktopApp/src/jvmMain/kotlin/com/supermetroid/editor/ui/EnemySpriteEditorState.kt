@@ -14,62 +14,6 @@ class EnemySpriteEditorState(
     private val customGfx: () -> TilesetGfxData,
     private val onDirty: () -> Unit,
 ) {
-    // ── PNG sprite overlay (preview thumbnails) ───────────────────────────
-
-    fun getEnemySpritePixels(speciesIdHex: String): Pair<IntArray, Pair<Int, Int>>? {
-        val customB64 = customGfx().enemyGfx[speciesIdHex]
-        val img: java.awt.image.BufferedImage? = if (customB64 != null) {
-            try {
-                val bytes = java.util.Base64.getDecoder().decode(customB64)
-                javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(bytes))
-            } catch (_: Exception) { null }
-        } else {
-            try {
-                val stream = javaClass.getResourceAsStream("/enemies/$speciesIdHex.png")
-                stream?.let { javax.imageio.ImageIO.read(it) }
-            } catch (_: Exception) { null }
-        }
-        img ?: return null
-        val w = img.width; val h = img.height
-        val pixels = img.getRGB(0, 0, w, h, null, 0, w)
-        return Pair(pixels, Pair(w, h))
-    }
-
-    fun hasCustomEnemySprite(speciesIdHex: String): Boolean =
-        customGfx().enemyGfx.containsKey(speciesIdHex)
-
-    fun exportEnemySprite(speciesIdHex: String, filePath: String): Boolean {
-        val (pixels, dims) = getEnemySpritePixels(speciesIdHex) ?: return false
-        return writePng(filePath, pixels, dims.first, dims.second)
-    }
-
-    fun importEnemySprite(speciesIdHex: String, filePath: String): Boolean {
-        return try {
-            val bytes = java.io.File(filePath).readBytes()
-            val b64 = java.util.Base64.getEncoder().encodeToString(bytes)
-            customGfx().enemyGfx[speciesIdHex] = b64
-            onDirty()
-            true
-        } catch (_: Exception) { false }
-    }
-
-    fun saveEnemySpritePixels(speciesIdHex: String, pixels: IntArray, w: Int, h: Int): Boolean {
-        return try {
-            val img = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-            img.setRGB(0, 0, w, h, pixels, 0, w)
-            val baos = java.io.ByteArrayOutputStream()
-            javax.imageio.ImageIO.write(img, "png", baos)
-            val b64 = java.util.Base64.getEncoder().encodeToString(baos.toByteArray())
-            customGfx().enemyGfx[speciesIdHex] = b64
-            onDirty()
-            true
-        } catch (_: Exception) { false }
-    }
-
-    fun resetEnemySprite(speciesIdHex: String) {
-        customGfx().enemyGfx.remove(speciesIdHex)
-        onDirty()
-    }
 
     // ── Enemy tile-sheet (raw 4bpp) ───────────────────────────────────────
 

@@ -3,7 +3,7 @@ package com.supermetroid.editor.rom
 /** Representative native room poses, not an emulation of boss AI or encounter movement. */
 class RoomBossPreview(private val parser: RomParser) {
     companion object {
-        val SPECIES = setOf(0xE2BF, 0xDDBF, 0xEEFF, 0xEF7F, 0xE13F, 0xE17F, 0xE4BF, 0xDE3F, 0xF293)
+        val SPECIES = setOf(0xE2BF, 0xDDBF, 0xEEFF, 0xEF7F, 0xE13F, 0xE17F, 0xE4BF, 0xDE3F, 0xF293, 0xEC3F, 0xEC7F)
         val COMPANIONS = mapOf(
             0xE2BF to setOf(0xE2FF, 0xE33F, 0xE37F, 0xE3BF, 0xE3FF, 0xE43F, 0xE47F),
             0xDDBF to setOf(0xDDFF),
@@ -55,6 +55,12 @@ class RoomBossPreview(private val parser: RomParser) {
                 val renderer = BotwoonSpritemap(parser)
                 if (!renderer.load(tiles)) return null
                 renderer.renderComposition(BotwoonSpritemap.COMPOSITIONS.single { it.key == "turning" })
+            }
+            0xEC3F, 0xEC7F -> {
+                val renderer = MotherBrainSpritemap(parser)
+                if (!renderer.load()) return null
+                val key = if (speciesId == 0xEC3F) "phase-1" else "phase-2"
+                renderer.renderComposition(MotherBrainSpritemap.COMPOSITIONS.single { it.key == key })
             }
             else -> return null
         } ?: return null

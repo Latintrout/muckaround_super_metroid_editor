@@ -71,6 +71,10 @@ same selection rows and palette controls as the existing sprite editors:
   suitless palette tracks for all three suits and both facing directions.
 - **Shared sprites and effects** exposes common effects, grapple tiles, gunship
   dust and beam source sheets. These source sheets are not full effect simulations.
+- **Golden Four statue** combines the room BG sculpture with the three real
+  bank-`$8D` projectile maps, rather than the deleted enemy instruction maps. Its
+  shared `$87:B364` OBJ tiles and three `$AA:D745..D7A4` palette rows are editable;
+  Kraid/Draygon's BG sculpture remains owned by room tileset 21.
 
 These workspaces support source-sheet pixel editing, palette-row editing, reset,
 project save/reopen and ROM export. Assembled references preview raw-source edits
@@ -78,6 +82,15 @@ live. Shared sources intentionally affect every preview using those bytes. The s
 reuses its existing enemy-owned tiles/palette; named shared palettes retain their
 existing owners. Other sources use `visualTileBlocks` and `visualPalettes` in project
 format 12. Normal ROM write-plan overlap checks reject conflicting owners.
+
+Native workspaces expose frame PNG, timed animation GIF and animation-sheet PNG
+export through the regular animation player. **Export source PNG / Import source PNG**
+round-trip the editable tile sheet with exact dimensions; imports match opaque
+colors to the selected palette and retain transparency. Assembled frames/animation
+sheets cannot be imported as tile sources because their pixels can have multiple owners.
+Weapon source sheets select the chosen projectile's actual OAM palette automatically
+(Super Missile uses row 5). Pixel-editor text follows the app font-size preference,
+and its palette/shortcut panel widens and scrolls for larger settings.
 
 Compressed sources are recompressed and verified on Apply. Edits must fit the
 original compressed byte budget; otherwise Apply reports an error without changing
@@ -99,7 +112,13 @@ suppresses the extra phase-2 slot. Spore Spawn's existing rendering is unchanged
 
 Bosses with off-room spawn coordinates are visually centered in the room, without
 modifying population coordinates or exported gameplay data. No encounter movement
-or boss AI is simulated. A state with no boss population remains empty.
+or boss AI is simulated. Kraid's static preview is lowered 48 pixels, the two Torizos
+are raised 16 pixels, and Golden Torizo is positioned near the right door. Phantoon's
+`$CD13` and Draygon's `$DA60` initial states are empty post-defeat states, so those
+two rooms receive centered display-only portraits even without a population entry.
+The selected state, working population and exported data stay unchanged; other empty
+rooms remain empty. G4's three enemy setup records produce one correctly assembled
+OBJ overlay and a single label over the room BG sculpture.
 
 Sova, Zeela and Zoomer use their source initialization table's `(orientation & 3) * 2`
 index, including orientation zero, rather than treating the population value as a
@@ -715,9 +734,22 @@ offer early coordination for two project edits that target aliased or overlappin
 ranges; the final write planner rejects conflicting overlaps safely. Quarantined boss
 mappings remain non-exportable. See E-09 in the validation matrix.
 
-### Pre-Rendered PNG Fallbacks
-Enemies without successful OAM spritemap tracing still display their tile sheet.
-Static PNG sprites are also stored in `desktopApp/src/jvmMain/resources/enemies/<speciesId>.png`.
+### Native-only enemy previews
+
+Legacy SMILE PNGs and all bundled-image fallback paths have been removed. Room
+previews, sprite workspaces and Phantoon behavior thumbnails use the loaded ROM's
+tiles, palettes and maps. Fune/Namihe use their exact species-specific idle table
+entries, and Mother Brain's phase-1/2 slots use its dedicated composition renderer.
+
+`NativeEnemyCoverageTest` checks all 159 independently visible preview records from
+the 164 source headers, plus every visible vanilla population across all room states.
+Sentinels, invisible collision/graphics loaders, the source-unused header and Ridley's
+internal explosion pixel owner are not independent actors. They are not replaced with
+an invented sprite. Missing/invalid ROM data remains an explicit room marker.
+
+Historical PNG comparisons were replaced by source-palette checks, exact native PNG
+round trips and independent ROM tilemap assembly; strict source-manifest pixel hashes
+remain in `PhantoonSourceParityTest`. No tests require the external PNG backup.
 
 ---
 
@@ -761,7 +793,7 @@ Enemy GFX Set ($B4)
 | `EnemyExportDiagTest.kt` | Population roundtrip, GFX set, properties bit 0x2000, kill count |
 | `EnemySpritemapTest.kt` | OAM parsing, instruction tracing, assembled sprites |
 | `EnemyTileScanTest.kt` | GRAPHADR decompression, tileDataSize mask, palette row 0 |
-| `PhantoonSpritemapRoundtripTest.kt` | Pixel-perfect match vs reference PNG, edit roundtrip |
+| `PhantoonSpritemapRoundtripTest.kt` | Native PNG export round trip and source-owned pixel editing, without legacy image fixtures |
 | `PhantoonSourceParityTest.kt` | All four slots, 22 tilemaps/extended spritemaps, 19 lists, eight health palettes, full-body/gaze rendering, five bounded animations, hashes, and edit ownership |
 | `DraygonSourceParityTest.kt` | Four slots, split BG2/OBJ ownership, 94 OAM + 103 extended + 48 BG2 maps, 57 lists, 250 production frames, palettes, hitboxes, and deterministic complete-composition hashes |
 | `RidleySourceParityTest.kt` | Both encounter headers, five shared base assets, the low-page forward/explosion asset and enemy-set placement, six ribs/claws DMA assets, 11 body + 12 wing + 19 tail maps, encounter lists, pointer tables, palettes, and deterministic complete-composition hashes |

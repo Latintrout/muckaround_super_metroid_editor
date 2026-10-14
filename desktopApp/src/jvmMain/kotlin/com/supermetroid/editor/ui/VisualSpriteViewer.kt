@@ -15,6 +15,7 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.RomVisualAssets
 import com.supermetroid.editor.rom.SpriteAnimation
 import com.supermetroid.editor.rom.NativeSpriteAssets
+import com.supermetroid.editor.rom.TourianStatueSprites
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -25,18 +26,25 @@ internal val VISUAL_SPRITE_WORKSPACES = listOf(
     VisualSpriteWorkspace(-3, "Title, intro and ending", "Scenes"),
     VisualSpriteWorkspace(-4, "Shared sprites and effects", "Effects"),
     VisualSpriteWorkspace(-5, "Samus death sequence", "Death"),
+    VisualSpriteWorkspace(-6, "Golden Four statue", "Statue"),
 )
 
 private val DEATH_NAMES = listOf("Power suit · right", "Power suit · left", "Varia suit · right", "Varia suit · left", "Gravity suit · right", "Gravity suit · left")
 
 internal fun visualSpriteNames(workspace: VisualSpriteWorkspace): List<String> = when (workspace.index) {
+    -6 -> listOf("Golden Four statue") + TourianStatueSprites.PARTS.map { it.name }
     -2 -> ProjectileSprites.WEAPONS.map { it.name }
     -3 -> CinematicSprites.SEQUENCES.map { it.name } + RomVisualAssets.ASSETS.filter { it.group == workspace.group }.map { it.name }
     -5 -> DEATH_NAMES + RomVisualAssets.ASSETS.filter { it.group == workspace.group }.map { it.name }
     else -> RomVisualAssets.ASSETS.filter { it.group == workspace.group }.map { it.name }
 }
 
-internal fun visualSpriteTargets(parser: RomParser, workspace: VisualSpriteWorkspace, selected: Int): List<NativeSpriteTarget> {
+internal fun visualSpriteTargets(parser: RomParser, workspace: VisualSpriteWorkspace, selected: Int, direction: Int = 2): List<NativeSpriteTarget> {
+    if (workspace.index == -6) {
+        val part = TourianStatueSprites.PARTS.getOrNull(selected - 1)
+        val row = part?.let { (it.palette - TourianStatueSprites.PALETTE) / 32 } ?: 0
+        return listOf(NativeSpriteTarget(NativeSpriteAssets.key(TourianStatueSprites.TILES), TourianStatueSprites.PALETTE, 3, row))
+    }
     if (workspace.index == -2) {
         val weapon = ProjectileSprites.WEAPONS.getOrNull(selected) ?: return emptyList()
         val beam = weapon.beam
@@ -46,7 +54,11 @@ internal fun visualSpriteTargets(parser: RomParser, workspace: VisualSpriteWorks
                 val palette = 0x900000 or parser.readUInt16At(parser.snesToPc(0x90C3C9 + beam * 2))
                 add(NativeSpriteTarget(NativeSpriteAssets.key(graphics), palette, 1))
             }
-            add(NativeSpriteTarget("9AD200", 0x9A8100, 8, 4))
+            val row = ProjectileSprites(parser).paletteRow(weapon, direction)
+            if (beam != null && row == 6) {
+                val palette = 0x900000 or parser.readUInt16At(parser.snesToPc(0x90C3C9 + beam * 2))
+                add(NativeSpriteTarget("9AD200", palette, 1))
+            } else add(NativeSpriteTarget("9AD200", 0x9A8100, 8, row))
         }
     }
     if (workspace.index == -3 && selected in CinematicSprites.SEQUENCES.indices) {
@@ -68,6 +80,14 @@ internal fun visualSpriteTargets(parser: RomParser, workspace: VisualSpriteWorks
 }
 
 internal fun renderVisualSprite(parser: RomParser, workspace: VisualSpriteWorkspace, selected: Int, direction: Int, paletteRow: Int): SpriteAnimation? {
+    if (workspace.index == -6) {
+        val renderer = TourianStatueSprites(parser)
+        val frame = if (selected == 0) renderer.renderComplete() else {
+            val sprite = renderer.renderObjects(TourianStatueSprites.PARTS.getOrNull(selected - 1)) ?: return null
+            com.supermetroid.editor.rom.SpriteAnimationFrame(sprite.pixels, sprite.width, sprite.height, label = visualSpriteNames(workspace).getOrNull(selected).orEmpty())
+        } ?: return null
+        return SpriteAnimation(frame.label, listOf(frame), loop = false)
+    }
     if (workspace.index == -2) return ProjectileSprites.WEAPONS.getOrNull(selected)?.let { ProjectileSprites(parser).render(it, direction) }
     if (workspace.index == -3 && selected in CinematicSprites.SEQUENCES.indices) return CinematicSprites(parser).render(CinematicSprites.SEQUENCES[selected])
     if (workspace.index == -5 && selected in DEATH_NAMES.indices) return SamusDeathSprites(parser).render(selected / 2, selected % 2 != 0)
@@ -85,7 +105,7 @@ internal fun VisualSpriteViewer(workspace: VisualSpriteWorkspace, parser: RomPar
     var selected by remember(workspace.index) { mutableStateOf(0) }
     var direction by remember { mutableStateOf(2) }
     val names = remember(workspace) { visualSpriteNames(workspace) }
-    val targets = remember(parser, workspace, selected) { visualSpriteTargets(parser, workspace, selected) }
+    val targets = remember(parser, workspace, selected, direction) { visualSpriteTargets(parser, workspace, selected, direction) }
     var selectedSource by remember(workspace, selected) { mutableStateOf(0) }
     val target = targets.getOrNull(selectedSource)
     var paletteRow by remember(workspace, selected) { mutableStateOf(targets.firstOrNull()?.defaultRow ?: 0) }
@@ -115,13 +135,14 @@ internal fun VisualSpriteViewer(workspace: VisualSpriteWorkspace, parser: RomPar
         }
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(animation?.name ?: workspace.name, fontSize = fs.heading)
+            if (workspace.index == -6) Text("OBJ pieces are editable here; the Kraid/Draygon background sculpture belongs to room tileset 21.", fontSize = fs.detail)
             if (workspace.index == -2) {
                 SpriteOptionSelector(ProjectileSprites.DIRECTIONS, direction, { direction = it }, Modifier.fillMaxWidth())
             }
             if (targets.size > 1) SpriteOptionSelector(targets.map { it.name }, selectedSource, { selectedSource = it }, Modifier.fillMaxWidth())
             if (target != null) NativeSpriteSourceControls(parser, editor, target, { editing = it }, { paletteRow = it })
             effective.exceptionOrNull()?.message?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = fs.detail) }
-            AnimationPlayer(animation, Modifier.weight(1f), previewSize = 540, showExportButtons = false)
+            NativeSpriteAnimationPlayer(animation, Modifier.weight(1f), previewSize = 540)
         }
     }
 }

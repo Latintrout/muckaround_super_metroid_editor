@@ -81,7 +81,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.awt.event.InputEvent
@@ -282,9 +281,9 @@ fun SpritePixelEditor(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                Text(label, fontSize = LocalEditorTheme.current.fontSize.value.body, fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary)
-                Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                Text("│", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Draw tools
                 FilterChip(selected = state.activeTool == PixelTool.PENCIL, onClick = { setTool(PixelTool.PENCIL) },
@@ -303,7 +302,7 @@ fun SpritePixelEditor(
                     label = { Icon(Icons.Default.Crop, "Select (S)", Modifier.size(14.dp)) },
                     modifier = Modifier.height(28.dp))
 
-                Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                Text("│", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Transform buttons operate only on an active selection or its floating preview.
                 SmallButton("Flip H", "H", enabled = state.hasTransformTarget) { applySelectionTransform(Transform.FLIP_H) }
@@ -311,7 +310,7 @@ fun SpritePixelEditor(
                 SmallButton("↻", "R", enabled = state.hasTransformTarget) { applySelectionTransform(Transform.ROTATE_CW) }
                 SmallButton("↺", "⇧R", enabled = state.hasTransformTarget) { applySelectionTransform(Transform.ROTATE_CCW) }
 
-                Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                Text("│", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.outlineVariant)
 
                 IconButton(onClick = { state.undo(); refreshVersion() }, enabled = state.undoStack.isNotEmpty(), modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.Undo, "Undo",  Modifier.size(16.dp),
@@ -324,28 +323,28 @@ fun SpritePixelEditor(
                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                 }
 
-                Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                Text("│", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.outlineVariant)
 
                 FilterChip(selected = showGrid, onClick = { showGrid = !showGrid },
-                    label = { Text("Px Grid", fontSize = 9.sp) }, modifier = Modifier.height(28.dp))
+                    label = { Text("Px Grid", fontSize = LocalEditorTheme.current.fontSize.value.detail) }, modifier = Modifier.height(28.dp))
                 if (fixedPalette != null) {
                     FilterChip(selected = showTileGrid, onClick = { showTileGrid = !showTileGrid },
-                        label = { Text("8px Grid", fontSize = 9.sp) }, modifier = Modifier.height(28.dp))
+                        label = { Text("8px Grid", fontSize = LocalEditorTheme.current.fontSize.value.detail) }, modifier = Modifier.height(28.dp))
                 }
                 if (referencePreviewImage != null) {
                     FilterChip(selected = showReferencePopup, onClick = { showReferencePopup = !showReferencePopup },
-                        label = { Text("Ref", fontSize = 9.sp) }, modifier = Modifier.height(28.dp))
+                        label = { Text("Ref", fontSize = LocalEditorTheme.current.fontSize.value.detail) }, modifier = Modifier.height(28.dp))
                 }
 
                 IconButton(onClick = { zoomLevel = (zoomLevel - 4).coerceAtLeast(2) },
                     enabled = zoomLevel > 2, modifier = Modifier.size(28.dp)) {
-                    Text("−", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("−", fontSize = LocalEditorTheme.current.fontSize.value.heading, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text("${zoomLevel}x", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface,
+                Text("${zoomLevel}x", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.width(30.dp), textAlign = TextAlign.Center)
                 IconButton(onClick = { zoomLevel = (zoomLevel + 4).coerceAtMost(48) },
                     enabled = zoomLevel < 48, modifier = Modifier.size(28.dp)) {
-                    Text("+", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("+", fontSize = LocalEditorTheme.current.fontSize.value.heading, color = MaterialTheme.colorScheme.onSurface)
                 }
 
                 Spacer(Modifier.weight(1f))
@@ -359,7 +358,7 @@ fun SpritePixelEditor(
                     color = MaterialTheme.colorScheme.primary
                 ) {
                     Box(Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                        Text("Apply", fontSize = 9.sp, color = MaterialTheme.colorScheme.onPrimary)
+                        Text("Apply", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
                 Surface(
@@ -368,7 +367,7 @@ fun SpritePixelEditor(
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Box(Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                        Text("Close", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Close", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -664,13 +663,14 @@ fun SpritePixelEditor(
             // Right panel: palette + info
             Column(
                 modifier = Modifier
-                    .width(150.dp)
+                    .width((150f * LocalEditorTheme.current.fontSize.value.detail.value / 9f).dp)
                     .fillMaxHeight()
                     .background(Color(0xFF0D0D1A))
+                    .verticalScroll(rememberScrollState())
                     .padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Palette", fontSize = 10.sp, color = Color(0xFFAAAAAA), fontWeight = FontWeight.Medium)
+                Text("Palette", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFAAAAAA), fontWeight = FontWeight.Medium)
 
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -700,7 +700,7 @@ fun SpritePixelEditor(
                 }
 
                 Spacer(Modifier.height(2.dp))
-                Text("Selected", fontSize = 9.sp, color = Color(0xFF888888))
+                Text("Selected", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888))
                 Box(
                     modifier = Modifier.fillMaxWidth().height(24.dp)
                         .clip(RoundedCornerShape(4.dp))
@@ -711,26 +711,26 @@ fun SpritePixelEditor(
                         .border(1.dp, Color(0x60FFFFFF), RoundedCornerShape(4.dp))
                 )
                 val selAlpha = (state.selectedColorArgb ushr 24) and 0xFF
-                if (selAlpha == 0) Text("Transparent", fontSize = 9.sp, color = Color(0xFF888888))
+                if (selAlpha == 0) Text("Transparent", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888))
                 else {
                     val r = (state.selectedColorArgb shr 16) and 0xFF
                     val g = (state.selectedColorArgb shr 8) and 0xFF
                     val b = state.selectedColorArgb and 0xFF
-                    Text("#%02X%02X%02X".format(r, g, b), fontSize = 9.sp, color = Color(0xFFAAAAAA))
+                    Text("#%02X%02X%02X".format(r, g, b), fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFAAAAAA))
                 }
 
                 Divider(color = Color(0xFF333355))
 
                 // Dimensions & info
-                Text("${imageWidth}×${imageHeight}px", fontSize = 9.sp, color = Color(0xFF888888))
-                Text("${state.palette.size} colors", fontSize = 9.sp, color = Color(0xFF888888))
-                Text("${state.undoStack.size} undo steps", fontSize = 9.sp, color = Color(0xFF666688))
+                Text("${imageWidth}×${imageHeight}px", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888))
+                Text("${state.palette.size} colors", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888))
+                Text("${state.undoStack.size} undo steps", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF666688))
                 if (state.isStampMode) {
-                    Text("Stamp: ${state.clipboardWidth}×${state.clipboardHeight}", fontSize = 9.sp, color = Color(0xFFAACC88))
+                    Text("Stamp: ${state.clipboardWidth}×${state.clipboardHeight}", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFAACC88))
                 }
 
                 Divider(color = Color(0xFF333355))
-                Text("Shortcuts", fontSize = 9.sp, color = Color(0xFF888888), fontWeight = FontWeight.Medium)
+                Text("Shortcuts", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888), fontWeight = FontWeight.Medium)
                 val shortcuts = listOf(
                     "B/P" to "Brush/Stamp",
                     "E" to "Eraser",
@@ -755,8 +755,8 @@ fun SpritePixelEditor(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(key, fontSize = 8.sp, color = Color(0xFFAAAACC))
-                        Text(action, fontSize = 8.sp, color = Color(0xFF888888))
+                        Text(key, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFAAAACC))
+                        Text(action, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888))
                     }
                 }
 
@@ -764,8 +764,8 @@ fun SpritePixelEditor(
                     Divider(color = Color(0xFF333355))
                     val w = abs(state.selX2 - state.selX1) + 1
                     val h = abs(state.selY2 - state.selY1) + 1
-                    Text("Selection: ${w}×${h}", fontSize = 9.sp, color = Color(0xFFAABBCC))
-                    Text("(${state.selLeft()}, ${state.selTop()})", fontSize = 8.sp, color = Color(0xFF888888))
+                    Text("Selection: ${w}×${h}", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFAABBCC))
+                    Text("(${state.selLeft()}, ${state.selTop()})", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF888888))
                 }
 
             }
@@ -845,13 +845,13 @@ private fun FloatingReferenceImage(
                 ) {
                     Text(
                         if (frames.size > 1) "Assembled ${frameIndex + 1}/${frames.size}" else "Assembled",
-                        fontSize = 10.sp,
+                        fontSize = LocalEditorTheme.current.fontSize.value.body,
                         color = Color(0xFFCCCCDD),
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         "Close",
-                        fontSize = 9.sp,
+                        fontSize = LocalEditorTheme.current.fontSize.value.detail,
                         color = Color(0xFFAAAACC),
                         modifier = Modifier.clickable(onClick = onClose)
                     )
@@ -895,11 +895,11 @@ private fun FloatingReferenceImage(
                         frameIndex = (frameIndex + 1) % frames.size
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("Speed", fontSize = 9.sp, color = Color(0xFF8888AA))
+                    Text("Speed", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF8888AA))
                     ReferenceControlButton("-", enabled = frameDelayMs < 600L) {
                         frameDelayMs = (frameDelayMs + 30L).coerceAtMost(600L)
                     }
-                    Text("${frameDelayMs}ms", fontSize = 9.sp, color = Color(0xFFCCCCDD), modifier = Modifier.width(42.dp), textAlign = TextAlign.Center)
+                    Text("${frameDelayMs}ms", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFCCCCDD), modifier = Modifier.width(42.dp), textAlign = TextAlign.Center)
                     ReferenceControlButton("+", enabled = frameDelayMs > 30L) {
                         frameDelayMs = (frameDelayMs - 30L).coerceAtLeast(30L)
                     }
@@ -939,7 +939,7 @@ private fun ReferenceControlButton(label: String, enabled: Boolean = true, onCli
         Box(Modifier.padding(horizontal = 7.dp), contentAlignment = Alignment.Center) {
             Text(
                 label,
-                fontSize = 9.sp,
+                fontSize = LocalEditorTheme.current.fontSize.value.detail,
                 color = if (enabled) Color(0xFFDDDDEE) else Color(0xFF777788)
             )
         }
@@ -960,7 +960,7 @@ private fun SmallButton(label: String, hint: String, enabled: Boolean = true, on
         ) {
             Text(
                 "$label ($hint)",
-                fontSize = 8.sp,
+                fontSize = LocalEditorTheme.current.fontSize.value.detail,
                 color = if (enabled) {
                     MaterialTheme.colorScheme.onSecondaryContainer
                 } else {

@@ -8,7 +8,7 @@ import javax.imageio.ImageIO
 
 /**
  * Exports rendered sprites as PNGs for visual inspection.
- * Also compares against reference PNGs where available.
+ * Requires nonblank native output without bundled image references.
  */
 class SpriteRenderExportTest {
 
@@ -58,17 +58,7 @@ class SpriteRenderExportTest {
                 println("Exported sheet (16-col VRAM layout): ${sheetFile.absolutePath} (${w}x${h})")
             }
 
-            // Compare against reference PNG if available
-            val refFile = TestRomHelper.repositoryFile(
-                "desktopApp/src/jvmMain/resources/enemies/${hexId}.png"
-            )
-            if (refFile.exists()) {
-                val refImg = ImageIO.read(refFile)
-                println("  Reference: ${refFile.name} (${refImg.width}x${refImg.height})")
-                println("  Assembled: ${assembled.width}x${assembled.height}")
-            } else {
-                println("  No reference PNG found at enemies/${hexId}.png")
-            }
+            assertTrue(assembled.pixels.any { it ushr 24 != 0 }, name)
         }
     }
 

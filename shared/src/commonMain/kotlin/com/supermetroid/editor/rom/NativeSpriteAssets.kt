@@ -15,7 +15,8 @@ object NativeSpriteAssets {
     val SOURCES = RomVisualAssets.ASSETS.distinctBy { it.graphics }.map { asset ->
         Source(asset.name, asset.graphics, asset.bytes, asset.compressed,
             asset.format in listOf(RomVisualAssets.Format.MODE7_TILES, RomVisualAssets.Format.MODE7_MAP, RomVisualAssets.Format.TITLE_SCENE))
-    } + Source("Samus' Ship shared OBJ tiles", 0xADB600, 0x1000, false, false)
+    } + listOf(Source("Samus' Ship shared OBJ tiles", 0xADB600, 0x1000, false, false),
+        Source("Golden Four statue OBJ tiles", TourianStatueSprites.TILES, TourianStatueSprites.TILE_BYTES, false, false))
 
     fun shipPalette(parser: RomParser): Int {
         val header = parser.snesToPc(0xA0D07F)
@@ -28,6 +29,7 @@ object NativeSpriteAssets {
     fun paletteRows(parser: RomParser): Set<Int> = buildSet {
         for (asset in RomVisualAssets.ASSETS) for (row in 0 until asset.paletteColors / 16) add(asset.palette + row * 32)
         add(shipPalette(parser))
+        TourianStatueSprites.PARTS.forEach { add(it.palette) }
         for (mask in 0 until 12) add(0x900000 or parser.readUInt16At(parser.snesToPc(0x90C3C9 + mask * 2)))
         for (i in 0 until 40) {
             val pointer = parser.readUInt16At(parser.snesToPc(0x9BB7D3 + i * 2))

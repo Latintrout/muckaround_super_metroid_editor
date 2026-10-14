@@ -17,6 +17,9 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
 import com.supermetroid.editor.rom.*
 import java.awt.image.BufferedImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal data class NativeSpriteTarget(val sourceKey: String, val paletteBase: Int, val rows: Int, val defaultRow: Int = 0) {
     val name: String get() = NativeSpriteAssets.source(sourceKey).name
@@ -31,6 +34,9 @@ internal fun NativeSpriteSourceControls(
     var row by remember(target) { mutableStateOf(target.defaultRow) }
     var colorIndex by remember(target, row) { mutableStateOf(-1) }
     var error by remember(target) { mutableStateOf<String?>(null) }
+    var status by remember(target) { mutableStateOf("") }
+    var transferring by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val paletteAddress = target.paletteBase + row * 32
     val palette = remember(parser, target, row, editor.editVersion, editor.paletteVersion) { editor.nativeSprites.palette(parser, paletteAddress) }
     val fs = LocalEditorTheme.current.fontSize.value
@@ -40,6 +46,37 @@ internal fun NativeSpriteSourceControls(
             error = runCatching { onEdit(editor.nativeSprites.loadSheet(parser, target.sourceKey,
                 if (NativeSpriteAssets.source(target.sourceKey).mode7) target.paletteBase else paletteAddress)) }.exceptionOrNull()?.message
         })
+        SpriteWorkspaceAction("Export source PNG", {
+            val sheet = runCatching { editor.nativeSprites.loadSheet(parser, target.sourceKey,
+                if (NativeSpriteAssets.source(target.sourceKey).mode7) target.paletteBase else paletteAddress) }
+                .getOrElse { error = it.message; return@SpriteWorkspaceAction }
+            val file = choosePngFile("Export Sprite Source PNG", "${exportSafeName(target.name)}_${target.sourceKey}_source.png") ?: return@SpriteWorkspaceAction
+            scope.launch {
+                transferring = true
+                val result = runCatching { withContext(Dispatchers.IO) { exportNativeSpritePng(file, sheet) } }
+                error = result.exceptionOrNull()?.message
+                status = if (result.isSuccess) "Exported ${file.name}" else ""
+                transferring = false
+            }
+        }, enabled = !transferring)
+        SpriteWorkspaceAction("Import source PNG", {
+            val sheet = runCatching { editor.nativeSprites.loadSheet(parser, target.sourceKey,
+                if (NativeSpriteAssets.source(target.sourceKey).mode7) target.paletteBase else paletteAddress) }
+                .getOrElse { error = it.message; return@SpriteWorkspaceAction }
+            val file = chooseSpriteSourcePng() ?: return@SpriteWorkspaceAction
+            val owner = editor.project
+            scope.launch {
+                transferring = true
+                val result = runCatching {
+                    val pixels = withContext(Dispatchers.IO) { importNativeSpritePng(file, sheet) }
+                    require(editor.project === owner) { "Project changed during import" }
+                    editor.nativeSprites.applyPixels(parser, sheet, pixels)
+                }
+                error = result.exceptionOrNull()?.message
+                status = if (result.isSuccess) "Imported ${file.name} · colors matched to the selected palette" else ""
+                transferring = false
+            }
+        }, enabled = !transferring)
         if (editor.nativeSprites.hasTiles(target.sourceKey)) SpriteWorkspaceAction("Reset pixels", { editor.nativeSprites.resetTiles(target.sourceKey) })
         if (editor.nativeSprites.hasPalette(parser, paletteAddress)) SpriteWorkspaceAction("Reset palette", { editor.nativeSprites.resetPalette(parser, paletteAddress) })
     }
@@ -61,6 +98,7 @@ internal fun NativeSpriteSourceControls(
     )
     if (NativeSpriteAssets.source(target.sourceKey).compressed) Text("Compressed source: Apply must fit its original ROM space.", fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = fs.detail) }
+    if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = fs.detail)
 }
 
 private fun SpriteAnimation.bitmaps() = frames.take(32).map { frame ->

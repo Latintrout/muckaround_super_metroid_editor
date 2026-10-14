@@ -19,17 +19,42 @@ class ProjectileSprites(private val parser: RomParser) {
         }
     }
 
-    fun render(weapon: Weapon, direction: Int = 2): SpriteAnimation? = runCatching {
+    private fun firstRecord(weapon: Weapon, direction: Int): Int {
         require(direction in DIRECTIONS.indices)
         val beam = weapon.beam
         val table = when {
             beam != null -> (if (weapon.charged) 0x9383D9 else 0x9383C1) + beam * 2
             weapon.nonBeam != null -> 0x9383F1 + weapon.nonBeam * 2
-            else -> return null
+            else -> error("Weapon has no source definition")
         }
         val definition = 0x930000 or word(table)
         val directional = beam != null || weapon.nonBeam in listOf(0, 2)
-        var address = 0x930000 or word(definition + 2 + if (directional) direction * 2 else 0)
+        return 0x930000 or word(definition + 2 + if (directional) direction * 2 else 0)
+    }
+
+    /** Use the same source OAM palette row as the chosen projectile, not a generic effects row. */
+    fun paletteRow(weapon: Weapon, direction: Int = 2): Int {
+        val maps = EnemySpritemap(parser)
+        var address = firstRecord(weapon, direction)
+        val seen = mutableSetOf<Int>()
+        while (seen.add(address) && seen.size <= 512) {
+            when (word(address)) {
+                0x8239 -> address = 0x930000 or word(address + 2)
+                in 1..0x7FFF -> {
+                    val map = maps.parseSpritemap(0x930000 or word(address + 2)) ?: break
+                    if (map.entries.isNotEmpty()) return map.entries.groupBy { it.palRow }
+                        .maxBy { (_, entries) -> entries.fold(0) { area, entry -> area + if (entry.is16x16) 256 else 64 } }.key
+                    address += 8
+                }
+                else -> break
+            }
+        }
+        return 6
+    }
+
+    fun render(weapon: Weapon, direction: Int = 2): SpriteAnimation? = runCatching {
+        val beam = weapon.beam
+        var address = firstRecord(weapon, direction)
         val tiles = RomVisualAssets.raw(parser, 0x9AD200, 0x2000)
         val colors = RomVisualAssets.palette(parser, 0x9A8100, 128)
         val rows = (0..7).associateWith { colors.copyOfRange(it * 16, (it + 1) * 16) }.toMutableMap()

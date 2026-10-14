@@ -92,8 +92,6 @@ class PhantoonSpritemap(private val romParser: RomParser) {
 
         private val IDLE_COMPONENTS = listOf(0xA7E0AA, 0xA7E236, 0xA7E31E, 0xA7E34E, 0xA7E37E)
 
-        /** X offset used only by the historical cropped E4BF PNG comparison. */
-        const val BODY_PNG_X_OFFSET = 5
     }
 
     enum class ComponentGroup(val displayName: String) {

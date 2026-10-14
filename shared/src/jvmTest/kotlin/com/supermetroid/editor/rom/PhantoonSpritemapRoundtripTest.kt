@@ -2,7 +2,6 @@ package com.supermetroid.editor.rom
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
-import java.io.File
 import javax.imageio.ImageIO
 import java.awt.image.BufferedImage
 
@@ -11,7 +10,7 @@ class PhantoonSpritemapRoundtripTest {
     private fun loadTestRom(): RomParser? = TestRomHelper.loadRomParser()
 
     @Test
-    fun `render body and verify 100 pct match with PNG`() {
+    fun `native body PNG export round trip preserves every pixel`() {
         val parser = loadTestRom() ?: return
         val sm = PhantoonSpritemap(parser)
         assertTrue(sm.load(), "Spritemap should load successfully")
@@ -23,35 +22,13 @@ class PhantoonSpritemapRoundtripTest {
         assertEquals(80, body.width)
         assertEquals(96, body.height)
 
-        val pngFile = File("../desktopApp/src/jvmMain/resources/enemies/E4BF.png")
-        if (!pngFile.exists()) return
-        val refImg = ImageIO.read(pngFile)
-        val refPixels = IntArray(refImg.width * refImg.height)
-        refImg.getRGB(0, 0, refImg.width, refImg.height, refPixels, 0, refImg.width)
-
-        var matches = 0
-        val offX = PhantoonSpritemap.BODY_PNG_X_OFFSET
-        for (py in 0 until refImg.height) {
-            for (px in 0 until refImg.width) {
-                val ax = px + offX
-                val ay = py
-                if (ax >= body.width || ay >= body.height) continue
-                val refA = refPixels[py * refImg.width + px]
-                val asmA = body.pixels[ay * body.width + ax]
-                val ra = (refA ushr 24) and 0xFF
-                val aa = (asmA ushr 24) and 0xFF
-                if (ra < 128 && aa < 128) { matches++; continue }
-                if (ra < 128 || aa < 128) continue
-                val dr = Math.abs(((refA shr 16) and 0xFF) - ((asmA shr 16) and 0xFF))
-                val dg = Math.abs(((refA shr 8) and 0xFF) - ((asmA shr 8) and 0xFF))
-                val db = Math.abs((refA and 0xFF) - (asmA and 0xFF))
-                if (dr <= 10 && dg <= 10 && db <= 10) matches++
-            }
-        }
-        val total = refImg.width * refImg.height
-        val pct = matches * 100.0 / total
-        println("Match: $matches/$total (${String.format("%.1f", pct)}%%)")
-        assertTrue(pct > 99.0, "Should match >99%")
+        assertTrue(body.pixels.count { it ushr 24 != 0 } > 1000)
+        val image = BufferedImage(body.width, body.height, BufferedImage.TYPE_INT_ARGB)
+        image.setRGB(0, 0, body.width, body.height, body.pixels, 0, body.width)
+        val bytes = java.io.ByteArrayOutputStream()
+        assertTrue(ImageIO.write(image, "png", bytes))
+        val decoded = ImageIO.read(java.io.ByteArrayInputStream(bytes.toByteArray()))
+        assertArrayEquals(body.pixels, decoded.getRGB(0, 0, body.width, body.height, null, 0, body.width))
     }
 
     @Test

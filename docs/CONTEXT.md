@@ -165,9 +165,12 @@ Screenshots and reference images for SMILE editors (BTS, enemy, FX, PLM).
 - **$AA**: Bomb Torizo, Golden Torizo
 - **$B3**: Botwoon
 
-### Pre-rendered Enemy Sprite PNGs
+### Enemy Sprite Previews
 
-`desktopApp/src/jvmMain/resources/enemies/<speciesId>.png`
+Enemy sprites are assembled directly from ROM tiles, palettes and OAM/BG maps.
+Legacy SMILE PNG resources and fallback loaders have been removed. See
+[`graphics/sprites.md`](graphics/sprites.md#native-only-enemy-previews) for rendering
+coverage, composite bosses and the native-only regression tests.
 
 ---
 
