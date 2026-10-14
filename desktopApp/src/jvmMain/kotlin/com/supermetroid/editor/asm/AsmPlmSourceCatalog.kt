@@ -27,9 +27,26 @@ internal class AsmPlmSourceCatalog(
     private val bindings = mutableMapOf<Int, ProjectPlmSourceBinding>()
     private val originalSource = AsmPlmDocument.Companion.Source(originalText)
     private val originalDocuments = mutableMapOf<Int, AsmPlmDocument>()
+    private var verifiedEnemyMacroText: String? = null
 
     fun requireStandardMacro(macros: String) {
         require(plmMacro(macros) == plmMacro(originalMacros)) { "%PLMPopEntry has a custom layout; standard room-object source is unavailable." }
+    }
+    /** Native record layouts cannot be widened just because Asar accepts the new byte stream. */
+    fun requireStandardEnemyMacros(macros: String) {
+        if (verifiedEnemyMacroText == macros) return
+        for (name in listOf("EnemyPopulations", "EnemyHeader", "enemyID", "XPosition", "YPosition", "initParam", "properties", "extraProperties", "speedParams")) {
+            val pattern = Regex("(?ms)^macro $name\\([^\\n]*\\).*?^endmacro\\b")
+            val original = pattern.findAll(originalMacros).toList()
+            val current = pattern.findAll(macros).toList()
+            fun code(value: String) = value.lineSequence().map { it.substringBefore(';').trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+            require(original.size <= 1 && current.size == original.size &&
+                original.singleOrNull()?.value?.let(::code) == current.singleOrNull()?.value?.let(::code)) {
+                val line = current.firstOrNull()?.range?.first?.let { macros.take(it).count { c -> c == '\n' } } ?: 0
+                "macros.asm:${line + 1}: %$name has a custom record layout. Authored enemy data requires the native layout; restore it or use a matching codec."
+            }
+        }
+        verifiedEnemyMacroText = macros
     }
     fun binding(pointer: Int): ProjectPlmSourceBinding {
         bindings[pointer]?.let { return it }

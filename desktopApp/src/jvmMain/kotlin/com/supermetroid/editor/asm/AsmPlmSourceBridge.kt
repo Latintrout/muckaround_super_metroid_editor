@@ -28,6 +28,7 @@ internal class AsmPlmSourceBridge(
     var onMetadataChanged: () -> Unit = {}
     val initialScrolls = AsmInitialScrollBridge(catalog, workspace, project) { onMetadataChanged() }
     val fx = AsmFxBridge(catalog, workspace, project) { onMetadataChanged() }
+    val enemies = AsmEnemyBridge(catalog, workspace, project) { onMetadataChanged() }
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
     private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
@@ -74,10 +75,12 @@ internal class AsmPlmSourceBridge(
     override val sourceFileIds: Set<String> get() = buildSet {
         if (project().rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 }) add(PLM_SOURCE_FILE)
         if (project().rooms.values.any { it.asmFxSourceVersion != 0 }) add(FX_SOURCE_FILE)
+        if (project().rooms.values.any { it.asmEnemySourceVersion != 0 }) add(ENEMY_SOURCE_FILE)
     }
 
     override fun prepare(fileId: String, text: String): () -> String {
         if (fileId == FX_SOURCE_FILE && fileId in sourceFileIds) return fx.prepare(text)
+        if (fileId == ENEMY_SOURCE_FILE && fileId in sourceFileIds) return enemies.prepare(text)
         if (fileId != PLM_SOURCE_FILE || fileId !in sourceFileIds) return { text }
         val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
         val initialRooms = project().rooms.values.filter { it.asmInitialScrollSourceVersion != 0 }.map { room ->

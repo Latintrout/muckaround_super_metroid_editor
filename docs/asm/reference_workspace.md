@@ -1392,6 +1392,75 @@ preview, notes, strict reads, state cloning and headered allocation/ownership.
 alongside PLMs, initial scrolls, door variants, empty tables, added states and ROM
 patches; fixtures are isolated and the base ROM remains immutable.
 
+## Reciprocal enemy populations and GFX
+
+Existing-room actors now use the same source/GUI authority as objects and FX.
+In an ASM-source project, **Room Info → Enemy Actors / Enemy Graphics → ASM**, or
+an actor's **ASM** shortcut in tile properties, opens that room/state's authored
+data rather than the species header. The first GUI add/remove/update also adopts
+the effective lists automatically. ROM-only projects keep their established delta
+path and do not show these source shortcuts.
+
+One `bank_A1.asm` buffer contains the paired definitions, so population and GFX
+changes have one atomic edit/save/undo boundary. The build planner places each
+population macro in `$A1` and each graphics macro in `$B4`; their stable identities
+do not encode allocated addresses. Per-state wrappers reference each list
+independently: a GUI population edit forks only its shared population, and a new
+species forks/adds graphics only when necessary. Raw edits to a shared declaration
+affect every referring state. New conditions inherit the template's two references.
+These paired state wrappers are planner recipes, not contiguous records to invoke
+inline from a custom module; placement invokes the two tables in their own banks.
+Saving removes unreachable owned helpers but retains definitions referenced by
+other project source. Scalar GUI edits retain other literal spellings and notes;
+source saves refresh only generated descriptions, leaving executable text intact.
+
+```asm
+macro SmeditEnemies_91F8_Population_1()
+    ; species, pixel X, pixel Y, init, properties, extra properties, parameter 1, parameter 2
+    dw $D13F, $0028, $0038, $0000, $2800, $0000, $0000, $0000
+    dw $FFFF ; End of population
+    db $00   ; Required kills
+endmacro
+
+macro SmeditEnemies_91F8_Graphics_1()
+    dw $D13F, $0001 ; species, VRAM destination (palette offset 1 → OBJ palette 9)
+    dw $FFFF
+endmacro
+```
+
+All eight actor words, list ordering, trailing required-kill count, intentional
+no-GFX actors and transfer-only GFX entries survive adoption. Zero-transfer headers
+do not acquire invented transfers. Equal `GRAPHADR` addresses are not treated as
+species aliases: `$A0:8BF3` matches the species ID itself. The native engine has
+**32 runtime enemy slots**, regardless of the preview parser's 64-record safety
+cap. Graphics validation checks four entries, palette offsets 0–7, raw LoROM source
+bounds, nonzero/aligned transfer sizes and the `$7000..97FF` staging footprint;
+special size-bit-15 quadrant offsets are retained. Native tables are audited with
+the clean ROM fixture. Companion initialization and dynamic AI spawning still need
+encounter-specific knowledge; these checks are not a gameplay simulation.
+
+Source-only values are decoded from a revision-local typed lens, including during
+progressive startup, without waiting for the full IDE index or invoking Asar.
+Invalid drafts remain saveable, preserve the last valid live preview and block GUI
+overwrites/builds. JSON schema 13 stores `asmEnemySourceVersion = 1`, not another
+population/GFX value list; common/state enemy deltas retire with metadata-aware
+source undo. Header/population macro layout changes, native loader changes and
+competing original tables/state pointers/selectors fail explicitly instead of
+being hidden by generated output. Missing or partial paired placements fail before
+a ROM is published. Allocations and every state pointer are checked against actual
+Asar output and the same write-owner planner used by normal ROM patches.
+
+Try updating an actor's X or parameter in the map, following **ASM**, editing the
+same row back, switching states, then Undo/Redo and Save/reopen. A GFX-less actor
+such as an existing elevator should retain its native arrangement. Build/Run with
+an unrelated patch enabled. `AsmEnemySourceTest` covers these boundaries, raw
+aliases, malformed/missing GFX, fifth transfers, macro layout changes, helper
+cleanup, headered claims and the complete native-table audit.
+`asmBuildIntegrationTest --tests '*authored enemy populations*'` proves real Asar
+composition with PLMs, scrolls, FX, new conditional states and ordinary patches in
+isolated projects. Project-created rooms and whole-room reset are intentionally
+guarded until those compound operations have stable reciprocal source identities.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -1412,8 +1481,9 @@ Follow-up work can now be incremental:
    shares fixed-layout declarations and relocatable authored object macros with the
    GUI, including state exceptions and copy-on-write. Initial screen grids,
    scroll-trigger commands, paired save-spawn records and ordinary door/default FX
-   now use the same authority contract. Next prioritize enemy population/GFX pairing and one
-   asset-owned graphics example, alongside compound operations. Then extend full
+   now use the same authority contract, including paired enemy populations/GFX.
+   Next prioritize source-aware compound operations and one asset-owned graphics
+   example. Then extend full
    authoring to rewritten state graphs, level data, doors, headers, and state selectors;
    then give project-created rooms stable source
    identities. Graphics, map, text, and sound encoders should follow the same

@@ -44,6 +44,7 @@ internal data class AsmRoomMaterialization(
     val saveTables: List<AsmRoomSaveTable> = emptyList(),
     val initialScrollTables: List<AsmRoomInitialScrollTable> = emptyList(),
     val fxTables: List<AsmRoomFxTable> = emptyList(),
+    val enemyTables: List<AsmRoomEnemyTable> = emptyList(),
 ) {
     val isEmpty: Boolean get() = claims.isEmpty()
 
@@ -74,6 +75,7 @@ internal class AsmSourceRoomMaterializer {
         sourceSaves: Map<String, com.supermetroid.editor.rom.SourceSaveResource> = emptyMap(),
         sourceInitialScrolls: Map<Int, Map<String, com.supermetroid.editor.rom.SourceInitialScrollResource>> = emptyMap(),
         sourceFx: Map<Int, Map<String, com.supermetroid.editor.rom.SourceFxResource>> = emptyMap(),
+        sourceEnemies: Map<Int, Map<String, com.supermetroid.editor.rom.SourceEnemyResources>> = emptyMap(),
     ): AsmRoomMaterialization {
         if (!ProjectRoomExporter.hasRoomEdits(project)) return AsmRoomMaterialization.EMPTY
 
@@ -113,7 +115,8 @@ internal class AsmSourceRoomMaterializer {
         val saveTables = if (sourceSaves.isEmpty()) emptyList() else discoverAsmRoomSaveTables(report, requireNotNull(plannedRom), sourceSaves)
         val initialScrollTables = if (sourceInitialScrolls.isEmpty()) emptyList() else discoverAsmInitialScrollTables(project, report, requireNotNull(plannedRom), sourceInitialScrolls)
         val fxTables = if (sourceFx.isEmpty()) emptyList() else discoverAsmFxTables(project, report, requireNotNull(plannedRom), sourceFx)
-        val typedClaims = plmTables.flatMap(AsmRoomPlmTable::claims) + scrollTables.map(AsmRoomScrollTable::claim) + saveTables.map(AsmRoomSaveTable::claim) + initialScrollTables.flatMap(AsmRoomInitialScrollTable::claims) + fxTables.flatMap(AsmRoomFxTable::claims)
+        val enemyTables = if (sourceEnemies.isEmpty()) emptyList() else discoverAsmEnemyTables(project, report, requireNotNull(plannedRom), sourceEnemies)
+        val typedClaims = plmTables.flatMap(AsmRoomPlmTable::claims) + scrollTables.map(AsmRoomScrollTable::claim) + saveTables.map(AsmRoomSaveTable::claim) + initialScrollTables.flatMap(AsmRoomInitialScrollTable::claims) + fxTables.flatMap(AsmRoomFxTable::claims) + enemyTables.flatMap(AsmRoomEnemyTable::claims)
         val typedOffsets = hashSetOf<Int>()
         typedClaims.forEach { claim ->
             (claim.pcOffset until claim.endExclusive).forEach { pc ->
@@ -152,7 +155,7 @@ internal class AsmSourceRoomMaterializer {
         return AsmRoomMaterialization(
             source = renderSource(rawClaims) + scrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } +
                 plmTables.joinToString("\n", prefix = "\n") { it.renderSource() } + saveTables.joinToString("\n", prefix = "\n") { it.renderSource() } +
-                initialScrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } + fxTables.joinToString("\n", prefix = "\n") { it.renderSource() },
+                initialScrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } + fxTables.joinToString("\n", prefix = "\n") { it.renderSource() } + enemyTables.joinToString("\n", prefix = "\n") { it.renderSource() },
             claims = rawClaims + typedClaims,
             roomIds = roomIds,
             eligibleWrites = writes.size,
@@ -162,6 +165,7 @@ internal class AsmSourceRoomMaterializer {
             saveTables = saveTables,
             initialScrollTables = initialScrollTables,
             fxTables = fxTables,
+            enemyTables = enemyTables,
         )
     }
 

@@ -43,6 +43,75 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `authored enemy populations and GFX compose with states PLMs and ROM patches with real Asar parity`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        editor.loadRoom(0x91F8, parser, parser.readRoomHeader(0x91F8)!!)
+        assertTrue(editor.ensureEnemySource("Landing Site"), editor.statusMessage)
+        val room = project.rooms.getValue("91F8")
+        val stateId = editor.currentPlmStateId()!!
+        val original = editor.workingEnemies.first()
+        editor.updateEnemy(original, original.copy(x = original.x + 16, extra3 = 0x0123))
+        assertNull(editor.enemyPreviewProblem)
+        val newId = editor.addRoomState(stateId, projectRoomStateCondition(ProjectRoomStateConditionKind.EVENT_SET, 0x0B), parser)
+        editor.switchRoomState(newId, parser)
+        editor.addEnemy(0xD17F, 128, 160)
+        assertNull(editor.enemyPreviewProblem, editor.statusMessage)
+        assertTrue(editor.ensureCurrentPlmSource("Landing Site"))
+        editor.setScroll(0, 0, 2, editor.workingBlocksWide / 16)
+        editor.setRoomStateFxChange(newId, com.supermetroid.editor.data.FxChange(fxType = 2, liquidSurfaceStart = 0x100), parser)
+        project.patches += SmPatch("enemy-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x43))))
+        suspend fun buildAndVerify() {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            val states = built.parseRoomStatesWithData(room.roomId)
+            room.states.forEachIndexed { index, state ->
+                val expected = assertNotNull(bridge.enemies.view(room.roomId, state.id).resource)
+                assertContentEquals(expected.population.bytes(), com.supermetroid.editor.rom.readSourceEnemyPopulation(built, states[index].enemySetPtr, expected.population.identity).bytes())
+                assertContentEquals(expected.graphics.bytes(), com.supermetroid.editor.rom.readSourceEnemyGraphics(built, states[index].enemyGfxPtr, expected.graphics.identity).bytes())
+                assertEquals(bridge.managedView(room.roomId, state.id).document!!.entries, built.parsePlmSet(states[index].plmSetPtr))
+            }
+            val populations = room.states.mapIndexed { index, state -> bridge.enemies.view(room.roomId, state.id).resource!!.population.identity to states[index].enemySetPtr }.groupBy({ it.first }, { it.second })
+            assertTrue(populations.values.all { it.distinct().size == 1 })
+            assertEquals(populations.size, populations.values.map { it.first() }.distinct().size)
+            assertEquals(0x43, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertTrue(result.writeReport.writes.any { it.owner == "patch:enemy-test-patch" })
+            val generated = AsmBuildArtifactRepository().loadGeneratedRooms(fixture.projectFile.path)!!.lines.joinToString("\n")
+            assertContains(generated, "; Enemy placement: authored paired values live in bank_A1.asm.")
+            assertContains(generated, "assert (")
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify()
+        val before = bridge.enemies.sourceText()
+        val selected = bridge.enemies.view(room.roomId, newId).resource!!.population
+        val body = authoredMacroBody(before, selected.identity)
+        workspace.replaceProjectSource(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, before, before.replace(body,
+            body.replace("\$0080, \$00A0", "\$0090, \$00A0")))
+        editor.refreshLinkedPlms()
+        assertEquals(144, editor.workingEnemies.last().x)
+        buildAndVerify()
+        val current = bridge.enemies.sourceText()
+        val invalid = current.replace("db \$00 ; Required kills", "db \$100 ; Required kills")
+        assertNotEquals(current, invalid)
+        workspace.replaceProjectSource(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, current, invalid)
+        assertTrue(workspace.saveAllSources())
+        val logs = mutableListOf<String>()
+        assertNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+        val failure = AsmBuildArtifactRepository().load(fixture.projectFile.path)!!
+        assertFalse(failure.succeeded)
+        assertTrue(failure.diagnostics.any { it.fileId == com.supermetroid.editor.asm.ENEMY_SOURCE_FILE && it.lineIndex != null })
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
+
     @Test fun `authored FX compose with PLMs scrolls door variants new states and ROM patches with real Asar parity`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)

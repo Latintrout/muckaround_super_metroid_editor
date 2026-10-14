@@ -419,7 +419,7 @@ class EditorState(
 
     fun setProjectRomBuildMode(mode: ProjectRomBuildMode) {
         if (mode == ProjectRomBuildMode.PATCHED_ROM && (project.asmWorkspace.plmSourceBindings.isNotEmpty() ||
-                project.rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 })) {
+                project.rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 || it.asmEnemySourceVersion != 0 })) {
             postStatus("Source-authored room data requires ASM mode.")
             return
         }
@@ -581,6 +581,7 @@ class EditorState(
     val statusIsError: Boolean get() = statusMessage.startsWith("Export failed", ignoreCase = true) ||
         statusMessage.startsWith("Export blocked", ignoreCase = true) ||
         statusMessage.startsWith("Save failed", ignoreCase = true) ||
+        statusMessage.startsWith("Enemy edit blocked", ignoreCase = true) ||
         statusMessage.startsWith("Object edit blocked", ignoreCase = true)
 
     /** Long-running ROM build state stays visible instead of expiring like a transient status. */
@@ -660,6 +661,49 @@ class EditorState(
         fxPreviewProblem = view.problem
         val preview = "$currentRoomId:$stateId" to view.resource?.entries.orEmpty()
         if (preview != linkedFxPreview) { linkedFxPreview = preview; _editVersionState.value++ }
+    }
+
+    internal var enemyPreviewProblem by mutableStateOf<String?>(null)
+        private set
+    internal var workingEnemyGraphics by mutableStateOf<List<RomParser.EnemyGfxEntry>>(emptyList())
+        private set
+    internal fun hasManagedEnemies() = (project.rooms[project.roomKey(currentRoomId)]?.asmEnemySourceVersion ?: 0) != 0
+    internal fun ensureEnemySource(roomName: String): Boolean = runCatching {
+        requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }.enemies.migrate(currentRoomId, roomName)
+        currentStateId = currentPlmStateId()
+        refreshEnemies()
+        true
+    }.getOrElse { postStatus("Enemy edit blocked: ${it.message}"); false }
+
+    private fun refreshEnemies() {
+        if (!hasManagedEnemies()) { enemyPreviewProblem = null; workingEnemyGraphics = emptyList(); return }
+        val stateId = currentPlmStateId()
+        val bridge = asmPlmSourceBridge?.enemies
+        if (stateId == null || bridge == null) { enemyPreviewProblem = "Enemy source is loading…"; return }
+        val view = bridge.view(currentRoomId, stateId)
+        enemyPreviewProblem = view.problem
+        val resource = view.resource ?: return
+        if (_workingEnemies != resource.population.entries || workingEnemyGraphics != resource.graphics.entries) {
+            _workingEnemies.clear(); _workingEnemies.addAll(resource.population.entries)
+            workingEnemyGraphics = resource.graphics.entries
+            _editVersionState.value++
+        }
+    }
+
+    private fun editSourceEnemies(name: String, transform: (List<RomParser.EnemyEntry>) -> List<RomParser.EnemyEntry>) {
+        if (!ensureEnemySource(currentRomParser?.readRoomHeader(currentRoomId)?.name ?: "Room")) return
+        runCatching {
+            val bridge = requireNotNull(asmPlmSourceBridge).enemies
+            val before = bridge.sourceText()
+            bridge.edit(currentRoomId, requireNotNull(currentPlmStateId()), transform)
+            val after = bridge.sourceText()
+            if (before != after) {
+                val op = EditOperation(name)
+                managedPlmUndo[op] = Triple(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, before, after)
+                undoStack.add(op); redoStack.clear(); undoVersion++
+                refreshEnemies(); editVersion++
+            }
+        }.onFailure { postStatus("Enemy edit blocked: ${it.message}") }
     }
 
     private fun editSourceFx(stateId: String, door: Int, change: FxChange?, allStates: Boolean = false) {
@@ -784,6 +828,7 @@ class EditorState(
     internal fun refreshLinkedPlms() {
         refreshInitialScrolls()
         refreshFx()
+        refreshEnemies()
         if (hasManagedPlms()) {
             val stateId = currentPlmStateId()
             val view = stateId?.let { asmPlmSourceBridge?.managedView(currentRoomId, it) }
@@ -3257,6 +3302,9 @@ class EditorState(
 
     /** Create a complete project-owned room seed. Call [prepareWorkspaceParser] afterwards. */
     fun createNewRoom(request: NewRoomCreationRequest, romParser: RomParser): ProjectNewRoom {
+        require(project.rooms.values.none { it.asmEnemySourceVersion != 0 }) {
+            "Project-created rooms cannot yet be combined with authored enemy populations/GFX. No room was created; keep existing-room authoring until stable new-room source identities are supported."
+        }
         val name = request.name.trim()
         require(name.isNotEmpty()) { "Room name cannot be empty" }
         require(request.area in 0..6) { "Room area must be Crateria through Ceres" }
@@ -3686,6 +3734,8 @@ class EditorState(
         objectPreviewProblem = null
         initialScrollPreviewProblem = null
         fxPreviewProblem = null
+        enemyPreviewProblem = null
+        workingEnemyGraphics = emptyList()
         linkedFxPreview = null
         dirty = false
         patchesSeeded = false
@@ -6382,6 +6432,7 @@ class EditorState(
 
     fun addEnemy(enemyId: Int, pixelX: Int, pixelY: Int, initParam: Int = 0, properties: Int = 0x2800) {
         val entry = RomParser.EnemyEntry(enemyId, pixelX, pixelY, initParam, properties)
+        if (asmNavigationEnabled || hasManagedEnemies()) { editSourceEnemies("Add ${RomParser.enemyName(enemyId)}", { it + entry }); return }
         _workingEnemies.add(entry)
         val ec = EnemyChange("add", enemyId, pixelX, pixelY, initParam, properties)
         currentEnemyChanges().add(ec)
@@ -6396,6 +6447,14 @@ class EditorState(
     }
 
     fun removeEnemy(enemy: RomParser.EnemyEntry) {
+        if (asmNavigationEnabled || hasManagedEnemies()) {
+            val index = _workingEnemies.indexOfFirst { it === enemy }.takeIf { it >= 0 } ?: _workingEnemies.indexOf(enemy)
+            editSourceEnemies("Remove ${RomParser.enemyName(enemy.id)}") { entries ->
+                require(index >= 0 && entries.getOrNull(index) == enemy) { "This actor changed; select its current placement again." }
+                entries.toMutableList().also { it.removeAt(index) }
+            }
+            return
+        }
         _workingEnemies.removeAll { it.id == enemy.id && it.x == enemy.x && it.y == enemy.y }
         val ec = EnemyChange("remove", enemy.id, enemy.x, enemy.y, enemy.initParam, enemy.properties,
             enemy.extra1, enemy.extra2, enemy.extra3, origX = enemy.x, origY = enemy.y)
@@ -6411,6 +6470,14 @@ class EditorState(
     }
 
     fun updateEnemy(old: RomParser.EnemyEntry, new: RomParser.EnemyEntry) {
+        if (asmNavigationEnabled || hasManagedEnemies()) {
+            val index = _workingEnemies.indexOfFirst { it === old }.takeIf { it >= 0 } ?: _workingEnemies.indexOf(old)
+            editSourceEnemies("Update ${RomParser.enemyName(new.id)}") { entries ->
+                require(index >= 0 && entries.getOrNull(index) == old) { "This actor changed; select its current placement again." }
+                entries.toMutableList().also { it[index] = new }
+            }
+            return
+        }
         val idx = _workingEnemies.indexOfFirst { it.id == old.id && it.x == old.x && it.y == old.y }
         if (idx < 0) return
         _workingEnemies[idx] = new
@@ -7333,13 +7400,18 @@ class EditorState(
             val view = requireNotNull(asmPlmSourceBridge) { "Wait for the FX source before cloning this state." }.fx.view(currentRoomId, template.id)
             require(view.problem == null) { view.problem ?: "Resolve the FX draft before cloning its state." }
         }
+        if (hasManagedEnemies()) {
+            val view = requireNotNull(asmPlmSourceBridge).enemies.view(currentRoomId, template.id)
+            require(view.problem == null) { view.problem ?: "Resolve the enemy draft before cloning its state." }
+        }
         var ordinal = 1
         var id: String
         do {
             id = "state-new-$ordinal"
             ordinal++
         } while (roomEdits.states.any { it.id == id } || asmPlmSourceBridge?.hasStateSource(currentRoomId, id) == true ||
-            asmPlmSourceBridge?.initialScrolls?.hasState(currentRoomId, id) == true || asmPlmSourceBridge?.fx?.hasState(currentRoomId, id) == true)
+            asmPlmSourceBridge?.initialScrolls?.hasState(currentRoomId, id) == true || asmPlmSourceBridge?.fx?.hasState(currentRoomId, id) == true ||
+            asmPlmSourceBridge?.enemies?.hasState(currentRoomId, id) == true)
 
         val newState = RoomStateEdits(
             id = id,
@@ -7366,6 +7438,7 @@ class EditorState(
         }
         asmPlmSourceBridge?.initialScrolls?.cloneState(currentRoomId, template.id, newState.id)
         asmPlmSourceBridge?.fx?.cloneState(currentRoomId, template.id, newState.id)
+        asmPlmSourceBridge?.enemies?.cloneState(currentRoomId, template.id, newState.id)
         roomEdits.states.add(insertionIndex, newState)
         roomEdits.stateGraphChanged = true
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
@@ -7758,7 +7831,8 @@ class EditorState(
             }
             val roomKey = project.roomKey(roomId)
             val romRoom = headersById[roomId]
-            if ((project.rooms[roomKey]?.asmInitialScrollSourceVersion ?: 0) != 0 || (project.rooms[roomKey]?.asmFxSourceVersion ?: 0) != 0) {
+            if ((project.rooms[roomKey]?.asmInitialScrollSourceVersion ?: 0) != 0 || (project.rooms[roomKey]?.asmFxSourceVersion ?: 0) != 0 ||
+                (project.rooms[roomKey]?.asmEnemySourceVersion ?: 0) != 0) {
                 skipped++
                 manualSkipped++
                 continue
@@ -8259,7 +8333,7 @@ class EditorState(
     }
 
     fun resetCurrentRoomToOriginal(romParser: RomParser): Boolean {
-        if (hasManagedPlms() || hasManagedInitialScrolls() || hasManagedFx()) {
+        if (hasManagedPlms() || hasManagedInitialScrolls() || hasManagedFx() || hasManagedEnemies()) {
             postStatus("This room owns authored source. Whole-room reset is not source-aware yet; use ASM Undo before resetting the room.")
             return false
         }
@@ -8403,6 +8477,9 @@ class EditorState(
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
         val pending = undoStack.last()
+        if (hasManagedEnemies() && (pending.enemyAdds.isNotEmpty() || pending.enemyRemoves.isNotEmpty() || pending.enemyUpdates.isNotEmpty())) {
+            postStatus("Enemy edit blocked: undo the source adoption in ASM before undoing older ROM enemy edits."); return false
+        }
         managedPlmUndo[pending]?.let { (fileId, _, after) ->
             return runCatching {
                 requireNotNull(asmPlmSourceBridge).undoSource(after, fileId)
@@ -8492,6 +8569,9 @@ class EditorState(
     fun redo(): Boolean {
         if (redoStack.isEmpty()) return false
         val pending = redoStack.last()
+        if (hasManagedEnemies() && (pending.enemyAdds.isNotEmpty() || pending.enemyRemoves.isNotEmpty() || pending.enemyUpdates.isNotEmpty())) {
+            postStatus("Enemy edit blocked: older ROM enemy edits cannot overwrite authored population source."); return false
+        }
         managedPlmUndo[pending]?.let { (fileId, before, _) ->
             return runCatching {
                 requireNotNull(asmPlmSourceBridge).redoSource(before, fileId)

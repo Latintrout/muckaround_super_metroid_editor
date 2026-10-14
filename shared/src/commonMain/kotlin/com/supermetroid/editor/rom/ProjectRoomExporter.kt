@@ -51,6 +51,7 @@ class ProjectRoomExporter(
     private val sourcePlmSets: Map<Int, Map<String, SourcePlmResource>> = emptyMap(),
     private val sourceInitialScrolls: Map<Int, Map<String, SourceInitialScrollResource>> = emptyMap(),
     private val sourceFx: Map<Int, Map<String, SourceFxResource>> = emptyMap(),
+    private val sourceEnemies: Map<Int, Map<String, SourceEnemyResources>> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -157,6 +158,10 @@ class ProjectRoomExporter(
 
         for ((roomKey, roomEdits) in effectiveEdits) {
             if (!roomEdits.hasEdits) continue
+            if (roomEdits.asmEnemySourceVersion != 0) {
+                require(roomEdits.asmEnemySourceVersion == 1 && roomEdits.roomId in sourceEnemies) { "Room $roomKey requires its decoded enemy source." }
+                require(roomEdits.enemyChanges.isEmpty() && roomEdits.states.all { it.enemyChanges.isEmpty() }) { "Room $roomKey has both authored enemies and GUI deltas." }
+            }
             if (roomEdits.asmFxSourceVersion != 0) {
                 requireDoorRoutedFxOwnership(roomEdits, romParser)
                 require(roomEdits.asmFxSourceVersion == 1 && roomEdits.roomId in sourceFx) { "Room $roomKey requires its decoded FX source." }
@@ -309,6 +314,10 @@ class ProjectRoomExporter(
                 applySourceFx(roomKey, roomId, roomEdits, rewrittenStateOffsets)
                 roomsPatched.add(roomKey)
             }
+            if (roomEdits.asmEnemySourceVersion != 0) {
+                applySourceEnemies(roomKey, roomId, roomEdits, rewrittenStateOffsets)
+                roomsPatched.add(roomKey)
+            }
             if (roomEdits.stateGraphChanged) roomsPatched.add(roomKey)
 
             if (roomEdits.saveStationSpawns.isNotEmpty()) {
@@ -397,6 +406,41 @@ class ProjectRoomExporter(
             val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
                 ?: failExport("Room $roomKey source state ${state.id} has no state record")
             writeU16(romData, offset + 20, pointer)
+        }
+    }
+
+    private fun applySourceEnemies(roomKey: String, roomId: Int, edits: RoomEdits, rewritten: Map<String, Int>) {
+        val inputs = sourceEnemies.getValue(roomId)
+        require(inputs.keys == edits.states.map { it.id }.toSet()) { "Enemy source state membership changed." }
+        val states = romParser.inspectRoomStates(roomId).states
+        if (rewritten.isEmpty()) require(edits.states.size == states.size &&
+            edits.states.mapNotNull { it.sourceStateIndex }.toSet() == states.indices.toSet()) { "Enemy source needs a complete state manifest or rebuilt graph." }
+        val populations = mutableMapOf<String, Pair<Int, SourceEnemyPopulation>>()
+        val graphics = mutableMapOf<String, Pair<Int, SourceEnemyGraphics>>()
+        for (state in edits.states) {
+            val input = inputs.getValue(state.id)
+            val population = input.population
+            val gfx = input.graphics
+            val previousPop = populations[population.identity]
+            val popPtr = if (previousPop != null) {
+                require(previousPop.second == population) { "Shared population has inconsistent values." }; previousPop.first
+            } else {
+                val allocation = enemyAllocator.allocate(population.bytes(), listOf(0xA1), "Room $roomKey source enemies ${population.identity}")
+                    ?: failExport("Population source for room $roomKey does not fit bank \$A1")
+                (allocation.snesAddress and 0xFFFF).also { populations[population.identity] = it to population }
+            }
+            val previousGfx = graphics[gfx.identity]
+            val gfxPtr = if (previousGfx != null) {
+                require(previousGfx.second == gfx) { "Shared GFX has inconsistent values." }; previousGfx.first
+            } else {
+                val allocation = enemyGfxAllocator.allocate(gfx.bytes(), listOf(0xB4), "Room $roomKey source enemy GFX ${gfx.identity}")
+                    ?: failExport("Enemy GFX source for room $roomKey does not fit bank \$B4")
+                (allocation.snesAddress and 0xFFFF).also { graphics[gfx.identity] = it to gfx }
+            }
+            val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
+                ?: failExport("Enemy source state ${state.id} has no state record")
+            writeU16(romData, offset + 8, popPtr)
+            writeU16(romData, offset + 10, gfxPtr)
         }
     }
 

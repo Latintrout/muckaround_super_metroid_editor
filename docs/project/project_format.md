@@ -198,6 +198,14 @@ resolve exported doors or treated as persistent identity.
 
 ## Version Fields
 
+Schema 13 adds `RoomEdits.asmEnemySourceVersion` (default 0, supported value 1).
+It owns paired population/GFX declarations in `bank_A1.asm`; the checked planner
+emits the population in bank `$A1` and GFX in `$B4`. Stable state wrappers can
+share the two resources independently. Adoption retires room/state `enemyChanges`;
+JSON stores neither duplicate actor values nor allocated addresses. Missing source,
+unknown versions, competing deltas or incomplete paired build inputs fail closed.
+The usual schema-upgrade backup protects older editors from dropping this ownership.
+
 Schema 11 adds `RoomEdits.asmPlmSourceVersion` (default 0; current authored format 1).
 It marks room PLM values as owned by the project's editable `bank_8F.asm` macros,
 using existing stable state IDs. Common/state `plmChanges` are empty after verified

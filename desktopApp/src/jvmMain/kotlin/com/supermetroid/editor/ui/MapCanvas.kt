@@ -254,6 +254,7 @@ fun MapCanvas(
     onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToScrollCommands: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToSaveSpawn: ((RomParser.PlmEntry) -> Unit)? = null,
+    onNavigateToEnemyPlacement: ((RomParser.EnemyEntry) -> Unit)? = null,
     roomKeyboardNavigationEnabled: Boolean = true,
     showItemNames: Boolean = true,
     showMetaNames: Boolean = true,
@@ -1894,6 +1895,7 @@ fun MapCanvas(
                                     onNavigateToPlmPlacement = onNavigateToPlmPlacement,
                                     onNavigateToScrollCommands = onNavigateToScrollCommands,
                                     onNavigateToSaveSpawn = onNavigateToSaveSpawn,
+                                    onNavigateToEnemyPlacement = onNavigateToEnemyPlacement,
                                     onDismiss = { propsExpanded = false; mapFocusReq.requestFocus() },
                                     onDrag = ::dragPropertiesPanel,
                                     modifier = Modifier

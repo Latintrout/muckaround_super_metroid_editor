@@ -94,6 +94,7 @@ internal fun TilePropertiesPanel(
     onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToScrollCommands: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToSaveSpawn: ((RomParser.PlmEntry) -> Unit)? = null,
+    onNavigateToEnemyPlacement: ((RomParser.EnemyEntry) -> Unit)? = null,
     onDismiss: () -> Unit,
     onDrag: (Offset) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -102,6 +103,7 @@ internal fun TilePropertiesPanel(
     val plmPlacementLink = editorState.projectAsmNavigation(onNavigateToPlmPlacement)
     val scrollCommandsLink = editorState.projectAsmNavigation(onNavigateToScrollCommands)
     val saveSpawnLink = editorState.projectAsmNavigation(onNavigateToSaveSpawn)
+    val enemyPlacementLink = editorState.projectAsmNavigation(onNavigateToEnemyPlacement)
     val uiFont = LocalEditorTheme.current.fontSize.value
     val panelWidth = when (uiFont) {
         FontSize.SMALL -> 280.dp
@@ -1652,8 +1654,9 @@ internal fun TilePropertiesPanel(
             Divider()
             Spacer(modifier = Modifier.height(4.dp))
             Text("Runtime Objects", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            editorState.enemyPreviewProblem?.let { Text(it, fontSize = uiFont.detail, color = MaterialTheme.colorScheme.error) }
             Text(
-                "Enemy-engine actors near this tile",
+                "Enemy-engine actors near this tile · this state",
                 fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -1677,6 +1680,10 @@ internal fun TilePropertiesPanel(
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(eName, fontSize = LocalEditorTheme.current.fontSize.value.body, fontWeight = FontWeight.Bold)
+                                enemyPlacementLink?.let { open ->
+                                    Text("ASM", fontSize = uiFont.detail, color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { open(enemy) }.padding(horizontal = 4.dp))
+                                }
                                 Text(
                                     "0x${enemy.id.toString(16).uppercase().padStart(4, '0')}",
                                     fontSize = LocalEditorTheme.current.fontSize.value.body,

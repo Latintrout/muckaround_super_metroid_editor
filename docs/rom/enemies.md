@@ -54,6 +54,22 @@ Each room state references an enemy population set. Each entry is 16 bytes:
 
 Terminated by species ID `0xFFFF`.
 
+The native loader clears `$0800` bytes at `Enemy.ID` (`$A0:8A76..8A87`)
+and advances the runtime slot by `$40` per record (`$A0:8BB7..8BBC`).
+`memory.asm` places the next owner at `$1778`, after the array starting `$0F78`:
+the native capacity is **32 slots**, not the tolerant parser's 64-record bound.
+AI-spawned or possessed companions can require additional slots; byte-valid
+population data alone does not prove that an encounter has enough free slots.
+The word terminator is followed by one required-kill-count byte. Empty native
+populations sometimes omit that byte because initialization exits before reading it.
+
+Reciprocal ASM authoring keeps population and GFX values in one `bank_A1.asm`
+buffer, with independent state references and checked placement into `$A1/$B4`.
+The GFX loader matches species IDs, not equal graphics pointers. New transfers
+are checked against four entries, palette offsets 0–7, LoROM source boundaries,
+and the `$7000..97FF` staging buffer. Zero-byte graphics headers must not acquire
+invented transfer entries. See [enemy source authoring](../asm/reference_workspace.md#reciprocal-enemy-populations-and-gfx).
+
 ### Properties Field Flags (offset +8)
 
 | Bit | Mask | Name |

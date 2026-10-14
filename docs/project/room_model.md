@@ -62,6 +62,24 @@ is conventionally used as an always-false selector that skips its state pointer.
 
 ## Current Boundary
 
+Existing-room enemy populations and their GFX lists are reciprocal in ASM mode.
+The first actor edit or **Room Info → Enemy Actors / Enemy Graphics → ASM** adopts
+all effective state lists, retaining their ordering, eight per-actor words and
+required kill quota. Both resource types live in one authored `bank_A1.asm` buffer
+so an edit has one source/undo boundary; checked placements still target `$A1`
+and `$B4` separately. GUI actor changes are selected-state edits and detach shared
+lists independently. Raw shared-table edits affect every state referencing that
+table. Existing transfer-only entries and intentional actors without GFX entries
+are preserved rather than inferred from visible sprites. GUI additions add needed
+species transfers subject to the four-entry/palette/staging-buffer checks.
+Equal `GRAPHADR` pointers alone do not authorize sharing: the engine matches GFX
+entries by species ID. Invalid drafts remain saveable, retain the last valid live
+preview and block stale GUI writes/builds. Original source table, pointer, selector
+or loader changes cannot be silently hidden by the authored replacements.
+Project-created rooms, whole-room reset and mixed old-ROM/source undo remain
+explicit guarded boundaries. This is byte/ownership parity, not simulation of AI
+or proof that arbitrary companion arrangements form a playable encounter.
+
 Room Info's **Edit Objects** dialog is a normal visual field editor, not an ASM
 mode selector. A separate right-aligned **ASM** action opens source only with
 Project ASM enabled and the ASM source build selected. All editor-to-source links

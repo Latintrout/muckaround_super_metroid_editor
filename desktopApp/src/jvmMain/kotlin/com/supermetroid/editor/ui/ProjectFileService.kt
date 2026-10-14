@@ -15,6 +15,13 @@ import com.supermetroid.editor.asm.protectInitialScrollBaseline
 import com.supermetroid.editor.asm.AsmFxSource
 import com.supermetroid.editor.asm.FX_SOURCE_FILE
 import com.supermetroid.editor.asm.protectFxBaseline
+import com.supermetroid.editor.asm.AsmEnemySource
+import com.supermetroid.editor.asm.ENEMY_SOURCE_FILE
+import com.supermetroid.editor.asm.protectEnemyBaseline
+import com.supermetroid.editor.rom.readSourceEnemyPopulation
+import com.supermetroid.editor.rom.readSourceEnemyGraphics
+import com.supermetroid.editor.rom.completeEnemyGraphics
+import com.supermetroid.editor.rom.baseSourceStateIndex
 import com.supermetroid.editor.asm.AsmWlaSymbolParser
 import com.supermetroid.editor.asm.PLM_SOURCE_FILE
 import com.supermetroid.editor.asm.AsmSourceAssetMaterializer
@@ -36,7 +43,7 @@ import java.security.MessageDigest
 
 internal object ProjectFileService {
     private val asmProjectCompiler = AsmProjectCompiler()
-    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v8-fx"
+    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v9-enemies"
     private const val MAX_PREPARED_ASM_BASES = 2
     private val preparedAsmBases = object : LinkedHashMap<String, AsmCompiledBuildBase>(
         MAX_PREPARED_ASM_BASES,
@@ -243,7 +250,7 @@ internal object ProjectFileService {
         onStatus: (String) -> Unit,
     ): AsmCompiledBuildBase? {
         if (project.asmWorkspace.buildMode == ProjectRomBuildMode.PATCHED_ROM) {
-            require(project.rooms.values.none { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 }) { "Authored room data requires ASM source mode." }
+            require(project.rooms.values.none { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 || it.asmEnemySourceVersion != 0 }) { "Authored room data requires ASM source mode." }
             require(project.asmWorkspace.plmSourceBindings.isEmpty()) { "Linked room objects require ASM source mode." }
             val sourceEdits = if (project.asmWorkspace.enabled && projectFilePath.isNotBlank()) {
                 AsmProjectWorkspaceRepository().sourceOverrideFileIds(projectFilePath)
@@ -268,7 +275,9 @@ internal object ProjectFileService {
         // Automatic ownership must work even when this room was never visited and no binding was saved.
         val linkedWorkspace = requireNotNull(AsmProjectWorkspaceRepository().loadForBuild(projectFilePath))
         linkedWorkspace.let { tree ->
-            val files = listOf(PLM_SOURCE_FILE, "macros.asm") + if (project.rooms.values.any { it.asmFxSourceVersion != 0 }) listOf(FX_SOURCE_FILE) else emptyList()
+            val files = listOf(PLM_SOURCE_FILE, "macros.asm") +
+                (if (project.rooms.values.any { it.asmFxSourceVersion != 0 }) listOf(FX_SOURCE_FILE) else emptyList()) +
+                (if (project.rooms.values.any { it.asmEnemySourceVersion != 0 }) listOf(ENEMY_SOURCE_FILE) else emptyList())
             for (fileId in files) {
                 val override = File(tree.root, "overrides/src/$fileId")
                 val authored = override.takeIf { it.isFile } ?: File(tree.originalDirectory, "src/$fileId")
@@ -307,6 +316,29 @@ internal object ProjectFileService {
         val sourceInitialScrolls = project.rooms.values.filter { it.asmInitialScrollSourceVersion != 0 }.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
             room.roomId to initialScrollSource.resources(room, room.roomHeaderChange?.width ?: header.width, room.roomHeaderChange?.height ?: header.height)
+        }
+        val enemyRooms = project.rooms.values.filter { it.asmEnemySourceVersion != 0 }
+        val sourceEnemies = if (enemyRooms.isEmpty()) emptyMap() else {
+            linkedCatalog.requireStandardEnemyMacros(linkedMacros)
+            val source = AsmEnemySource(File(linkedWorkspace.workingDirectory, "src/$ENEMY_SOURCE_FILE").readText(), linkedCatalog.symbols)
+            enemyRooms.associate { room ->
+                val inputs = source.resources(room)
+                val states = romParser.inspectRoomStates(room.roomId).states
+                inputs.forEach { (id, input) ->
+                    val index = requireNotNull(room.states.single { it.id == id }.baseSourceStateIndex())
+                    val pc = requireNotNull(states.getOrNull(index)?.stateDataPcOffset)
+                    val baseline = readSourceEnemyPopulation(romParser, romParser.readStateData(pc).getValue("enemySetPtr"), "Original population")
+                    val baselineGraphics = readSourceEnemyGraphics(romParser, romParser.readStateData(pc).getValue("enemyGfxPtr"), "Original GFX")
+                    try {
+                        require(completeEnemyGraphics(romParser, input.population.entries, baseline.entries, input.graphics, baselineGraphics) == input.graphics) {
+                            "${input.population.identity}: this actor needs its paired GFX entry."
+                        }
+                    } catch (error: Exception) {
+                        throw IllegalArgumentException("$ENEMY_SOURCE_FILE:${source.errorLine(room.roomId, id, error.message.orEmpty()) + 1}: ${error.message}", error)
+                    }
+                }
+                room.roomId to inputs
+            }
         }
         val sourcePlmSets = managedRooms.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
@@ -355,6 +387,7 @@ internal object ProjectFileService {
         val compiledSaveParser = RomParser(initial.romBytes)
         protectInitialScrollBaseline(project, romParser, compiledSaveParser)
         protectFxBaseline(project, romParser, compiledSaveParser)
+        protectEnemyBaseline(project, romParser, compiledSaveParser, sourceEnemies)
         for (save in sourceSaves.values) {
             val baseline = requireNotNull(romParser.readSaveEntry(save.area, save.slot))
             val compiled = requireNotNull(compiledSaveParser.readSaveEntry(save.area, save.slot))
@@ -388,14 +421,20 @@ internal object ProjectFileService {
             sourcePlmSets = sourcePlmSets,
             sourceInitialScrolls = sourceInitialScrolls,
             sourceFx = sourceFx,
+            sourceEnemies = sourceEnemies,
         ).build() ?: throw AsmCompilationException(
             planningLog.lastOrNull { it.startsWith("ERROR:") }
                 ?.removePrefix("ERROR: ")
                 ?: "Could not validate editor data against the compiled ASM source"
         )
         val roomMaterialization = AsmSourceRoomMaterializer().materialize(
-            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves, sourceInitialScrolls, sourceFx,
+            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves, sourceInitialScrolls, sourceFx, sourceEnemies,
         )
+        val enemyIdentities = sourceEnemies.values.flatMap { it.values }.flatMap { listOf(it.population.identity, it.graphics.identity) }.toSet()
+        require(roomMaterialization.enemyTables.map { it.identity }.toSet() == enemyIdentities &&
+            roomMaterialization.enemyTables.sumOf { it.pointerOffsets.size } == sourceEnemies.values.sumOf { it.size * 2 }) {
+            "Authored population/GFX inputs could not be included atomically; no ROM was produced."
+        }
         require(roomMaterialization.fxTables.map { it.resource.identity }.toSet() == sourceFx.values.flatMap { it.values }.map { it.identity }.toSet() &&
             roomMaterialization.fxTables.sumOf { it.pointerOffsets.size } == sourceFx.values.sumOf { it.size }) {
             "Authored FX could not be included atomically; no ROM was produced."

@@ -11,7 +11,7 @@ logic (`EditorState.exportToRom()`).
 | Resource | Hard limit | Practical limit | Entry size | Notes |
 |----------|-----------|-----------------|------------|-------|
 | **PLMs** (items, doors, save stations, gates…) | Terminated by `0x0000` | **256** (parser safety cap) | 6 bytes | Total set = `(N × 6) + 2` bytes |
-| **Enemies** | Terminated by `0xFFFF` | ~60 per set | 16 bytes | Bank `$A1` free space is the real cap |
+| **Enemies** | **32 native slots**, terminated by `0xFFFF` | Leave room for actors spawned by AI | 16 bytes | `$0F78..1777` holds 32 × `$40`-byte runtime slots; the preview parser's 64-record bound is not an engine limit. Authored population includes the trailing kill-quota byte. |
 | **FX entries** | Full Default header (`doorSelect == 0`) or 2-byte `$FFFF` stop | **16** (parser/authoring safety cap, not hardware) | 16 bytes | Bank `$83`; runtime-indexed tails need separate ownership |
 | **Room scrolls** | 1 byte per screen | **50 bytes** (max 50 screens) | 1 byte | Bank `$8F` |
 | **Room dimensions** | 0x0F × 0x0F (16 × 16 screens) | **50 screens** max area | — | `width × height ≤ 50` |

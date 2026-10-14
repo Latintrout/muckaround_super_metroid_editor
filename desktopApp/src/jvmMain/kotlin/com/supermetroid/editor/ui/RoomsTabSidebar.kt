@@ -46,6 +46,7 @@ internal fun RoomsTabSidebar(
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
     onNavigateToFx: ((String, Int?) -> Unit)? = null,
+    onNavigateToEnemies: ((String, Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
     onKeyboardNavigatorChanged: (((Int) -> Boolean)?) -> Unit = {},
 ) {
@@ -135,6 +136,7 @@ internal fun RoomsTabSidebar(
                                             onNavigateToAsm = onNavigateToAsm,
                                             onNavigateToInitialScrolls = onNavigateToInitialScrolls,
                                             onNavigateToFx = onNavigateToFx,
+                                            onNavigateToEnemies = onNavigateToEnemies,
                                             onWorkspaceChanged = onWorkspaceChanged,
                                             scrollState = sidebarState.verticalScroll(RoomSidebarTab.ROOM_INFO),
                                         )

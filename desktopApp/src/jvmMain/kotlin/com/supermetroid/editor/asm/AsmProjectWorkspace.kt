@@ -94,7 +94,7 @@ internal class AsmProjectWorkspaceRepository(
 
     /** Enough source for room rendering/editing; the rest of the IDE index can follow independently. */
     fun loadRoomWorkspace(projectFilePath: String): AsmProjectWorkspace? =
-        load(projectFilePath, setOf("main.asm", "macros.asm", PLM_SOURCE_FILE, FX_SOURCE_FILE))
+        load(projectFilePath, setOf("main.asm", "macros.asm", PLM_SOURCE_FILE, FX_SOURCE_FILE, ENEMY_SOURCE_FILE))
 
     fun loadForBuild(projectFilePath: String): AsmProjectBuildWorkspace? {
         val root = projectRoot(projectFilePath) ?: return null

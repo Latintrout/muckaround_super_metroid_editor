@@ -648,6 +648,23 @@ fun main() = application {
             val editorInitialScrollsLink = editorState.projectAsmNavigation(::openInitialScrolls)
             val editorFxLink = editorState.projectAsmNavigation(::openFx)
             val editorSaveSpawnLink = editorState.projectAsmNavigation(::openSaveSpawn)
+            fun openEnemySource(entry: RomParser.EnemyEntry?, graphics: Boolean = false, requestedState: String? = null) {
+                if (!editorState.asmNavigationEnabled) return
+                val selectedIndex = entry?.let { actor -> editorState.workingEnemies.indexOfFirst { it === actor }
+                    .takeIf { it >= 0 } ?: editorState.workingEnemies.indexOf(actor) }
+                if (!editorState.ensureEnemySource(selectedRoom?.name ?: "Room")) return
+                val stateId = requestedState ?: editorState.currentPlmStateId() ?: return
+                val index = selectedIndex?.takeIf { it >= 0 && editorState.workingEnemies.getOrNull(it) == entry }
+                if (entry != null && index == null) { editorState.postStatus("This actor changed; select its current placement again."); return }
+                runCatching { requireNotNull(editorState.asmPlmSourceBridge).enemies.line(editorState.currentRoomId, stateId, index, graphics) }
+                    .onSuccess { line -> navigate {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, line)
+                        leftTab = TAB_ASM
+                    } }.onFailure { editorState.postStatus("Enemy source needs attention: ${it.message}") }
+            }
+            val editorEnemyPlacementLink = editorState.projectAsmNavigation<(RomParser.EnemyEntry) -> Unit> { openEnemySource(it) }
+            val editorEnemiesLink = editorState.projectAsmNavigation<(String, Boolean) -> Unit> { state, graphics -> openEnemySource(null, graphics, state) }
 
             fun openAsmEditorTarget(target: AsmEditorTarget) {
                 navigate {
@@ -1359,6 +1376,7 @@ fun main() = application {
                                             onNavigateToAsm = editorAsmAddressLink,
                                             onNavigateToInitialScrolls = editorInitialScrollsLink,
                                             onNavigateToFx = editorFxLink,
+                                            onNavigateToEnemies = editorEnemiesLink,
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },
                                             modifier = Modifier.fillMaxSize(),
                                         )
@@ -1505,6 +1523,7 @@ fun main() = application {
                                             onNavigateToPlmPlacement = editorPlmPlacementLink,
                                             onNavigateToScrollCommands = editorScrollCommandsLink,
                                             onNavigateToSaveSpawn = editorSaveSpawnLink,
+                                            onNavigateToEnemyPlacement = editorEnemyPlacementLink,
                                             showItemNames = showRoomItemNames,
                                             showMetaNames = showRoomMetaNames,
                                             highlightItems = highlightRoomItems,

@@ -102,12 +102,14 @@ fun RoomPropertiesPanel(
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
     onNavigateToFx: ((String, Int?) -> Unit)? = null,
+    onNavigateToEnemies: ((String, Boolean) -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
     scrollState: ScrollState = rememberScrollState(),
 ) {
     val asmLinkCallback = editorState.projectAsmNavigation(onNavigateToAsm)
     val initialScrollsLink = editorState.projectAsmNavigation(onNavigateToInitialScrolls)
     val fxLink = editorState.projectAsmNavigation(onNavigateToFx)
+    val enemiesLink = editorState.projectAsmNavigation(onNavigateToEnemies)
     val stateInspection = remember(room.roomId, romParser) { romParser.inspectRoomStates(room.roomId) }
     // Track project-backed changes so authored state count/order is reflected immediately.
     @Suppress("UNUSED_VARIABLE") val headerEditVersion = editorState.editVersion
@@ -660,6 +662,15 @@ fun RoomPropertiesPanel(
         val stateDifferences = changedRoomStateSections(stateData, defaultStateData)
 
         fun sharingDescription(field: String, value: Int): String {
+            if (field in listOf("enemySetPtr", "enemyGfxPtr") && editorState.hasManagedEnemies()) {
+                val source = selectedStateItem?.id?.let { editorState.asmPlmSourceBridge?.enemies?.view(room.roomId, it) }
+                if (source?.problem != null) return "Source needs repair"
+                fun identity(resource: com.supermetroid.editor.rom.SourceEnemyResources?) =
+                    if (field == "enemySetPtr") resource?.population?.identity else resource?.graphics?.identity
+                val selected = identity(source?.resource) ?: return "Source loading…"
+                val count = states.count { identity(editorState.asmPlmSourceBridge?.enemies?.view(room.roomId, it.id)?.resource) == selected }
+                return if (count == 1) "This state" else "$count states share this list"
+            }
             if (field == "fxPtr" && sourceFxOwned) {
                 val source = selectedStateItem?.id?.let { editorState.asmPlmSourceBridge?.fx?.view(room.roomId, it) }
                 if (source?.problem != null) return "Source needs repair"
@@ -767,13 +778,17 @@ fun RoomPropertiesPanel(
 
         val selectedIsActive = editorState.currentStateId?.let { it == selectedStateItem?.id }
             ?: (editorState.currentStateIndex == selectedSourceStateIndex)
-        val enemyCount = if (selectedIsActive) editorState.workingEnemies.size else {
+        val authoredEnemies = if (editorState.hasManagedEnemies()) selectedStateItem?.id?.let {
+            editorState.asmPlmSourceBridge?.enemies?.view(room.roomId, it)
+        } else null
+        val enemyCount = authoredEnemies?.resource?.population?.entries?.size ?: if (selectedIsActive) editorState.workingEnemies.size else {
             remember(enemySetPtr) { romParser.parseEnemyPopulation(enemySetPtr).size }
         }
         val plmCount = if (selectedIsActive) editorState.workingPlms.size else {
             remember(plmSetPtr) { romParser.parsePlmSet(plmSetPtr).size }
         }
-        val gfxEntries = remember(enemyGfxPtr) { romParser.parseEnemyGfxSet(enemyGfxPtr) }
+        val gfxEntries = authoredEnemies?.resource?.graphics?.entries ?: if (selectedIsActive && editorState.hasManagedEnemies()) editorState.workingEnemyGraphics
+            else remember(enemyGfxPtr) { romParser.parseEnemyGfxSet(enemyGfxPtr) }
         val gfxCount = gfxEntries.size
         if (helpTopic == RoomInfoHelpTopic.STATE_DATA) {
             StateDataHelpDialog(
@@ -871,8 +886,11 @@ fun RoomPropertiesPanel(
         if (selectedIsActive) {
             RoomObjectsPanel(editorState, plmSetPtr, asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
         }
-        PropertyRow("Enemy Actors", "$enemyCount actors · ${sharingDescription("enemySetPtr", enemySetPtr)}")
-        PropertyRow("Enemy Graphics", "$gfxCount slots · ${sharingDescription("enemyGfxPtr", enemyGfxPtr)}")
+        PropertyRow("Enemy Actors", "$enemyCount actors · ${sharingDescription("enemySetPtr", enemySetPtr)}",
+            enemiesLink?.let { open -> { selectedStateItem?.id?.let { open(it, false) }; Unit } })
+        editorState.enemyPreviewProblem?.let { Text(it, fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error) }
+        PropertyRow("Enemy Graphics", "$gfxCount slots · ${sharingDescription("enemyGfxPtr", enemyGfxPtr)}",
+            enemiesLink?.let { open -> { selectedStateItem?.id?.let { open(it, true) }; Unit } })
         val roomLogic = when {
             mainAsmPtr != 0 && setupAsmPtr != 0 -> "Setup + active room logic"
             mainAsmPtr != 0 -> "Active room logic"
@@ -916,8 +934,8 @@ fun RoomPropertiesPanel(
                 else asmLink(fxPtr.takeIf { it != 0 }?.let { RomConstants.BANK_FX or it }),
             )
             PropertyRow("Object Set", "\$8F:${hex16(plmSetPtr).removePrefix("0x")}", asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
-            PropertyRow("Enemy Set", "\$A1:${hex16(enemySetPtr).removePrefix("0x")}", asmLink(RomConstants.BANK_ENEMY_SET or enemySetPtr))
-            PropertyRow("Enemy GFX", "\$B4:${hex16(enemyGfxPtr).removePrefix("0x")}", asmLink(RomConstants.BANK_ENEMY_GFX or enemyGfxPtr))
+            PropertyRow("Enemy Set", if (editorState.hasManagedEnemies()) "Project population" else "\$A1:${hex16(enemySetPtr).removePrefix("0x")}", enemiesLink?.let { open -> { selectedStateItem?.id?.let { open(it, false) }; Unit } })
+            PropertyRow("Enemy GFX", if (editorState.hasManagedEnemies()) "Project GFX · $gfxCount entries" else "\$B4:${hex16(enemyGfxPtr).removePrefix("0x")}", enemiesLink?.let { open -> { selectedStateItem?.id?.let { open(it, true) }; Unit } })
             PropertyRow(
                 "Special X-Ray",
                 if (xraySpecialCasingPtr == 0) "None" else "\$8F:${hex16(xraySpecialCasingPtr).removePrefix("0x")}",
