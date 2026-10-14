@@ -48,6 +48,6 @@ class TourianStatueSprites(private val parser: RomParser) {
             val color = objects.pixels[y * objects.width + x]
             if (px in 0 until width && py in 0 until height && color ushr 24 != 0) pixels[py * width + px] = color
         }
-        return SpriteAnimationFrame(pixels, width, height, label = "Golden Four statue")
+        return SpriteAnimationFrame(pixels, width, height, label = "Golden Four statue").trimTransparent(padding = 4)
     }
 }

@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,6 +42,7 @@ import com.supermetroid.editor.rom.CommunitySamusSourceCodec
 import com.supermetroid.editor.rom.GifEncoder
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.SamusCommunitySheetDecoder
+import com.supermetroid.editor.rom.SamusDeathSprites
 import com.supermetroid.editor.rom.SamusSpriteDecoder
 import com.supermetroid.editor.rom.SpriteAnimation
 import com.supermetroid.editor.rom.SpriteAnimationFrame
@@ -53,7 +56,7 @@ import javax.imageio.ImageIO
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SamusSpriteViewer(
     romParser: RomParser?,
@@ -70,7 +73,12 @@ fun SamusSpriteViewer(
         return
     }
 
-    val decoder = remember(rp) { SamusSpriteDecoder(rp) }
+    val nativePreview = remember(rp, editorState.editVersion, editorState.paletteVersion) {
+        runCatching { editorState.nativeSprites.previewParser(rp) }
+    }
+    // A failed edit plan is shown below, never silently displayed/exported as base art.
+    val previewParser = nativePreview.getOrDefault(rp)
+    val decoder = remember(previewParser) { SamusSpriteDecoder(previewParser) }
     var selectedSuit by remember { mutableStateOf(SamusSpriteDecoder.SuitType.POWER) }
     var selectedGroupIdx by remember { mutableStateOf(0) }
     var selectedAnimIdx by remember { mutableStateOf(0) }
@@ -90,6 +98,7 @@ fun SamusSpriteViewer(
     val activeCommunitySource = remember(samusSourceVersion, editorState.project) {
         editorState.project.customGfx.samusCommunitySource
     }
+    var comparingRom by remember(activeCommunitySource?.sha256) { mutableStateOf(false) }
 
     // A project-owned community sheet is the active Samus source, so opening the
     // Samus workspace should show its mapped animations immediately. The user can
@@ -241,6 +250,7 @@ fun SamusSpriteViewer(
 
     fun previewProjectSource() {
         val source = activeCommunitySource ?: return
+        comparingRom = false
         scope.launch {
             communityLoading = true
             val session = withContext(Dispatchers.IO) { communityLoader.load(source) }
@@ -368,30 +378,37 @@ fun SamusSpriteViewer(
     var isPlaying by remember { mutableStateOf(false) }
     var animFrame by remember { mutableStateOf(0) }
 
-    val groups = SamusSpriteDecoder.ANIMATION_GROUPS
+    val groups = SAMUS_PREVIEW_GROUPS
     val currentGroup = groups.getOrNull(selectedGroupIdx) ?: groups.first()
     val currentAnimId = currentGroup.animationIds.getOrNull(selectedAnimIdx) ?: currentGroup.animationIds.first()
 
     // Build animation for the current selection
-    val animation = remember(currentAnimId, selectedSuit) {
+    val animation = remember(previewParser, currentAnimId, selectedSuit) {
         // Reset frame to 0 when animation changes, but keep playing state
         animFrame = 0
-        decoder.buildAnimation(currentAnimId, selectedSuit, renderSize = 96)
+        samusPreviewAnimation(previewParser, decoder, currentAnimId, selectedSuit)
+    }
+    var editing by remember(rp, System.identityHashCode(editorState.project)) { mutableStateOf<NativeSpriteEditorState.Sheet?>(null) }
+    editing?.let { sheet ->
+        NativeSpritePixelEditing(rp, editorState, sheet,
+            { parser -> samusPreviewAnimation(parser, SamusSpriteDecoder(parser), currentAnimId, selectedSuit) },
+            { editing = null }, modifier)
+        return
     }
     val displayedProjectSource = activeCommunitySource?.sha256?.let { hash ->
         communitySession?.sourceKey == "project:$hash"
     } == true
 
-    Column(modifier = modifier.fillMaxSize().background(Color(0xFF1A1A2E))) {
+    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // ── Header ──
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.surface
         ) {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text("Samus Sprites", fontWeight = FontWeight.Bold, fontSize = LocalEditorTheme.current.fontSize.value.heading,
                     color = MaterialTheme.colorScheme.onSurface)
@@ -409,31 +426,29 @@ fun SamusSpriteViewer(
                     )
                 }
 
-                Spacer(Modifier.weight(1f))
-
                 Surface(
                     modifier = Modifier.clickable(enabled = !communityLoading) { openCatalog() },
-                    color = Color(0xFF244B68),
+                    color = MaterialTheme.colorScheme.primaryContainer,
                     shape = RoundedCornerShape(4.dp),
                 ) {
                     Text(
                         "Community Catalog…",
                         fontSize = LocalEditorTheme.current.fontSize.value.detail,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = Color(0xFFB9DEFF),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
 
                 Surface(
                     modifier = Modifier.clickable(enabled = !communityLoading) { openCommunitySheet() },
-                    color = Color(0xFF263755),
+                    color = MaterialTheme.colorScheme.primaryContainer,
                     shape = RoundedCornerShape(4.dp),
                 ) {
                     Text(
                         if (communityLoading) "Validating…" else "Import Local PNG…",
                         fontSize = LocalEditorTheme.current.fontSize.value.detail,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = Color(0xFF9CC7FF),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
 
@@ -441,22 +456,23 @@ fun SamusSpriteViewer(
                     Surface(
                         modifier = Modifier.clickable {
                             communitySession = null
+                            comparingRom = true
                             exportStatus = ""
                         },
-                        color = Color(0xFF2A2D45),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         shape = RoundedCornerShape(4.dp),
                     ) {
                         Text(
                             "ROM Animations",
                             fontSize = LocalEditorTheme.current.fontSize.value.detail,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            color = Color(0xFFCCD2E7),
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 } else {
                     // Export All Samus Sprites button
                 Surface(
-                    modifier = Modifier.clickable {
+                    modifier = Modifier.clickable(enabled = nativePreview.isSuccess) {
                         val file = choosePngFile(
                             dialogTitle = "Save All Samus Sprites as Sprite Sheet",
                             defaultName = "samus_all_sprites_${selectedSuit.name.lowercase()}.png",
@@ -465,7 +481,7 @@ fun SamusSpriteViewer(
                             exportStatus = "Building all sprites..."
                             val result = runCatching {
                                 withContext(Dispatchers.Default) {
-                                    exportAllSamusSprites(decoder, selectedSuit, file)
+                                    exportAllSamusSprites(previewParser, decoder, selectedSuit, file)
                                 }
                             }
                             exportStatus = result.fold(
@@ -477,12 +493,12 @@ fun SamusSpriteViewer(
                             )
                         }
                     },
-                    color = Color(0xFF2A3A2A),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text("Export All Sprites", fontSize = LocalEditorTheme.current.fontSize.value.detail,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = Color(0xFF90D090))
+                        color = MaterialTheme.colorScheme.onTertiaryContainer)
                 }
                 }
             }
@@ -490,12 +506,12 @@ fun SamusSpriteViewer(
 
         // Status bar
         if (exportStatus.isNotEmpty()) {
-            Text(exportStatus, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFFFD54F),
+            Text(exportStatus, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp))
         }
 
         if (activeCommunitySource != null && communitySession == null) {
-            Surface(color = Color(0xFF173322), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -505,17 +521,17 @@ fun SamusSpriteViewer(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Text(
                                 "Project Samus · ${activeCommunitySource.displayName}",
-                                color = Color(0xFFB7F7CA),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 fontSize = LocalEditorTheme.current.fontSize.value.body,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Surface(
-                                color = if (activeCommunitySource.injectionArtifact != null) Color(0xFF28503B) else Color(0xFF4A3E20),
+                                color = if (activeCommunitySource.injectionArtifact != null) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
                                 shape = RoundedCornerShape(4.dp),
                             ) {
                                 Text(
                                     if (activeCommunitySource.injectionArtifact != null) "ROM READY" else "SOURCE ONLY",
-                                    color = if (activeCommunitySource.injectionArtifact != null) Color(0xFFB7F7CA) else Color(0xFFFDE68A),
+                                    color = if (activeCommunitySource.injectionArtifact != null) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
                                     fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
@@ -527,21 +543,21 @@ fun SamusSpriteViewer(
                         } else {
                             "Local source · ${activeCommunitySource.sha256.take(10)}"
                         }
-                        Text(attribution, color = Color(0xFF78AA8A), fontSize = LocalEditorTheme.current.fontSize.value.detail)
+                        Text(attribution, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = LocalEditorTheme.current.fontSize.value.detail)
                     }
                     Surface(
                         modifier = Modifier.clickable(enabled = !communityLoading) { previewProjectSource() },
-                        color = Color(0xFF28503B),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
                         shape = RoundedCornerShape(4.dp),
                     ) {
-                        Text("Preview Source", color = Color(0xFFD4F8DE), fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+                        Text("Preview Source", color = MaterialTheme.colorScheme.onTertiaryContainer, fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
                     }
                     Surface(
                         modifier = Modifier.clickable { confirmRestoreBase = true },
-                        color = Color(0xFF3D3940),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         shape = RoundedCornerShape(4.dp),
                     ) {
-                        Text("Restore Base ROM Samus", color = Color(0xFFE0D6DF), fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+                        Text("Restore Base ROM Samus", color = MaterialTheme.colorScheme.onSurface, fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
                     }
                 }
             }
@@ -566,6 +582,13 @@ fun SamusSpriteViewer(
                 selectedSuit = selectedSuit,
                 modifier = Modifier.fillMaxSize(),
             )
+        } else if (activeCommunitySource != null && !comparingRom) {
+            Text("Loading project Samus source…", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = LocalEditorTheme.current.fontSize.value.body, modifier = Modifier.padding(12.dp))
+        } else if (nativePreview.isFailure) {
+            Text("Could not preview project sprite edits: ${nativePreview.exceptionOrNull()?.message}",
+                color = MaterialTheme.colorScheme.error, fontSize = LocalEditorTheme.current.fontSize.value.body,
+                modifier = Modifier.padding(12.dp))
         } else {
         Row(modifier = Modifier.fillMaxSize()) {
             // ── Left: Animation group list ──
@@ -575,12 +598,13 @@ fun SamusSpriteViewer(
                     .padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text("Animations", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFB0B8D1),
+                Text("Animations", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
 
                 for ((gIdx, group) in groups.withIndex()) {
-                    val frameCountPreview = decoder.getFrameCount(group.animationIds.first())
+                    val frameCountPreview = if (isSamusDeathSelection(group.animationIds.first())) 9
+                        else decoder.getFrameCount(group.animationIds.first())
                     Surface(
                         modifier = Modifier.fillMaxWidth()
                             .clickable {
@@ -595,16 +619,16 @@ fun SamusSpriteViewer(
                             Text(group.name, fontSize = LocalEditorTheme.current.fontSize.value.body,
                                 fontWeight = if (gIdx == selectedGroupIdx) FontWeight.Bold else FontWeight.Normal,
                                 color = if (gIdx == selectedGroupIdx) MaterialTheme.colorScheme.onPrimaryContainer
-                                else Color(0xFFB0B8D1))
+                                else MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("${group.animationIds.size} variants, $frameCountPreview frames — ${group.description}",
-                                fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF6A6F88))
+                                fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
 
             // ── Divider ──
-            Box(Modifier.width(1.dp).fillMaxSize().background(Color(0xFF2A2D45)))
+            Box(Modifier.width(1.dp).fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
 
             // ── Right: Animation player + details ──
             Column(
@@ -615,26 +639,27 @@ fun SamusSpriteViewer(
             ) {
                 // Direction selector (if group has multiple anims)
                 if (currentGroup.animationIds.size > 1) {
-                    Text("Direction / Variant", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFB0B8D1),
+                    Text("Direction / Variant", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
-                    Row(
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        for ((aIdx, _) in currentGroup.animationIds.withIndex()) {
+                        for ((aIdx, animationId) in currentGroup.animationIds.withIndex()) {
                             Surface(
                                 modifier = Modifier.clickable {
                                     selectedAnimIdx = aIdx
                                 },
                                 color = if (aIdx == selectedAnimIdx) MaterialTheme.colorScheme.primaryContainer
-                                else Color(0xFF2A2D45),
+                                else MaterialTheme.colorScheme.surfaceVariant,
                                 shape = RoundedCornerShape(4.dp)
                             ) {
-                                Text("$aIdx", fontSize = LocalEditorTheme.current.fontSize.value.detail,
+                                Text(when (animationId) { SAMUS_DEATH_RIGHT -> "Right"; SAMUS_DEATH_LEFT -> "Left"; else -> "$aIdx" }, fontSize = LocalEditorTheme.current.fontSize.value.detail,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     color = if (aIdx == selectedAnimIdx) MaterialTheme.colorScheme.onPrimaryContainer
-                                    else Color(0xFFB0B8D1),
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontFamily = FontFamily.Monospace)
                             }
                         }
@@ -644,8 +669,9 @@ fun SamusSpriteViewer(
 
                 // Animation name
                 Text(
-                    "Anim 0x${currentAnimId.toString(16).uppercase()} — ${currentGroup.name}",
-                    fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFB0B8D1)
+                    if (isSamusDeathSelection(currentAnimId)) animation?.name ?: currentGroup.name
+                    else "Anim 0x${currentAnimId.toString(16).uppercase()} — ${currentGroup.name}",
+                    fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
 
@@ -713,34 +739,39 @@ fun SamusSpriteViewer(
                     }
                 )
 
-                // Palette display
-                Spacer(Modifier.height(16.dp))
-                Text("Palette (${selectedSuit.name})", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFB0B8D1),
-                    fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(4.dp))
+                if (isSamusDeathSelection(currentAnimId)) {
+                    Spacer(Modifier.height(16.dp))
+                    NativeSpriteSourceControls(rp, editorState, samusDeathTarget(previewParser, selectedSuit), { editing = it })
+                } else {
+                    // Palette display for normal gameplay poses (death has its own palette track).
+                    Spacer(Modifier.height(16.dp))
+                    Text("Palette (${selectedSuit.name})", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
 
-                val palette = remember(selectedSuit) { decoder.readPalette(selectedSuit) }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    for (i in 0 until 16) {
-                        val argb = palette[i]
-                        val r = (argb shr 16) and 0xFF
-                        val g = (argb shr 8) and 0xFF
-                        val b = argb and 0xFF
-                        Box(
-                            modifier = Modifier
-                                .weight(1f).height(20.dp)
-                                .background(
-                                    if (i == 0) Color(0xFF2A2A3A) else Color(r / 255f, g / 255f, b / 255f),
-                                    RoundedCornerShape(2.dp)
-                                )
-                                .border(1.dp, Color(0xFF3A3F5C), RoundedCornerShape(2.dp))
-                        ) {
-                            if (i == 0) {
-                                Text("T", fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = Color(0xFF4A4C5E),
-                                    modifier = Modifier.align(Alignment.Center))
+                    val palette = remember(decoder, selectedSuit) { decoder.readPalette(selectedSuit) }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        for (i in 0 until 16) {
+                            val argb = palette[i]
+                            val r = (argb shr 16) and 0xFF
+                            val g = (argb shr 8) and 0xFF
+                            val b = argb and 0xFF
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f).height(20.dp)
+                                    .background(
+                                        if (i == 0) MaterialTheme.colorScheme.surface else Color(r / 255f, g / 255f, b / 255f),
+                                        RoundedCornerShape(2.dp)
+                                    )
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp))
+                            ) {
+                                if (i == 0) {
+                                    Text("T", fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.align(Alignment.Center))
+                                }
                             }
                         }
                     }
@@ -851,11 +882,14 @@ internal fun chooseGifFile(dialogTitle: String, defaultName: String): File? {
 }
 
 private fun exportAllSamusSprites(
+    parser: RomParser,
     decoder: SamusSpriteDecoder,
     suit: SamusSpriteDecoder.SuitType,
     file: File,
 ): Int {
-    val allFrames = decoder.buildAllAnimations(suit, renderSize = 64)
+    val animations = decoder.buildAllAnimations(suit, renderSize = 64) +
+        listOfNotNull(SamusDeathSprites(parser).render(suit.ordinal, false), SamusDeathSprites(parser).render(suit.ordinal, true))
+    val allFrames = animations
         .flatMap { animation ->
             animation.frames.mapIndexed { index, frame ->
                 frame.copy(label = "${animation.name} #${index + 1}")

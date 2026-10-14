@@ -133,6 +133,13 @@ pose-family IDs remain in range. Death is deliberately absent from ordinary pose
 families because it uses a separate graphics path; `$E7/$E8` are not a generic death
 pair.
 
+The Samus workspace nevertheless exposes a **Death** group through a separate UI
+selection adapter (`SamusPreviewAnimations.kt`), not fake gameplay pose IDs. It renders
+`SamusDeathSprites` with the selected suit, both facing directions, and native palette
+tracks; source edits use the same portable project editing/import/export path as Misc.
+Community Samus already supplies its own mapped Death group: playback uses that sheet's
+artwork and timing and does not loop or fall back to original-ROM artwork.
+
 This is strong structural coverage, not yet an independently reviewed visual atlas.
 The remaining work is:
 

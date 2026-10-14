@@ -127,6 +127,12 @@ class RoomEnemyPreviewTest {
             val image = buildCompositeImage(data, setOf(TileOverlay.ENEMIES, TileOverlay.LAYER2), false, layer2Pixels = background)
             ImageIO.write(image, "png", File(TestRomHelper.outputDir(), "golden-four-room.png"))
             val full = requireNotNull(TourianStatueSprites(parser).renderComplete())
+            val visible = full.pixels.indices.filter { full.pixels[it] ushr 24 != 0 }
+            assertEquals(4, visible.minOf { it % full.width })
+            assertEquals(4, visible.minOf { it / full.width })
+            assertEquals(full.width - 5, visible.maxOf { it % full.width })
+            assertEquals(full.height - 5, visible.maxOf { it / full.width })
+            assertTrue(full.width < 256 && full.height < 256, "Empty BG canvas must not shrink the assembled preview")
             val scene = BufferedImage(full.width, full.height, BufferedImage.TYPE_INT_ARGB).apply { setRGB(0, 0, width, height, full.pixels, 0, width) }
             ImageIO.write(scene, "png", File(TestRomHelper.outputDir(), "golden-four-full.png"))
         } finally { EnemySpriteCache.setRomParser(null) }

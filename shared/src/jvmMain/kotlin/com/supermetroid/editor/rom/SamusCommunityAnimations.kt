@@ -116,7 +116,7 @@ class SamusCommunityAnimationCatalog private constructor(
         return SpriteAnimation(
             name = "${group.name} · ${humanize(variant.name)}",
             frames = renderedFrames,
-            loop = true,
+            loop = !group.name.equals("Death", ignoreCase = true),
         )
     }
 

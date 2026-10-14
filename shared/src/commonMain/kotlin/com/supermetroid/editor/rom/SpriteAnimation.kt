@@ -19,6 +19,32 @@ data class SpriteAnimationFrame(
     /** Duration in milliseconds at 60fps */
     val durationMs: Int get() = if (durationTicks > 0) (durationTicks * 1000) / 60 else 0
 
+    /** Crop a static preview's empty canvas; never apply independently to animated poses. */
+    fun trimTransparent(padding: Int = 0): SpriteAnimationFrame {
+        require(padding >= 0)
+        var left = width
+        var top = height
+        var right = -1
+        var bottom = -1
+        for (y in 0 until height) for (x in 0 until width) {
+            if (pixels[y * width + x] ushr 24 != 0) {
+                left = minOf(left, x)
+                top = minOf(top, y)
+                right = maxOf(right, x)
+                bottom = maxOf(bottom, y)
+            }
+        }
+        if (right < left) return this
+        val croppedWidth = right - left + 1 + padding * 2
+        val croppedHeight = bottom - top + 1 + padding * 2
+        val cropped = IntArray(croppedWidth * croppedHeight)
+        for (y in top..bottom) {
+            pixels.copyInto(cropped, (y - top + padding) * croppedWidth + padding,
+                y * width + left, y * width + right + 1)
+        }
+        return copy(pixels = cropped, width = croppedWidth, height = croppedHeight)
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is SpriteAnimationFrame) return false

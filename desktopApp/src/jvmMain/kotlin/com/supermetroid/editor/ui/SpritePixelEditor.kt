@@ -276,10 +276,10 @@ fun SpritePixelEditor(
         ) {
         // ── Toolbar ──
         Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(label, fontSize = LocalEditorTheme.current.fontSize.value.body, fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary)
@@ -346,8 +346,6 @@ fun SpritePixelEditor(
                     enabled = zoomLevel < 48, modifier = Modifier.size(28.dp)) {
                     Text("+", fontSize = LocalEditorTheme.current.fontSize.value.heading, color = MaterialTheme.colorScheme.onSurface)
                 }
-
-                Spacer(Modifier.weight(1f))
 
                 Surface(
                     modifier = Modifier.height(28.dp).clickable {

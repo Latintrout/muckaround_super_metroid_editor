@@ -67,14 +67,18 @@ same selection rows and palette controls as the existing sprite editors:
   missiles, bombs and impacts. Beam graphics/palettes follow the runtime transfers.
 - **Title, intro and ending** previews composed title graphics, cinematic OBJ
   tracks, BG tilemaps and Ceres Mode 7 graphics from their original sources.
-- **Samus death sequence** uses the separate death graphics and both suit and
-  suitless palette tracks for all three suits and both facing directions.
 - **Shared sprites and effects** exposes common effects, grapple tiles, gunship
   dust and beam source sheets. These source sheets are not full effect simulations.
 - **Golden Four statue** combines the room BG sculpture with the three real
   bank-`$8D` projectile maps, rather than the deleted enemy instruction maps. Its
   shared `$87:B364` OBJ tiles and three `$AA:D745..D7A4` palette rows are editable;
-  Kraid/Draygon's BG sculpture remains owned by room tileset 21.
+  Kraid/Draygon's BG sculpture remains owned by room tileset 21. The assembled preview
+  trims transparent room-canvas padding without changing the room overlay's anchors.
+
+The **Samus** section owns **Death**, including the separate ROM death graphics and
+suit/suitless palette tracks for all suits and both directions. It retains source-sheet
+editing/import/export and is included in Export All Sprites. An active community source
+uses its own mapped Death artwork instead, never a fallback to original-ROM death art.
 
 These workspaces support source-sheet pixel editing, palette-row editing, reset,
 project save/reopen and ROM export. Assembled references preview raw-source edits
@@ -90,7 +94,9 @@ colors to the selected palette and retain transparency. Assembled frames/animati
 sheets cannot be imported as tile sources because their pixels can have multiple owners.
 Weapon source sheets select the chosen projectile's actual OAM palette automatically
 (Super Missile uses row 5). Pixel-editor text follows the app font-size preference,
-and its palette/shortcut panel widens and scrolls for larger settings.
+and its palette/shortcut panel widens and scrolls for larger settings. The pixel-editor
+toolbar wraps at the available width. Samus, community sheets, and the shared animation
+player use the app's dark/light theme colors, including transparency checkerboards.
 
 Compressed sources are recompressed and verified on Apply. Edits must fit the
 original compressed byte budget; otherwise Apply reports an error without changing

@@ -138,4 +138,29 @@ class SamusCommunityAnimationsTest {
         paletteIndices = byteArrayOf(1),
         paletteInterval = 0..0,
     )
+
+    @Test
+    fun deathUsesOnlyTheCommunitySheetsArtworkInBothDirectionsAndNeverLoops() {
+        val decoder = SamusCommunitySheetDecoder()
+        val blank = BufferedImage(SamusCommunitySheetDecoder.FORMAT_WIDTH,
+            SamusCommunitySheetDecoder.FORMAT_HEIGHT, BufferedImage.TYPE_INT_ARGB)
+        val decoded = assertNotNull(decoder.decode(blank, "community-death-fixture.png").sheet)
+        val communityColor = 0xFF12ABCD.toInt()
+        val sheet = decoded.copy(images = decoded.images.mapValues { (_, image) ->
+            image.copy(pixels = IntArray(image.width * image.height) { communityColor },
+                paletteIndices = null, paletteInterval = null)
+        })
+        val catalog = SamusCommunityAnimationCatalog.loadBundled()
+        val death = catalog.groups.single { it.name == "Death" }
+        assertEquals(setOf("right", "left"), death.variants.map { it.name }.toSet())
+        for (suit in SamusSpriteDecoder.SuitType.entries) for (variant in death.variants) {
+            val animation = catalog.buildAnimation(sheet, death, variant, suit)
+            assertTrue(!animation.loop)
+            assertEquals(variant.frames.map { it.durationTicks }, animation.frames.map { it.durationTicks })
+            assertTrue(animation.frames.all { frame -> frame.pixels.any { it == communityColor } })
+            assertEquals(setOf(communityColor), animation.frames.flatMap { frame -> frame.pixels.filter { it ushr 24 != 0 } }.toSet())
+            val missingArt = catalog.buildAnimation(sheet.copy(images = emptyMap()), death, variant, suit)
+            assertTrue(missingArt.frames.all { frame -> frame.pixels.all { it == 0 } }, "Missing community art must not become vanilla Samus")
+        }
+    }
 }

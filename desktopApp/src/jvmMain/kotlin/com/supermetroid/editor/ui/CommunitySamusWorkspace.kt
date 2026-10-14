@@ -71,7 +71,7 @@ internal fun CommunitySamusWorkspace(
 
     Column(modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().background(Color(0xFF1C2033)).padding(horizontal = 12.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -87,7 +87,7 @@ internal fun CommunitySamusWorkspace(
             Text(
                 "SpriteSomething ${SamusCommunitySheetDecoder.FORMAT_ID.substringAfter('-')}",
                 fontSize = font.detail,
-                color = Color(0xFF7F89A5),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
@@ -98,7 +98,7 @@ internal fun CommunitySamusWorkspace(
                         Text(
                             "The bundled animation map could not be loaded: ${catalogResult.exceptionOrNull()?.message}",
                             fontSize = font.body,
-                            color = Color(0xFFFCA5A5),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                     }
                 } else {
@@ -149,15 +149,15 @@ private fun CommunitySamusAnimationBrowser(
 
     Row(modifier) {
         Column(
-            Modifier.width(220.dp).fillMaxHeight().background(Color(0xFF191D2F))
+            Modifier.width(220.dp).fillMaxHeight().background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState()).padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text("Animations", fontSize = font.body, color = Color(0xFFB8C0D8), fontWeight = FontWeight.SemiBold)
+            Text("Animations", fontSize = font.body, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
             Text(
                 "${catalog.groups.size} groups · ${catalog.variantCount} variants",
                 fontSize = font.detail,
-                color = Color(0xFF737D99),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 5.dp),
             )
             catalog.groups.forEachIndexed { index, choice ->
@@ -176,29 +176,29 @@ private fun CommunitySamusAnimationBrowser(
                             choice.name,
                             fontSize = font.body,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFFC0C7DC),
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             "${choice.variants.size} variants · ${choice.variants.sumOf { it.frames.size }} frames",
                             fontSize = font.detail,
-                            color = Color(0xFF747E99),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
         }
 
-        Box(Modifier.width(1.dp).fillMaxHeight().background(Color(0xFF30354E)))
+        Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
 
         Column(
             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(group.name, fontSize = font.heading, color = Color(0xFFF0F2FC), fontWeight = FontWeight.Bold)
+            Text(group.name, fontSize = font.heading, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
             Text(
                 "Community sheet animation · ${selectedSuit.name.lowercase().replaceFirstChar { it.uppercase() }} palette · SpriteSomething timing and composition",
                 fontSize = font.detail,
-                color = Color(0xFF8993AE),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
 
@@ -225,7 +225,7 @@ private fun CommunitySamusAnimationBrowser(
 
             if (unresolved.isNotEmpty()) {
                 Surface(
-                    color = Color(0xFF3A321C),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
                     shape = RoundedCornerShape(5.dp),
                     modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
                 ) {
@@ -236,7 +236,7 @@ private fun CommunitySamusAnimationBrowser(
                             "${unresolved.size} optional composition piece${if (unresolved.size == 1) " is" else "s are"} not stored in this sheet."
                         },
                         fontSize = font.detail,
-                        color = Color(0xFFFDE68A),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
                     )
                 }
@@ -319,7 +319,7 @@ private fun CommunitySamusFrameGallery(
     }
     val selected = sheet.images[selectedName] ?: images.firstOrNull() ?: sheet.images.values.first()
 
-    Column(modifier.background(Color(0xFF171A2A)).padding(10.dp)) {
+    Column(modifier.background(MaterialTheme.colorScheme.background).padding(10.dp)) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -347,7 +347,7 @@ private fun CommunitySamusFrameGallery(
                     )
                 }
             }
-            Text("${images.size} frames", fontSize = font.detail, color = Color(0xFF8993AE))
+            Text("${images.size} frames", fontSize = font.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         Spacer(Modifier.height(8.dp))
@@ -367,11 +367,11 @@ private fun CommunitySamusFrameGallery(
                     ) {
                         Surface(
                             modifier = Modifier.width(118.dp).fillMaxHeight().clickable { selectedName = image.name },
-                            color = if (active) MaterialTheme.colorScheme.primaryContainer else Color(0xFF22263B),
+                            color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                             shape = RoundedCornerShape(7.dp),
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
-                                if (active) MaterialTheme.colorScheme.primary else Color(0xFF343A54),
+                                if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                             ),
                         ) {
                             Column(
@@ -380,7 +380,7 @@ private fun CommunitySamusFrameGallery(
                             ) {
                                 Box(
                                     Modifier.fillMaxWidth().weight(1f)
-                                        .background(Color(0xFF1B1F31), RoundedCornerShape(4.dp)),
+                                        .background(MaterialTheme.colorScheme.background, RoundedCornerShape(4.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Image(
@@ -394,7 +394,7 @@ private fun CommunitySamusFrameGallery(
                                 Text(
                                     humanizeCommunityName(image.name),
                                     fontSize = font.detail,
-                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFFD0D6E9),
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(top = 5.dp),
@@ -402,7 +402,7 @@ private fun CommunitySamusFrameGallery(
                                 Text(
                                     "${image.width} × ${image.height}",
                                     fontSize = font.statusBar,
-                                    color = Color(0xFF7D87A2),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -410,7 +410,7 @@ private fun CommunitySamusFrameGallery(
                 }
             }
 
-            Box(Modifier.width(1.dp).fillMaxHeight().background(Color(0xFF30354E)))
+            Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
             CommunityRegionDetails(selected, sheet, selectedSuit, Modifier.width(330.dp))
         }
     }

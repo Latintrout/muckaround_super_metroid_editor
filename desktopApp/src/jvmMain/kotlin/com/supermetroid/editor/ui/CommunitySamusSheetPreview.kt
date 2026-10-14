@@ -228,7 +228,7 @@ internal fun CommunitySamusSheetPreview(
     modifier: Modifier = Modifier,
 ) {
     val sheet = session.result.sheet
-    Column(modifier.fillMaxSize().background(Color(0xFF171A2A))) {
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         CommunitySheetHeader(
             session = session,
             onUseInProject = onUseInProject,
@@ -264,7 +264,7 @@ private fun CommunitySheetHeader(
     onPreviewProjectSource: (() -> Unit)?,
     onRestoreBase: (() -> Unit)?,
 ) {
-    Surface(color = Color(0xFF20243A), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -276,24 +276,24 @@ private fun CommunitySheetHeader(
                         session.metadata?.displayName ?: session.sourceName.substringBeforeLast('.'),
                         fontWeight = FontWeight.Bold,
                         fontSize = LocalEditorTheme.current.fontSize.value.heading,
-                        color = Color(0xFFF1F3FF),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     CompactBadge(
                         if (isProjectSource) "PROJECT SOURCE" else "PREVIEW",
-                        if (isProjectSource) Color(0xFF86EFAC) else Color(0xFF93C5FD),
-                        if (isProjectSource) Color(0xFF173322) else Color(0xFF172B45),
+                        if (isProjectSource) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                        if (isProjectSource) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
                     )
                     if (isProjectSource && projectSource != null) {
                         CompactBadge(
                             if (projectSource.injectionArtifact != null) "ROM READY" else "SOURCE ONLY",
-                            if (projectSource.injectionArtifact != null) Color(0xFF86EFAC) else Color(0xFFFDE68A),
-                            if (projectSource.injectionArtifact != null) Color(0xFF28503B) else Color(0xFF4A3E20),
+                            if (projectSource.injectionArtifact != null) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                            if (projectSource.injectionArtifact != null) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
                         )
                     }
                     if (session.result.isValid) {
-                        CompactBadge("VALID", Color(0xFF86EFAC), Color(0xFF173322))
+                        CompactBadge("VALID", MaterialTheme.colorScheme.onTertiaryContainer, MaterialTheme.colorScheme.tertiaryContainer)
                     } else {
-                        CompactBadge("NEEDS ATTENTION", Color(0xFFFCA5A5), Color(0xFF3B1E25))
+                        CompactBadge("NEEDS ATTENTION", MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.errorContainer)
                     }
                 }
                 val details = session.metadata?.let { metadata ->
@@ -303,10 +303,10 @@ private fun CommunitySheetHeader(
                         if (metadata.version != null) append("catalog v${metadata.version}") else append(session.sourceName)
                     }
                 } ?: "Uncataloged PNG  •  ${session.sourceName}"
-                Text(details, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF9AA4C1), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(details, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (!isProjectSource && projectSource != null && onPreviewProjectSource != null) {
-                Surface(color = Color(0xFF173322), shape = RoundedCornerShape(5.dp)) {
+                Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RoundedCornerShape(5.dp)) {
                     Row(
                         Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -316,21 +316,21 @@ private fun CommunitySheetHeader(
                             Text(
                                 "Current project",
                                 fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
-                                color = Color(0xFF78AA8A),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
                                 projectSource.displayName,
                                 fontSize = LocalEditorTheme.current.fontSize.value.detail,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFB7F7CA),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
                         CompactBadge(
                             if (projectSource.injectionArtifact != null) "ROM READY" else "SOURCE ONLY",
-                            if (projectSource.injectionArtifact != null) Color(0xFF86EFAC) else Color(0xFFFDE68A),
-                            if (projectSource.injectionArtifact != null) Color(0xFF28503B) else Color(0xFF4A3E20),
+                            if (projectSource.injectionArtifact != null) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                            if (projectSource.injectionArtifact != null) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
                         )
                         CompactAction("View", onPreviewProjectSource)
                     }
@@ -359,8 +359,8 @@ private fun CommunityIssueSummary(session: CommunitySamusPreviewSession) {
     if (messages.isEmpty()) return
 
     val hasError = session.result.issues.any { it.severity == SamusCommunitySheetDecoder.Severity.ERROR }
-    val background = if (hasError) Color(0xFF3A2028) else Color(0xFF3A321C)
-    val foreground = if (hasError) Color(0xFFFCA5A5) else Color(0xFFFDE68A)
+    val background = if (hasError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
+    val foreground = if (hasError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
     Surface(color = background, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             messages.take(3).forEach { message ->
@@ -380,7 +380,7 @@ private fun InvalidCommunitySheet(
     modifier: Modifier,
 ) {
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Surface(color = Color(0xFF22263B), shape = RoundedCornerShape(8.dp), modifier = Modifier.width(460.dp)) {
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp), modifier = Modifier.width(460.dp)) {
             Column(
                 Modifier.padding(22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -388,18 +388,18 @@ private fun InvalidCommunitySheet(
             ) {
                 Text(
                     "This PNG is not a supported community Samus sheet",
-                    color = Color(0xFFF1F3FF),
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
                     fontSize = LocalEditorTheme.current.fontSize.value.heading,
                 )
                 Text(
                     "Expected ${SamusCommunitySheetDecoder.FORMAT_WIDTH} × ${SamusCommunitySheetDecoder.FORMAT_HEIGHT} using the pinned SpriteSomething layout.",
-                    color = Color(0xFFAAB2CA),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = LocalEditorTheme.current.fontSize.value.body,
                 )
                 session.result.issues.filter { it.severity == SamusCommunitySheetDecoder.Severity.ERROR }
                     .take(4)
-                    .forEach { issue -> Text(issue.message, color = Color(0xFFFCA5A5), fontSize = LocalEditorTheme.current.fontSize.value.detail) }
+                    .forEach { issue -> Text(issue.message, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = LocalEditorTheme.current.fontSize.value.detail) }
                 CompactAction("Choose a different PNG", onChooseAnother)
             }
         }
@@ -430,10 +430,10 @@ internal fun CommunitySheetMetrics(sheet: SamusCommunitySheetDecoder.DecodedShee
 
 @Composable
 private fun MetricCard(label: String, value: String, modifier: Modifier) {
-    Surface(modifier, color = Color(0xFF22263B), shape = RoundedCornerShape(6.dp)) {
+    Surface(modifier, color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(6.dp)) {
         Column(Modifier.padding(horizontal = 9.dp, vertical = 6.dp)) {
-            Text(label, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF79839F))
-            Text(value, fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFDCE2F8), fontWeight = FontWeight.SemiBold)
+            Text(label, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -464,7 +464,7 @@ internal fun CommunityRegionBrowser(
 
     Row(modifier.fillMaxWidth()) {
         Column(
-            Modifier.width(265.dp).fillMaxHeight().background(Color(0xFF1C2033)).padding(9.dp),
+            Modifier.width(265.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(9.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             OutlinedTextField(
@@ -496,7 +496,7 @@ internal fun CommunityRegionBrowser(
                     )
                 }
             }
-            Text("${filtered.size} regions", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF79839F))
+            Text("${filtered.size} regions", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
@@ -517,20 +517,20 @@ internal fun CommunityRegionBrowser(
                                 Text(
                                     humanizeCommunityName(image.name),
                                     fontSize = LocalEditorTheme.current.fontSize.value.detail,
-                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFFC6CCE0),
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                Text(image.name, fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = Color(0xFF69738E), fontFamily = FontFamily.Monospace)
+                                Text(image.name, fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
                             }
-                            Text("${image.width}×${image.height}", fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = Color(0xFF7E88A4))
+                            Text("${image.width}×${image.height}", fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
         }
 
-        Box(Modifier.width(1.dp).fillMaxHeight().background(Color(0xFF30354E)))
+        Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
         CommunityRegionDetails(selected, sheet, selectedSuit, Modifier.weight(1f))
     }
 }
@@ -548,14 +548,14 @@ internal fun CommunityRegionDetails(
         modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(humanizeCommunityName(image.name), fontSize = LocalEditorTheme.current.fontSize.value.display, fontWeight = FontWeight.Bold, color = Color(0xFFF0F2FC))
-        Text(image.name, fontSize = LocalEditorTheme.current.fontSize.value.detail, fontFamily = FontFamily.Monospace, color = Color(0xFF8993B0))
+        Text(humanizeCommunityName(image.name), fontSize = LocalEditorTheme.current.fontSize.value.display, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        Text(image.name, fontSize = LocalEditorTheme.current.fontSize.value.detail, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(10.dp))
 
         Box(
             Modifier.fillMaxWidth().height(380.dp)
-                .border(1.dp, Color(0xFF3A405B), RoundedCornerShape(8.dp))
-                .background(Color(0xFF20243A), RoundedCornerShape(8.dp)),
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Checkerboard(Modifier.fillMaxSize().padding(1.dp))
@@ -567,8 +567,8 @@ internal fun CommunityRegionDetails(
                 filterQuality = FilterQuality.None,
             )
             if (opaquePixels == 0) {
-                Surface(color = Color(0xDD272B40), shape = RoundedCornerShape(5.dp)) {
-                    Text("Transparent region", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFFDE68A), modifier = Modifier.padding(8.dp))
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.87f), shape = RoundedCornerShape(5.dp)) {
+                    Text("Transparent region", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(8.dp))
                 }
             }
         }
@@ -582,8 +582,8 @@ internal fun CommunityRegionDetails(
 
         Spacer(Modifier.height(12.dp))
         if (image.name == "palette_block") {
-            Text("Master palettes", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color(0xFFB8C0D8), fontWeight = FontWeight.SemiBold)
-            Text("7 rows × 15 colors", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF76809D))
+            Text("Master palettes", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+            Text("7 rows × 15 colors", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(5.dp))
             sheet.masterPaletteRgb.toList().chunked(15).forEach { row ->
                 PaletteRow(row)
@@ -596,7 +596,7 @@ internal fun CommunityRegionDetails(
                     "${selectedSuit.name.lowercase().replaceFirstChar { it.uppercase() }} preview palette " +
                         "${interval.first}–${interval.last}  •  decoded index 0 stays transparent",
                     fontSize = LocalEditorTheme.current.fontSize.value.detail,
-                    color = Color(0xFF8D97B3),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(5.dp))
                 PaletteRow(interval.map { sheet.masterPaletteRgb[it] })
@@ -615,7 +615,7 @@ private fun PaletteRow(colors: List<Int>) {
             Box(
                 Modifier.weight(1f).fillMaxHeight()
                     .background(Color(red / 255f, green / 255f, blue / 255f), RoundedCornerShape(2.dp))
-                    .border(1.dp, Color(0x553A405B), RoundedCornerShape(2.dp)),
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.33f), RoundedCornerShape(2.dp)),
             )
         }
     }
@@ -623,6 +623,8 @@ private fun PaletteRow(colors: List<Int>) {
 
 @Composable
 private fun Checkerboard(modifier: Modifier) {
+    val checkerLight = MaterialTheme.colorScheme.surface
+    val checkerDark = MaterialTheme.colorScheme.surfaceVariant
     Canvas(modifier) {
         val cell = 12.dp.toPx()
         var y = 0f
@@ -632,7 +634,7 @@ private fun Checkerboard(modifier: Modifier) {
             var column = 0
             while (x < size.width) {
                 drawRect(
-                    color = if ((row + column) % 2 == 0) Color(0xFF272C42) else Color(0xFF20243A),
+                    color = if ((row + column) % 2 == 0) checkerDark else checkerLight,
                     topLeft = Offset(x, y),
                     size = Size(cell.coerceAtMost(size.width - x), cell.coerceAtMost(size.height - y)),
                 )
@@ -656,10 +658,10 @@ private fun CompactBadge(text: String, foreground: Color, background: Color) {
 private fun CompactAction(text: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        color = Color(0xFF303650),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(5.dp),
     ) {
-        Text(text, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFFD8DEF2), modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
+        Text(text, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
     }
 }
 

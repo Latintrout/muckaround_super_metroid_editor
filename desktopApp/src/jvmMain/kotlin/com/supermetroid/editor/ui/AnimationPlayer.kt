@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
@@ -92,7 +91,7 @@ fun AnimationPlayer(
             Text(
                 "No animation data",
                 fontSize = LocalEditorTheme.current.fontSize.value.body,
-                color = Color(0xFF6A6F88),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         return
@@ -180,10 +179,12 @@ fun AnimationPlayer(
             bi
         }
 
+        val checkerLight = MaterialTheme.colorScheme.surface
+        val checkerDark = MaterialTheme.colorScheme.surfaceVariant
         Box(
             modifier = Modifier.size(previewSize.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, Color(0xFF3A3F5C), RoundedCornerShape(8.dp)),
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
             // Checkerboard
@@ -193,7 +194,7 @@ fun AnimationPlayer(
                 val rows = (size.height / cellSize).toInt() + 1
                 for (r in 0 until rows) {
                     for (c in 0 until cols) {
-                        val color = if ((r + c) % 2 == 0) Color(0xFF2A2A3A) else Color(0xFF333348)
+                        val color = if ((r + c) % 2 == 0) checkerLight else checkerDark
                         drawRect(color, Offset(c * cellSize, r * cellSize), Size(cellSize, cellSize))
                     }
                 }
@@ -217,7 +218,7 @@ fun AnimationPlayer(
         Text(
             "Frame ${safeFrame + 1}/${frames.size} — $timingText",
             fontSize = LocalEditorTheme.current.fontSize.value.detail,
-            color = Color(0xFFB0B8D1),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
         )
 
@@ -237,7 +238,7 @@ fun AnimationPlayer(
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(Icons.Default.SkipPrevious, "Previous frame",
-                    modifier = Modifier.size(18.dp), tint = Color(0xFFB0B8D1))
+                    modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             // Play / Pause — distinct behavior
@@ -261,7 +262,7 @@ fun AnimationPlayer(
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(Icons.Default.PlayArrow, "Play",
-                        modifier = Modifier.size(22.dp), tint = Color(0xFFB0B8D1))
+                        modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -274,7 +275,7 @@ fun AnimationPlayer(
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(Icons.Default.Stop, "Stop",
-                    modifier = Modifier.size(18.dp), tint = Color(0xFFB0B8D1))
+                    modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             // Step forward
@@ -286,7 +287,7 @@ fun AnimationPlayer(
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(Icons.Default.SkipNext, "Next frame",
-                    modifier = Modifier.size(18.dp), tint = Color(0xFFB0B8D1))
+                    modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Spacer(Modifier.width(8.dp))
@@ -298,14 +299,14 @@ fun AnimationPlayer(
                 Surface(
                     modifier = Modifier.clickable { speedMultiplier = speed },
                     color = if (speedMultiplier == speed) MaterialTheme.colorScheme.primaryContainer
-                    else Color(0xFF2A2D45),
+                    else MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text(
                         label, fontSize = LocalEditorTheme.current.fontSize.value.detail,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                         color = if (speedMultiplier == speed) MaterialTheme.colorScheme.onPrimaryContainer
-                        else Color(0xFFB0B8D1),
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = FontFamily.Monospace
                     )
                 }
@@ -327,7 +328,7 @@ fun AnimationPlayer(
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
                     activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = Color(0xFF3A3F5C)
+                    inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant
                 )
             )
         }
@@ -340,7 +341,7 @@ fun AnimationPlayer(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Export:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = Color(0xFF6A6F88))
+                Text("Export:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 if (onExportPng != null) {
                     ExportButton("Frame PNG") { onExportPng(frame, safeFrame) }
@@ -360,13 +361,13 @@ fun AnimationPlayer(
 private fun ExportButton(label: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        color = Color(0xFF2A3A2A),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
         shape = RoundedCornerShape(4.dp)
     ) {
         Text(
             label, fontSize = LocalEditorTheme.current.fontSize.value.detail,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            color = Color(0xFF90D090)
+            color = MaterialTheme.colorScheme.onTertiaryContainer
         )
     }
 }

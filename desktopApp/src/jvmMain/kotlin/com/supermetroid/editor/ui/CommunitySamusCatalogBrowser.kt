@@ -109,20 +109,20 @@ internal fun CommunitySamusCatalogBrowser(
         showcaseLoading = false
     }
 
-    Column(modifier.fillMaxSize().background(Color(0xFF171A2A))) {
-        Surface(color = Color(0xFF20243A), modifier = Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Community Samus Catalog", color = Color(0xFFF1F3FF), fontWeight = FontWeight.Bold, fontSize = fs.heading)
+                    Text("Community Samus Catalog", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = fs.heading)
                     Text(
                         "${snapshot.sprites.size} sprites · upstream ${snapshot.revision.take(8)}" +
                             (if (snapshot.usedCachedCatalog) " · saved catalog" else "") +
                             (if (romReadyCatalog) " · ROM-ready" else " · preview-only revision"),
-                        color = Color(0xFF8D97B3),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = fs.detail,
                     )
                 }
@@ -133,14 +133,14 @@ internal fun CommunitySamusCatalogBrowser(
         }
 
         snapshot.notice?.let { notice ->
-            Surface(color = Color(0xFF3A321C), modifier = Modifier.fillMaxWidth()) {
-                Text(notice, color = Color(0xFFFDE68A), fontSize = fs.detail, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Text(notice, color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = fs.detail, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
             }
         }
 
         Row(Modifier.fillMaxSize()) {
             Column(
-                Modifier.width(sidebarWidth).fillMaxHeight().background(Color(0xFF1C2033)).padding(10.dp),
+                Modifier.width(sidebarWidth).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 OutlinedTextField(
@@ -171,7 +171,7 @@ internal fun CommunitySamusCatalogBrowser(
                         )
                     }
                 }
-                Text("${filtered.size} matches", fontSize = fs.detail, color = Color(0xFF8D97B3))
+                Text("${filtered.size} matches", fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     items(filtered, key = { it.name }) { sprite ->
                         val active = sprite.name == selected.name
@@ -190,34 +190,34 @@ internal fun CommunitySamusCatalogBrowser(
                                         sprite.displayName,
                                         fontSize = fs.body,
                                         fontWeight = if (sprite.name == activeCatalogName) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFFC6CCE0),
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
                                         sprite.authors.joinToString(),
                                         fontSize = fs.detail,
-                                        color = Color(0xFF8792AF),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                if (sprite.name == activeCatalogName) CatalogBadge("PROJECT", Color(0xFF86EFAC))
-                                else if (isDownloaded(sprite)) CatalogBadge("SAVED", Color(0xFF93C5FD))
+                                if (sprite.name == activeCatalogName) CatalogBadge("PROJECT", MaterialTheme.colorScheme.tertiary)
+                                else if (isDownloaded(sprite)) CatalogBadge("SAVED", MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
                 }
             }
 
-            Box(Modifier.width(1.dp).fillMaxHeight().background(Color(0xFF30354E)))
+            Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
             Column(
                 Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.height(12.dp))
                 Surface(
-                    color = Color(0xFF22263B),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth(0.9f).widthIn(max = 780.dp),
                 ) {
@@ -231,35 +231,35 @@ internal fun CommunitySamusCatalogBrowser(
                             showcaseLoading -> ShowcaseLoading()
                             else -> {
                                 Box(
-                                    Modifier.size(110.dp).background(Color(0xFF303650), RoundedCornerShape(10.dp)),
+                                    Modifier.size(110.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
                                         selected.displayName.take(1).uppercase(),
                                         fontSize = fs.display,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF9CC7FF),
+                                        color = MaterialTheme.colorScheme.primary,
                                     )
                                 }
                                 Text(
                                     if (selectedDownloaded) "Saved preview unavailable" else "Download to see representative in-game poses",
                                     fontSize = fs.detail,
-                                    color = Color(0xFF8D97B3),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
                         Spacer(Modifier.height(3.dp))
-                        Text(selected.displayName, fontSize = fs.display, fontWeight = FontWeight.Bold, color = Color(0xFFF1F3FF))
-                        Text("by ${selected.authors.joinToString()}", fontSize = fs.body, color = Color(0xFFB7C0D9))
+                        Text(selected.displayName, fontSize = fs.display, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Text("by ${selected.authors.joinToString()}", fontSize = fs.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             "${selected.category} · catalog v${selected.version}",
                             fontSize = fs.detail,
-                            color = Color(0xFF7F8AA7),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(selected.name, fontSize = fs.detail, fontFamily = FontFamily.Monospace, color = Color(0xFF7E89A6))
+                        Text(selected.name, fontSize = fs.detail, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         CatalogBadge(
                             if (romReadyCatalog) "VERIFIED ROM PATCH AVAILABLE" else "SOURCE PREVIEW ONLY",
-                            if (romReadyCatalog) Color(0xFF86EFAC) else Color(0xFFFDE68A),
+                            if (romReadyCatalog) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                         Spacer(Modifier.height(5.dp))
                         if (!selectedDownloaded) {
@@ -297,7 +297,7 @@ internal fun CommunitySamusCatalogBrowser(
                             }
                         }
                         if (selected.name == activeCatalogName) {
-                            Text("This is the project’s selected Samus source.", fontSize = fs.detail, color = Color(0xFF86EFAC))
+                            Text("This is the project’s selected Samus source.", fontSize = fs.detail, color = MaterialTheme.colorScheme.tertiary)
                         }
                     }
                 }
@@ -305,7 +305,7 @@ internal fun CommunitySamusCatalogBrowser(
                 Text(
                     "Artwork downloads directly from MapRandoSprites only when requested and stays in SMEDIT’s local cache.",
                     fontSize = fs.detail,
-                    color = Color(0xFF747F9B),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(18.dp))
             }
@@ -326,7 +326,7 @@ private fun CommunitySamusShowcase(
         val showcaseHeight = (rows * SHOWCASE_CELL_SIZE + (rows - 1).coerceAtLeast(0) * SHOWCASE_GAP + 24).dp
         Box(
             Modifier.fillMaxWidth().height(showcaseHeight)
-                .background(Color(0xFF171A2A), RoundedCornerShape(8.dp)),
+                .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -339,7 +339,7 @@ private fun CommunitySamusShowcase(
                         indices.forEach { index ->
                             Surface(
                                 modifier = Modifier.requiredSize(SHOWCASE_CELL_SIZE.dp),
-                                color = Color(0xFF1D2235),
+                                color = MaterialTheme.colorScheme.surface,
                                 shape = RoundedCornerShape(6.dp),
                             ) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -357,11 +357,11 @@ private fun CommunitySamusShowcase(
                 }
             }
             if (!showcase.hasVisiblePixels) {
-                Surface(color = Color(0xE6292E43), shape = RoundedCornerShape(5.dp)) {
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f), shape = RoundedCornerShape(5.dp)) {
                     Text(
                         "Representative gameplay poses are transparent",
                         fontSize = fs.body,
-                        color = Color(0xFFFDE68A),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
@@ -379,7 +379,7 @@ private fun ShowcaseLoading() {
         val showcaseHeight = (rows * SHOWCASE_CELL_SIZE + (rows - 1) * SHOWCASE_GAP + 24).dp
         Box(
             Modifier.fillMaxWidth().height(showcaseHeight)
-                .background(Color(0xFF171A2A), RoundedCornerShape(8.dp)),
+                .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -391,13 +391,13 @@ private fun ShowcaseLoading() {
                         repeat(minOf(columns, SHOWCASE_ITEM_COUNT - row * columns)) {
                             Box(
                                 Modifier.requiredSize(SHOWCASE_CELL_SIZE.dp)
-                                    .background(Color(0xFF1D2235), RoundedCornerShape(6.dp)),
+                                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp)),
                             )
                         }
                     }
                 }
             }
-            Text("Building downloaded pose preview…", fontSize = fs.body, color = Color(0xFF9CC7FF))
+            Text("Building downloaded pose preview…", fontSize = fs.body, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -422,8 +422,8 @@ internal fun CommunitySamusCatalogStatus(
     modifier: Modifier = Modifier,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
-    Box(modifier.fillMaxSize().background(Color(0xFF171A2A)), contentAlignment = Alignment.Center) {
-        Surface(color = Color(0xFF22263B), shape = RoundedCornerShape(9.dp), modifier = Modifier.width(500.dp)) {
+    Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(9.dp), modifier = Modifier.width(500.dp)) {
             Column(
                 Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -431,11 +431,11 @@ internal fun CommunitySamusCatalogStatus(
             ) {
                 Text(
                     if (isError) "Community catalog unavailable" else "Loading community catalog…",
-                    color = if (isError) Color(0xFFFCA5A5) else Color(0xFFF1F3FF),
+                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
                     fontSize = fs.heading,
                 )
-                Text(message, color = Color(0xFF9AA4C1), fontSize = fs.body)
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = fs.body)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     if (isError) CatalogAction("Try Again", onRetry, emphasized = true)
                     CatalogAction("Import Local PNG…", onImportFile)
@@ -455,7 +455,7 @@ private fun SamusCommunitySheetDecoder.DecodedImage.toCatalogImageBitmap(): Imag
 @Composable
 private fun CatalogBadge(text: String, foreground: Color) {
     val fs = LocalEditorTheme.current.fontSize.value
-    Surface(color = Color(0xFF263149), shape = RoundedCornerShape(4.dp)) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(4.dp)) {
         Text(text, fontSize = fs.statusBar, color = foreground, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
     }
 }
@@ -471,16 +471,20 @@ private fun CatalogAction(
     Surface(
         modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
         color = when {
-            !enabled -> Color(0xFF2A2D3B)
-            emphasized -> Color(0xFF244B68)
-            else -> Color(0xFF303650)
+            !enabled -> MaterialTheme.colorScheme.surfaceVariant
+            emphasized -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant
         },
         shape = RoundedCornerShape(5.dp),
     ) {
         Text(
             text,
             fontSize = fs.body,
-            color = if (enabled) Color(0xFFD8DEF2) else Color(0xFF74798A),
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
             modifier = Modifier.padding(horizontal = if (emphasized) 13.dp else 9.dp, vertical = if (emphasized) 8.dp else 6.dp),
         )
     }

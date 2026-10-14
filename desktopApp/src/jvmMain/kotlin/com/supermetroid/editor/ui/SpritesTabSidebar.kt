@@ -53,7 +53,7 @@ internal fun spriteMatchesQuery(
 
 internal fun samusMatchesSpriteQuery(query: String): Boolean {
     val lower = query.trim().lowercase()
-    return lower.isEmpty() || "samus".contains(lower) || "player".contains(lower)
+    return lower.isEmpty() || listOf("samus", "player", "death", "suit explosion").any { it.contains(lower) }
 }
 
 internal fun sortSpriteEntries(

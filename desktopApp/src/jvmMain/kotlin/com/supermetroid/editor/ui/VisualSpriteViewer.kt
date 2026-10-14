@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.supermetroid.editor.rom.ProjectileSprites
 import com.supermetroid.editor.rom.CinematicSprites
-import com.supermetroid.editor.rom.SamusDeathSprites
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.RomVisualAssets
 import com.supermetroid.editor.rom.SpriteAnimation
@@ -25,17 +24,13 @@ internal val VISUAL_SPRITE_WORKSPACES = listOf(
     VisualSpriteWorkspace(-2, "Beams and projectiles", "Weapons"),
     VisualSpriteWorkspace(-3, "Title, intro and ending", "Scenes"),
     VisualSpriteWorkspace(-4, "Shared sprites and effects", "Effects"),
-    VisualSpriteWorkspace(-5, "Samus death sequence", "Death"),
     VisualSpriteWorkspace(-6, "Golden Four statue", "Statue"),
 )
-
-private val DEATH_NAMES = listOf("Power suit · right", "Power suit · left", "Varia suit · right", "Varia suit · left", "Gravity suit · right", "Gravity suit · left")
 
 internal fun visualSpriteNames(workspace: VisualSpriteWorkspace): List<String> = when (workspace.index) {
     -6 -> listOf("Golden Four statue") + TourianStatueSprites.PARTS.map { it.name }
     -2 -> ProjectileSprites.WEAPONS.map { it.name }
     -3 -> CinematicSprites.SEQUENCES.map { it.name } + RomVisualAssets.ASSETS.filter { it.group == workspace.group }.map { it.name }
-    -5 -> DEATH_NAMES + RomVisualAssets.ASSETS.filter { it.group == workspace.group }.map { it.name }
     else -> RomVisualAssets.ASSETS.filter { it.group == workspace.group }.map { it.name }
 }
 
@@ -68,12 +63,7 @@ internal fun visualSpriteTargets(parser: RomParser, workspace: VisualSpriteWorks
             if (sequence.graphics == 0x95E4C2) add(NativeSpriteTarget("9AD200", sequence.palette, 16, 15))
         }
     }
-    if (workspace.index == -5 && selected in DEATH_NAMES.indices) {
-        val stage = parser.readByteAt(parser.snesToPc(0x9BB824))
-        val palette = 0x9B0000 or parser.readUInt16At(parser.snesToPc(0x9BB7D3 + selected / 2 * 20 + stage * 2))
-        return listOf(NativeSpriteTarget("9B8000", palette, 1))
-    }
-    val offset = when (workspace.index) { -3 -> CinematicSprites.SEQUENCES.size; -5 -> DEATH_NAMES.size; else -> 0 }
+    val offset = if (workspace.index == -3) CinematicSprites.SEQUENCES.size else 0
     val asset = RomVisualAssets.ASSETS.filter { it.group == workspace.group }.getOrNull(selected - offset) ?: return emptyList()
     val row = when (asset.graphics) { 0x9580D8 -> 9; 0x95E4C2 -> 15; 0x97B957 -> 13; 0x97D7FC -> 14; else -> 0 }
     return listOf(NativeSpriteTarget(NativeSpriteAssets.key(asset.graphics), asset.palette, asset.paletteColors / 16, row))
@@ -90,8 +80,7 @@ internal fun renderVisualSprite(parser: RomParser, workspace: VisualSpriteWorksp
     }
     if (workspace.index == -2) return ProjectileSprites.WEAPONS.getOrNull(selected)?.let { ProjectileSprites(parser).render(it, direction) }
     if (workspace.index == -3 && selected in CinematicSprites.SEQUENCES.indices) return CinematicSprites(parser).render(CinematicSprites.SEQUENCES[selected])
-    if (workspace.index == -5 && selected in DEATH_NAMES.indices) return SamusDeathSprites(parser).render(selected / 2, selected % 2 != 0)
-    val offset = when (workspace.index) { -3 -> CinematicSprites.SEQUENCES.size; -5 -> DEATH_NAMES.size; else -> 0 }
+    val offset = if (workspace.index == -3) CinematicSprites.SEQUENCES.size else 0
     val asset = RomVisualAssets.ASSETS.filter { it.group == workspace.group }.getOrNull(selected - offset) ?: return null
     return RomVisualAssets.render(parser, asset, paletteRow)?.let { SpriteAnimation(asset.name, listOf(it), loop = false) }
 }

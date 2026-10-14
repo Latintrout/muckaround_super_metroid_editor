@@ -42,6 +42,26 @@ class SpriteAnimationTest {
     // ─── SpriteAnimation tests ──────────────────────────────────────
 
     @Test
+    fun `static frame trimming preserves visible pixels metadata and requested padding`() {
+        val pixels = IntArray(8 * 7)
+        pixels[2 * 8 + 3] = 0xFF123456.toInt()
+        pixels[3 * 8 + 4] = 0xFFABCDEF.toInt()
+        pixels[0] = 0x00123456 // Invisible RGB must not prevent cropping.
+        val original = SpriteAnimationFrame(pixels, 8, 7, 12, "statue")
+        val trimmed = original.trimTransparent(1)
+        assertEquals(4, trimmed.width)
+        assertEquals(4, trimmed.height)
+        assertEquals(12, trimmed.durationTicks)
+        assertEquals("statue", trimmed.label)
+        assertEquals(pixels[2 * 8 + 3], trimmed.pixels[1 * 4 + 1])
+        assertEquals(pixels[3 * 8 + 4], trimmed.pixels[2 * 4 + 2])
+        assertEquals(2, trimmed.pixels.count { it ushr 24 != 0 })
+        val blank = SpriteAnimationFrame(IntArray(6), 3, 2)
+        assertEquals(blank, blank.trimTransparent(4))
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) { original.trimTransparent(-1) }
+    }
+
+    @Test
     fun `animation total ticks sums frame durations`() {
         val frames = listOf(
             SpriteAnimationFrame(IntArray(1), 1, 1, durationTicks = 4),
