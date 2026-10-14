@@ -21,6 +21,15 @@ import com.supermetroid.editor.asm.formatSnesAddress
 import com.supermetroid.editor.asm.snesLoRomToPc
 import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.data.ProjectRomBuildMode
+import com.supermetroid.editor.data.SmEditProject
+
+/** Source shortcuts imply project ownership; the standalone reference browser does not. */
+internal fun projectAsmNavigationEnabled(project: SmEditProject): Boolean =
+    project.asmWorkspace.enabled && project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE
+
+/** Null callbacks hide shortcuts throughout the view tree; the router checks mode again on invocation. */
+internal fun <T> EditorState.projectAsmNavigation(callback: T?): T? = callback.takeIf { asmNavigationEnabled }
 
 internal fun semanticAsmAddress(bankBase: Int, pointer: Int): Int? =
     (bankBase or (pointer and 0xFFFF)).takeIf {

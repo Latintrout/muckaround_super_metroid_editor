@@ -19,6 +19,7 @@ import com.supermetroid.editor.data.ProjectRomBuildMode
 /** Normal visual object fields in either mode; source navigation stays a separate action. */
 @Composable
 internal fun RoomObjectsPanel(editor: EditorState, pointer: Int, onOpenAsm: (() -> Unit)?) {
+    val asmLink = editor.projectAsmNavigation(onOpenAsm)
     val sourceMode = editor.project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE
     val bridge = editor.asmPlmSourceBridge
     val fs = LocalEditorTheme.current.fontSize.value
@@ -40,9 +41,9 @@ internal fun RoomObjectsPanel(editor: EditorState, pointer: Int, onOpenAsm: (() 
             Text("Edit Objects", fontSize = fs.detail)
         }
         Spacer(Modifier.weight(1f))
-        if (editor.project.asmWorkspace.enabled && onOpenAsm != null) Text("ASM", fontSize = ROOM_INFO_COMPACT_FONT_SIZE,
+        if (asmLink != null) Text("ASM", fontSize = ROOM_INFO_COMPACT_FONT_SIZE,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.clickable(onClick = onOpenAsm).padding(horizontal = 4.dp, vertical = 1.dp))
+            modifier = Modifier.clickable(onClick = asmLink).padding(horizontal = 4.dp, vertical = 1.dp))
     }
     if (!managed && authority?.authority == AsmPlmAuthority.CONFLICT) {
         Text("Source and room data need review before building.", color = MaterialTheme.colorScheme.error, fontSize = fs.detail)
@@ -68,13 +69,13 @@ internal fun RoomObjectsPanel(editor: EditorState, pointer: Int, onOpenAsm: (() 
                 }
             },
             confirmButton = { TextButton(onClick = { open = false }) { Text("Done", fontSize = fs.body) } },
-            dismissButton = { if (onOpenAsm != null) TextButton(onClick = { open = false; onOpenAsm() }) {
+            dismissButton = { if (asmLink != null) TextButton(onClick = { open = false; asmLink() }) {
                 Text(if (authority.authority == AsmPlmAuthority.ROOM_EDITOR) "View ASM baseline" else "View ASM", fontSize = fs.body)
             } },
         )
     } else {
         LinkedPlmListDialog(bridge, pointer, if (managed) editor.currentRoomId to managedState.orEmpty() else null,
-            onOpenAsm, { editor.refreshLinkedPlms() }, if (hasLegacyBinding && !managed) ({
+            asmLink, { editor.refreshLinkedPlms() }, if (hasLegacyBinding && !managed) ({
             bridge.unlink(pointer)
             editor.notifyPlmSourceLinked()
             open = false

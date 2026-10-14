@@ -620,6 +620,28 @@ class EmulatorWorkspaceState(
     private fun emulatorWramAddress(address: Int): Int =
         if (isExternalBackend && address in 0x0000..0x1FFFF) 0x7E0000 + address else address
 
+    // ── Public memory access (for hex editor, etc.) ───────────────────────
+
+    /** Whether the emulator session is active and memory is accessible. */
+    val isMemoryAccessible: Boolean get() = backend?.isConnected == true && session.active
+
+    /**
+     * Read [size] bytes starting at WRAM [address] (0x0000-based offset).
+     * Handles bank-prefix conversion for external backends automatically.
+     */
+    suspend fun readMemory(address: Int, size: Int): ByteArray {
+        val b = backend ?: throw IllegalStateException("No backend")
+        return b.readMemory(emulatorWramAddress(address), size)
+    }
+
+    /**
+     * Write [data] starting at WRAM [address] (0x0000-based offset).
+     */
+    suspend fun writeMemory(address: Int, data: ByteArray) {
+        val b = backend ?: throw IllegalStateException("No backend")
+        b.writeMemory(emulatorWramAddress(address), data)
+    }
+
     private fun readLeWord(bytes: ByteArray): Int {
         if (bytes.size < 2) return 0
         return (bytes[0].toInt() and 0xFF) or ((bytes[1].toInt() and 0xFF) shl 8)

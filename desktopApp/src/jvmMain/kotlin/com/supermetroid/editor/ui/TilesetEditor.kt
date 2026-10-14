@@ -237,6 +237,7 @@ fun TilesetCanvas(
     modifier: Modifier = Modifier,
     onNavigateToAsm: ((Int) -> Unit)? = null,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
     val zoomState = remember { mutableStateOf(2.0f) }
     val zoomLevel = zoomState.value
     AttachMacPinchZoom(LocalSwingWindow.current, zoomState, minZoom = 0.5f, maxZoom = 8f)
@@ -313,7 +314,7 @@ fun TilesetCanvas(
                     Text("Tileset $tilesetId", fontSize = 11.sp, fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary)
 
-                    if (romParser != null && onNavigateToAsm != null) {
+                    if (romParser != null && asmLink != null) {
                         val catalog = romParser.graphicsCatalog
                         val entry = catalog.entry(tilesetId)
                         val asmSources = remember(romParser, tilesetId) {
@@ -354,7 +355,7 @@ fun TilesetCanvas(
                                             },
                                             onClick = {
                                                 asmMenuExpanded = false
-                                                onNavigateToAsm(address)
+                                                asmLink(address)
                                             },
                                         )
                                     }

@@ -74,7 +74,7 @@ private val CRE_BITFLAG_NAMES = mapOf(
 )
 
 
-// Names from SMILE source (FX1_1.frx Layer3Type dropdown)
+// Names verified against the native FX handler dispatch.
 private val FX_TYPE_OPTIONS = com.supermetroid.editor.rom.NativeFxTypes.names.toList()
 
 private val SCROLL_COLORS = mapOf(
@@ -105,6 +105,9 @@ fun RoomPropertiesPanel(
     onWorkspaceChanged: (() -> Unit)? = null,
     scrollState: ScrollState = rememberScrollState(),
 ) {
+    val asmLinkCallback = editorState.projectAsmNavigation(onNavigateToAsm)
+    val initialScrollsLink = editorState.projectAsmNavigation(onNavigateToInitialScrolls)
+    val fxLink = editorState.projectAsmNavigation(onNavigateToFx)
     val stateInspection = remember(room.roomId, romParser) { romParser.inspectRoomStates(room.roomId) }
     // Track project-backed changes so authored state count/order is reflected immediately.
     @Suppress("UNUSED_VARIABLE") val headerEditVersion = editorState.editVersion
@@ -356,7 +359,7 @@ fun RoomPropertiesPanel(
         PropertyRow(
             "Room ID",
             "0x${room.roomId.toString(16).uppercase().padStart(4, '0')}",
-            onNavigateToAsm?.let { navigate -> { navigate(RomConstants.BANK_ROOM_DATA or room.roomId) } },
+            asmLinkCallback?.let { navigate -> { navigate(RomConstants.BANK_ROOM_DATA or room.roomId) } },
         )
         PropertyRow("Room Index", "0x${room.index.toString(16).uppercase().padStart(2, '0')}")
         AreaDropdown(effectiveArea) { targetArea ->
@@ -392,7 +395,7 @@ fun RoomPropertiesPanel(
         PropertyRow(
             "Door Out Ptr",
             "0x${room.doorOut.toString(16).uppercase().padStart(4, '0')} (\$8F)",
-            onNavigateToAsm?.takeIf { room.doorOut != 0 }?.let { navigate ->
+            asmLinkCallback?.takeIf { room.doorOut != 0 }?.let { navigate ->
                 { navigate(RomConstants.BANK_ROOM_DATA or room.doorOut) }
             },
         )
@@ -499,12 +502,12 @@ fun RoomPropertiesPanel(
                                 color = if (state.baseSourceStateIndex == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f),
                             )
-                            if (stateSnesAddress != null && onNavigateToAsm != null) {
+                            if (stateSnesAddress != null && asmLinkCallback != null) {
                                 Text(
                                     "ASM",
                                     fontSize = ROOM_INFO_COMPACT_FONT_SIZE,
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable { onNavigateToAsm(stateSnesAddress) }
+                                    modifier = Modifier.clickable { asmLinkCallback(stateSnesAddress) }
                                         .padding(horizontal = 4.dp, vertical = 1.dp),
                                 )
                             }
@@ -650,7 +653,7 @@ fun RoomPropertiesPanel(
         val xraySpecialCasingPtr = stateData["xraySpecialCasingPtr"] ?: room.xraySpecialCasingPtr
         fun asmLink(snesAddress: Int?): (() -> Unit)? = snesAddress
             ?.takeIf { snesLoRomToPc(it) != null }
-            ?.let { address -> onNavigateToAsm?.let { navigate -> { navigate(address) } } }
+            ?.let { address -> asmLinkCallback?.let { navigate -> { navigate(address) } } }
 
         val stateNames = states.map { projectConditionLabel(it.condition, room.area) }
         val defaultStateData = allStateData.lastOrNull().orEmpty()
@@ -861,7 +864,7 @@ fun RoomPropertiesPanel(
             "Effects",
             "${FX_TYPE_OPTIONS.firstOrNull { it.first == editFxType }?.second ?: "Unknown (${hex8(editFxType)})"} · " +
                 sharingDescription("fxPtr", fxPtr),
-            onNavigateToFx?.takeIf { editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE }
+            fxLink
                 ?.let { open -> { selectedStateItem?.id?.let { open(it, null) }; Unit } },
         )
         PropertyRow("Placed Objects", "$plmCount objects · ${sharingDescription("plmSetPtr", plmSetPtr)}")
@@ -909,7 +912,7 @@ fun RoomPropertiesPanel(
             PropertyRow(
                 "FX Data",
                 if (fxPtr == 0) "None" else "\$83:${hex16(fxPtr).removePrefix("0x")}",
-                if (sourceFxOwned) onNavigateToFx?.let { open -> { selectedStateItem?.id?.let { open(it, null) }; Unit } }
+                if (sourceFxOwned) fxLink?.let { open -> { selectedStateItem?.id?.let { open(it, null) }; Unit } }
                 else asmLink(fxPtr.takeIf { it != 0 }?.let { RomConstants.BANK_FX or it }),
             )
             PropertyRow("Object Set", "\$8F:${hex16(plmSetPtr).removePrefix("0x")}", asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
@@ -937,9 +940,9 @@ fun RoomPropertiesPanel(
         // ── FX Data (editable) ──
         SectionHeader("FX Data")
         editorState.fxPreviewProblem?.let { Text(it, fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error) }
-        if (onNavigateToFx != null && editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
+        if (fxLink != null) {
             PropertyRow("Default FX", FX_TYPE_OPTIONS.firstOrNull { it.first == editFxType }?.second ?: defaultFx.fxTypeName) {
-                selectedStateItem?.id?.let { onNavigateToFx(it, 0) }
+                selectedStateItem?.id?.let { fxLink(it, 0) }
             }
         }
         if (!hasFxTable) {
@@ -985,8 +988,8 @@ fun RoomPropertiesPanel(
                         ) {
                             Text("Edit", fontSize = ROOM_INFO_COMPACT_FONT_SIZE)
                         }
-                        if (onNavigateToFx != null && editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
-                            TextButton(onClick = { selectedStateItem?.id?.let { onNavigateToFx(it, fx.doorSelect) } },
+                        if (fxLink != null) {
+                            TextButton(onClick = { selectedStateItem?.id?.let { fxLink(it, fx.doorSelect) } },
                                 modifier = Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) {
                                 Text("ASM", fontSize = ROOM_INFO_COMPACT_FONT_SIZE)
                             }
@@ -1093,7 +1096,7 @@ fun RoomPropertiesPanel(
             if (count == 1) "This state" else "$count states share this table"
         } ?: sharingDescription("roomScrollsPtr", scrollsPtr)
         PropertyRow("Initial grid", scrollSharing,
-            onNavigateToInitialScrolls?.takeIf { editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE })
+            initialScrollsLink)
         editorState.initialScrollPreviewProblem?.let { problem ->
             Text(problem, fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error)
         }
@@ -1105,7 +1108,7 @@ fun RoomPropertiesPanel(
                     0x0001 -> "All Green preset (\$0001)"
                     else -> "\$8F:${scrollsPtr.toString(16).uppercase().padStart(4, '0')}"
                 },
-                if (initialScrollView != null) onNavigateToInitialScrolls else asmLink(scrollsPtr.takeIf { it > 1 }?.let { RomConstants.BANK_ROOM_DATA or it }),
+                if (initialScrollView != null) initialScrollsLink else asmLink(scrollsPtr.takeIf { it > 1 }?.let { RomConstants.BANK_ROOM_DATA or it }),
             )
         }
 

@@ -98,6 +98,10 @@ internal fun TilePropertiesPanel(
     onDrag: (Offset) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
+    val plmPlacementLink = editorState.projectAsmNavigation(onNavigateToPlmPlacement)
+    val scrollCommandsLink = editorState.projectAsmNavigation(onNavigateToScrollCommands)
+    val saveSpawnLink = editorState.projectAsmNavigation(onNavigateToSaveSpawn)
     val uiFont = LocalEditorTheme.current.fontSize.value
     val panelWidth = when (uiFont) {
         FontSize.SMALL -> 280.dp
@@ -590,10 +594,10 @@ internal fun TilePropertiesPanel(
                         )
                     }
 
-                    if (doorDefinitionAddress != null && onNavigateToAsm != null) {
+                    if (doorDefinitionAddress != null && asmLink != null) {
                         AsmNavigationLink(
                             snesAddress = doorDefinitionAddress,
-                            onNavigateToAsm = onNavigateToAsm,
+                            onNavigateToAsm = asmLink,
                             label = "DoorDef ASM ${'$'}83:${currentDoor.doorDefPtr.toString(16).uppercase().padStart(4, '0')}",
                             modifier = Modifier.padding(bottom = 2.dp),
                         )
@@ -957,7 +961,7 @@ internal fun TilePropertiesPanel(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(iName, fontSize = LocalEditorTheme.current.fontSize.value.body, modifier = Modifier.weight(1f))
-                            AsmPlmNavigationLinks(plm, onNavigateToPlmPlacement, onNavigateToAsm)
+                            AsmPlmNavigationLinks(plm, plmPlacementLink, asmLink)
                         }
                         Text(
                             "Pickup ID: 0x${plm.param.toString(16).uppercase().padStart(2, '0')}",
@@ -995,7 +999,7 @@ internal fun TilePropertiesPanel(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f),
                             )
-                            AsmPlmNavigationLinks(plm, onNavigateToPlmPlacement, onNavigateToAsm)
+                            AsmPlmNavigationLinks(plm, plmPlacementLink, asmLink)
                         }
                         PlmScopeActions(editorState, plm, canRemove)
                         // Save station spawn details
@@ -1009,7 +1013,7 @@ internal fun TilePropertiesPanel(
                                 if (editorState.hasManagedPlms()) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text("Spawn shared across states", fontSize = uiFont.detail, color = detailColor, modifier = Modifier.weight(1f))
-                                        if (onNavigateToSaveSpawn != null) TextButton(onClick = { onNavigateToSaveSpawn(plm) }) {
+                                        if (saveSpawnLink != null) TextButton(onClick = { saveSpawnLink(plm) }) {
                                             Text("Spawn ASM", fontSize = uiFont.detail)
                                         }
                                     }
@@ -1135,7 +1139,7 @@ internal fun TilePropertiesPanel(
                                         TextButton(onClick = { draft = if (draft != null) null else editorState.asmPlmSourceBridge!!.sourceText() to commands }) {
                                             Text("Edit commands", fontSize = uiFont.detail)
                                         }
-                                        if (onNavigateToScrollCommands != null) TextButton(onClick = { onNavigateToScrollCommands(plm) }) {
+                                        if (scrollCommandsLink != null) TextButton(onClick = { scrollCommandsLink(plm) }) {
                                             Text("ASM commands", fontSize = uiFont.detail)
                                         }
                                     }

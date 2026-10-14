@@ -168,6 +168,7 @@ fun MinimapSidebar(
     onNavigateToAsm: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
     val fs = LocalEditorTheme.current.fontSize.value
     val parser = romParser ?: return
     state.initIfNeeded(parser, editorState)
@@ -192,10 +193,10 @@ fun MinimapSidebar(
                         modifier = Modifier.weight(1f).padding(vertical = 2.dp),
                         color = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                     )
-                    if (onNavigateToAsm != null) {
+                    if (asmLink != null) {
                         AsmNavigationLink(
                             parser.readMinimapTilemapAddress(area),
-                            onNavigateToAsm,
+                            asmLink,
                             label = "ASM",
                         )
                     }
@@ -231,10 +232,10 @@ fun MinimapSidebar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Tile", fontWeight = FontWeight.Bold, fontSize = fs.heading, modifier = Modifier.weight(1f))
-            if (onNavigateToAsm != null) {
+            if (asmLink != null) {
                 AsmNavigationLink(
                     parser.readMinimapTileGraphicsAddress(),
-                    onNavigateToAsm,
+                    asmLink,
                     label = "Tiles ASM",
                 )
             }

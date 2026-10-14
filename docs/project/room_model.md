@@ -63,7 +63,10 @@ is conventionally used as an always-false selector that skips its state pointer.
 ## Current Boundary
 
 Room Info's **Edit Objects** dialog is a normal visual field editor, not an ASM
-mode selector. A separate right-aligned **ASM** action opens source. ROM-mode field
+mode selector. A separate right-aligned **ASM** action opens source only with
+Project ASM enabled and the ASM source build selected. All editor-to-source links
+use that same boundary; ROM mode keeps the standalone ASM reference browser but
+does not imply that relocated room data matches reference addresses. ROM-mode field
 edits retain the object's observed/selected state scope and use one undoable delta
 transaction; station, gate and scroll compound changes stay in their dedicated map
 controls. Source-owned dialogs retain their existing shared-list/expression rules

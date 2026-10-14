@@ -396,6 +396,7 @@ fun SoundEditorCanvas(
     modifier: Modifier = Modifier,
     onNavigateToAsm: ((Int) -> Unit)? = null,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
     val state = soundEditorState
     val scope = rememberCoroutineScope()
     val musicEditVersion = editorState.musicEditVersion
@@ -448,7 +449,7 @@ fun SoundEditorCanvas(
                     Spacer(Modifier.width(4.dp))
                 }
                 Text(track.area, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (romParser != null && onNavigateToAsm != null) {
+                if (romParser != null && asmLink != null) {
                     val asmTargets = remember(romParser, track.songSet) {
                         buildList {
                             val tablePc = SpcData.findSongSetPointerEntryPc(romParser, track.songSet)
@@ -463,7 +464,7 @@ fun SoundEditorCanvas(
                         }
                     }
                     for ((label, address) in asmTargets) {
-                        AsmNavigationLink(address, onNavigateToAsm, label)
+                        AsmNavigationLink(address, asmLink, label)
                     }
                 }
             } else if (sample != null) {

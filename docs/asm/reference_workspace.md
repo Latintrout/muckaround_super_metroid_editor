@@ -11,6 +11,15 @@ patch path. A clean Project ASM workspace can temporarily return to **Loaded ROM
 once a saved or unsaved source edit exists, source mode is required so the edit can
 never be silently omitted from an export.
 
+Editor-to-source **ASM** shortcuts appear only when **Project ASM** is enabled
+and **ASM source** is the active build mode. This rule covers Room Info, selected
+objects/doors/saves, scrolls, FX, tilesets, sprites, enemy stats, minimap, text and
+sound. Downloading the reference alone does not enable these links; returning a
+clean workspace to **Loaded ROM** hides them again. ROM edits can relocate data
+without updating reference source, so those shortcuts must not imply a mapping in
+patch-only projects. The main **ASM** tab, reference navigation and Library remain
+available in either mode.
+
 ## User workflow
 
 1. Open a ROM normally in SMEDIT.

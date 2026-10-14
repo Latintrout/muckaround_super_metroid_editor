@@ -65,6 +65,11 @@ data class AppSettings(
     val mainSidebarWidthDp: Float = 340f,
     val sidebarBottomPaneHeightDp: Float = 0f,
     val asmProblemsPaneHeightDp: Float = 180f,
+    val hexEditorWindowX: Float = -1f,
+    val hexEditorWindowY: Float = -1f,
+    val hexEditorWindowWidth: Float = -1f,
+    val hexEditorWindowHeight: Float = -1f,
+    val hexEditorNavWidth: Float = -1f,
 )
 
 object AppConfig {

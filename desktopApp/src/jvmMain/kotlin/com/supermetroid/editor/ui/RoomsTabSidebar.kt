@@ -43,7 +43,7 @@ internal fun RoomsTabSidebar(
     onTilesetHeightChange: (Float) -> Unit,
     onSeedPatterns: () -> Unit,
     onNavigateToMap: () -> Unit,
-    onNavigateToAsm: (Int) -> Unit,
+    onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
     onNavigateToFx: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier,

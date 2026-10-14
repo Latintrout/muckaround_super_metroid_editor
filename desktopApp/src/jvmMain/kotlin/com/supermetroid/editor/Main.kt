@@ -107,6 +107,8 @@ import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.EditorTheme
 import com.supermetroid.editor.ui.EditorThemeState
 import com.supermetroid.editor.ui.EmulatorWorkspaceState
+import com.supermetroid.editor.ui.HexEditorPanel
+import com.supermetroid.editor.ui.HexEditorState
 import com.supermetroid.editor.ui.EnemyTabCanvas
 import com.supermetroid.editor.ui.EnemyTabSidebar
 import com.supermetroid.editor.ui.FloatingEmulatorWindow
@@ -124,6 +126,7 @@ import com.supermetroid.editor.ui.PatchListPanel
 import com.supermetroid.editor.ui.PatternEditorCanvas
 import com.supermetroid.editor.ui.RoomsTabSidebar
 import com.supermetroid.editor.ui.RoomsSidebarState
+import com.supermetroid.editor.ui.projectAsmNavigation
 import com.supermetroid.editor.ui.RoomListView
 import com.supermetroid.editor.ui.SettingsPopup
 import com.supermetroid.editor.ui.SoundEditorCanvas
@@ -397,6 +400,8 @@ fun main() = application {
         ) {
             var emulatorEnabled by remember { mutableStateOf(false) }
             val emulatorWorkspaceState = remember { EmulatorWorkspaceState() }
+            var hexEditorEnabled by remember { mutableStateOf(false) }
+            val hexEditorState = remember { HexEditorState() }
             var settingsOpen by remember { mutableStateOf(false) }
             var validationOpen by remember { mutableStateOf(false) }
             var validationIssues by remember { mutableStateOf<List<RomValidator.Issue>?>(null) }
@@ -529,6 +534,7 @@ fun main() = application {
             }
 
             fun openAsmAddress(snesAddress: Int) {
+                if (!editorState.asmNavigationEnabled) return
                 navigate {
                     val managedLine = if (editorState.hasManagedPlms() && snesAddress ushr 16 == 0x8F &&
                         snesAddress and 0xFFFF == editorState.currentPlmSourcePointer()) {
@@ -547,6 +553,7 @@ fun main() = application {
             }
 
             fun openPlmPlacement(entry: RomParser.PlmEntry) {
+                if (!editorState.asmNavigationEnabled) return
                 navigate {
                     var selectedEntry = entry
                     val roomName = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
@@ -582,6 +589,7 @@ fun main() = application {
             }
 
             fun openScrollCommands(entry: RomParser.PlmEntry) {
+                if (!editorState.asmNavigationEnabled) return
                 val stateId = editorState.currentPlmStateId() ?: return
                 val target = editorState.asmPlmSourceBridge?.scrollTarget(editorState.currentRoomId, stateId, entry) ?: return
                 when (target) {
@@ -595,6 +603,7 @@ fun main() = application {
             }
 
             fun openInitialScrolls() {
+                if (!editorState.asmNavigationEnabled) return
                 val name = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
                 if (!editorState.ensureInitialScrollSource(name)) return
                 val stateId = editorState.currentPlmStateId() ?: return
@@ -607,6 +616,7 @@ fun main() = application {
             }
 
             fun openFx(stateId: String, door: Int?) {
+                if (!editorState.asmNavigationEnabled) return
                 if (!editorState.ensureFxSource(selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}")) return
                 runCatching { requireNotNull(editorState.asmPlmSourceBridge).fx.line(editorState.currentRoomId, stateId, door) }
                     .onSuccess { line -> navigate {
@@ -617,6 +627,7 @@ fun main() = application {
             }
 
             fun openSaveSpawn(entry: RomParser.PlmEntry) {
+                if (!editorState.asmNavigationEnabled) return
                 if (!editorState.ensureSaveSpawnSource(entry)) return
                 val target = editorState.asmPlmSourceBridge?.saveTarget(editorState.currentRoomId,
                     editorState.activeRoomAreaForEditing(), entry.param and 255) ?: return
@@ -629,6 +640,13 @@ fun main() = application {
                     is AsmPlmPlacementTarget.Unavailable -> editorState.postStatus(target.reason)
                 }
             }
+
+            val editorAsmAddressLink = editorState.projectAsmNavigation(::openAsmAddress)
+            val editorPlmPlacementLink = editorState.projectAsmNavigation(::openPlmPlacement)
+            val editorScrollCommandsLink = editorState.projectAsmNavigation(::openScrollCommands)
+            val editorInitialScrollsLink = editorState.projectAsmNavigation(::openInitialScrolls)
+            val editorFxLink = editorState.projectAsmNavigation(::openFx)
+            val editorSaveSpawnLink = editorState.projectAsmNavigation(::openSaveSpawn)
 
             fun openAsmEditorTarget(target: AsmEditorTarget) {
                 navigate {
@@ -945,6 +963,19 @@ fun main() = application {
                             )
                             Spacer(Modifier.width(4.dp))
                             Text("EMU", fontSize = fs.detail, softWrap = false)
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                            contentPadding = ProjectToolbarActionPadding,
+                            onClick = { hexEditorEnabled = !hexEditorEnabled },
+                            enabled = emulatorEnabled,
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (hexEditorEnabled) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surface,
+                            ),
+                        ) {
+                            Text("HEX", fontSize = fs.detail, softWrap = false)
                         }
                         Box {
                             Button(
@@ -1318,9 +1349,9 @@ fun main() = application {
                                                     leftTab = TAB_MAP
                                                 }
                                             },
-                                            onNavigateToAsm = ::openAsmAddress,
-                                            onNavigateToInitialScrolls = ::openInitialScrolls,
-                                            onNavigateToFx = ::openFx,
+                                            onNavigateToAsm = editorAsmAddressLink,
+                                            onNavigateToInitialScrolls = editorInitialScrollsLink,
+                                            onNavigateToFx = editorFxLink,
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },
                                             modifier = Modifier.fillMaxSize(),
                                         )
@@ -1372,20 +1403,20 @@ fun main() = application {
                                         onSelectSprite = { spriteIndex ->
                                             if (selectedSpriteIdx != spriteIndex) navigate { selectedSpriteIdx = spriteIndex }
                                         },
-                                        onNavigateToAsm = ::openAsmAddress,
+                                        onNavigateToAsm = editorAsmAddressLink,
                                     )
                                     TAB_MAP -> MinimapSidebar(
                                         state = minimapEditorState,
                                         romParser = romParser,
                                         editorState = editorState,
-                                        onNavigateToAsm = ::openAsmAddress,
+                                        onNavigateToAsm = editorAsmAddressLink,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                     TAB_TEXT -> TextEditorSidebar(
                                         romParser = romParser,
                                         editorState = editorState,
                                         textEditorState = textEditorState,
-                                        onNavigateToAsm = ::openAsmAddress,
+                                        onNavigateToAsm = editorAsmAddressLink,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                     TAB_ENEMY -> EnemyTabSidebar(editorState = editorState, romParser = romParser)
@@ -1462,11 +1493,11 @@ fun main() = application {
                                                 selectedRoom = rooms.firstOrNull { it.handle == selectedHandle }
                                                     ?: selectedRoom
                                             },
-                                            onNavigateToAsm = ::openAsmAddress,
+                                            onNavigateToAsm = editorAsmAddressLink,
                                             roomKeyboardNavigationEnabled = leftTab == TAB_ROOMS,
-                                            onNavigateToPlmPlacement = ::openPlmPlacement,
-                                            onNavigateToScrollCommands = ::openScrollCommands,
-                                            onNavigateToSaveSpawn = ::openSaveSpawn,
+                                            onNavigateToPlmPlacement = editorPlmPlacementLink,
+                                            onNavigateToScrollCommands = editorScrollCommandsLink,
+                                            onNavigateToSaveSpawn = editorSaveSpawnLink,
                                             showItemNames = showRoomItemNames,
                                             showMetaNames = showRoomMetaNames,
                                             highlightItems = highlightRoomItems,
@@ -1487,7 +1518,7 @@ fun main() = application {
                                                 romParser = romParser,
                                                 editorState = editorState,
                                                 tilesetEditorState = tilesetEditorState,
-                                                onNavigateToAsm = ::openAsmAddress,
+                                                onNavigateToAsm = editorAsmAddressLink,
                                                 modifier = Modifier.fillMaxSize()
                                             )
                                         }
@@ -1501,7 +1532,7 @@ fun main() = application {
                                         romParser = romParser,
                                         editorState = editorState,
                                         soundEditorState = soundEditorState,
-                                        onNavigateToAsm = ::openAsmAddress,
+                                        onNavigateToAsm = editorAsmAddressLink,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                     TAB_SPRITES -> SpritesTabCanvas(
@@ -1519,13 +1550,13 @@ fun main() = application {
                                         romParser = romParser,
                                         editorState = editorState,
                                         textEditorState = textEditorState,
-                                        onNavigateToAsm = ::openAsmAddress,
+                                        onNavigateToAsm = editorAsmAddressLink,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                     TAB_ENEMY -> EnemyTabCanvas(
                                         editorState = editorState,
                                         romParser = romParser,
-                                        onNavigateToAsm = ::openAsmAddress,
+                                        onNavigateToAsm = editorAsmAddressLink,
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                     TAB_BOSS -> BossTabCanvas(editorState = editorState, romParser = romParser, modifier = Modifier.fillMaxSize())
@@ -1744,6 +1775,17 @@ fun main() = application {
                                 if (romPath != null) saveLastRoom(romPath, room)
                             }
                         }
+                    }
+
+                    // ── Floating hex editor overlay ──
+                    if (hexEditorEnabled) {
+                        HexEditorPanel(
+                            state = hexEditorState,
+                            emulatorWorkspaceState = emulatorWorkspaceState,
+                            containerSizePx = emulatorContainerSize,
+                            density = windowDensity.density,
+                            onClose = { hexEditorEnabled = false },
+                        )
                     }
                 }
             }

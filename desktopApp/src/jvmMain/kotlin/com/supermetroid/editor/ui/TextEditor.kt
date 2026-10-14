@@ -67,6 +67,7 @@ fun TextEditorSidebar(
     onNavigateToAsm: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
     val fs = LocalEditorTheme.current.fontSize.value
     val parser = romParser ?: return
     val entries = remember(parser) { TextData.readAllText(parser.getRomData()) }
@@ -124,8 +125,8 @@ fun TextEditorSidebar(
                                 fontWeight = if (isModified) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isModified) Color(0xFFFFCC00) else MaterialTheme.colorScheme.onSurface
                             )
-                            if (entry.writable && onNavigateToAsm != null) {
-                                AsmNavigationLink(entry.snesAddress, onNavigateToAsm, label = "ASM")
+                            if (entry.writable && asmLink != null) {
+                                AsmNavigationLink(entry.snesAddress, asmLink, label = "ASM")
                             } else {
                                 Text(
                                     if (entry.writable) "$${entry.snesAddress.toString(16).uppercase()}" else "unmapped",
@@ -159,6 +160,7 @@ fun TextEditorPreview(
     onNavigateToAsm: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
     val parser = romParser ?: return
     val entries = remember(parser) { TextData.readAllText(parser.getRomData()) }
 
@@ -188,7 +190,7 @@ fun TextEditorPreview(
                     editorState = editorState,
                     selected = entry.id == textEditorState.selectedEntryId,
                     navigationSerial = textEditorState.navigationSerial,
-                    onNavigateToAsm = onNavigateToAsm,
+                    onNavigateToAsm = asmLink,
                 )
                 Spacer(Modifier.height(4.dp))
             }
@@ -210,7 +212,7 @@ fun TextEditorPreview(
                     editorState = editorState,
                     selected = entry.id == textEditorState.selectedEntryId,
                     navigationSerial = textEditorState.navigationSerial,
-                    onNavigateToAsm = onNavigateToAsm,
+                    onNavigateToAsm = asmLink,
                 )
                 Spacer(Modifier.height(4.dp))
             }

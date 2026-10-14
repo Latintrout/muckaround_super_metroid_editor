@@ -119,6 +119,7 @@ fun EnemyStatsEditor(
     modifier: Modifier = Modifier,
     onNavigateToAsm: ((Int) -> Unit)? = null,
 ) {
+    val asmLink = editorState.projectAsmNavigation(onNavigateToAsm)
     // All enemy fields (HP, DMG, AI pointers, GFX) share this map.
     // Keys follow the pattern: "${enemyKey}_fieldName" (e.g., "zoomer_hp", "zoomer_touchAi")
     val values = remember(patch.id, editorState.patchVersion) {
@@ -160,7 +161,7 @@ fun EnemyStatsEditor(
         val grouped = ENEMY_DEFS.groupBy { it.category }
         for (cat in CATEGORY_ORDER) {
             val enemies = grouped[cat] ?: continue
-            EnemyCategorySection(cat, enemies, values, ::apply, romParser, editorState, onNavigateToAsm)
+            EnemyCategorySection(cat, enemies, values, ::apply, romParser, editorState, asmLink)
             Spacer(Modifier.height(12.dp))
         }
 

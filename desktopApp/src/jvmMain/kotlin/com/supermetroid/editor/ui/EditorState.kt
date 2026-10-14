@@ -391,6 +391,12 @@ class EditorState(
         _roomEditOrder[currentRoomId] = ++_editCounter
     }
 
+    private var asmModeRevision by mutableStateOf(0)
+    internal val asmNavigationEnabled: Boolean get() {
+        asmModeRevision // Nested project flags are not Compose state; mode changes must invalidate links.
+        return projectAsmNavigationEnabled(project)
+    }
+
     /**
      * Persist the opt-in ASM workspace contract without treating it as a room edit.
      * Enabling the editable workspace also makes it the build source: otherwise a
@@ -406,6 +412,7 @@ class EditorState(
         project.asmWorkspace.sourceRevision = sourceRevision
         project.asmWorkspace.buildMode = ProjectRomBuildMode.ASM_SOURCE
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
+        asmModeRevision++
         dirty = true
     }
 
@@ -418,6 +425,7 @@ class EditorState(
         if (project.asmWorkspace.buildMode == mode) return
         project.asmWorkspace.buildMode = mode
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
+        asmModeRevision++
         dirty = true
     }
 
