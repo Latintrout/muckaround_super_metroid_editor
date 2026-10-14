@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
+import com.supermetroid.editor.ui.ProjectToolbar
+import com.supermetroid.editor.asm.placementAfterObjectMigration
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -195,6 +198,7 @@ private fun floatingWindowConfig(windowState: WindowState): WindowConfig? {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 fun main() = application {
     val scope = rememberCoroutineScope()
     var romParser by remember { mutableStateOf<RomParser?>(null) }
@@ -539,6 +543,7 @@ fun main() = application {
 
             fun openPlmPlacement(entry: RomParser.PlmEntry) {
                 navigate {
+                    var selectedEntry = entry
                     val roomName = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
                     var currentTarget = editorState.currentPlmSourcePointer()?.let { pointer ->
                         editorState.asmPlmSourceBridge?.placementTarget(
@@ -549,9 +554,10 @@ fun main() = application {
                         editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
                         if (!editorState.ensureCurrentPlmSource(roomName)) currentTarget = AsmPlmPlacementTarget.Unavailable(
                             editorState.plmSourceMigrationProblem ?: currentTarget.reason)
+                        else selectedEntry = placementAfterObjectMigration(entry, editorState.workingPlms) ?: entry
                     }
                     val target = if (editorState.hasManagedPlms()) editorState.currentPlmStateId()?.let {
-                        editorState.asmPlmSourceBridge?.managedPlacement(editorState.currentRoomId, it, entry)
+                        editorState.asmPlmSourceBridge?.managedPlacement(editorState.currentRoomId, it, selectedEntry)
                     } ?: currentTarget else currentTarget
                     when (target) {
                         is AsmPlmPlacementTarget.Source -> {
@@ -567,6 +573,33 @@ fun main() = application {
                         )
                     }
                     leftTab = TAB_ASM
+                }
+            }
+
+            fun openScrollCommands(entry: RomParser.PlmEntry) {
+                val stateId = editorState.currentPlmStateId() ?: return
+                val target = editorState.asmPlmSourceBridge?.scrollTarget(editorState.currentRoomId, stateId, entry) ?: return
+                when (target) {
+                    is AsmPlmPlacementTarget.Source -> navigate {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource("bank_8F.asm", target.lineIndex, columnIndex = target.columnIndex)
+                        leftTab = TAB_ASM
+                    }
+                    is AsmPlmPlacementTarget.Unavailable -> editorState.postStatus(target.reason)
+                }
+            }
+
+            fun openSaveSpawn(entry: RomParser.PlmEntry) {
+                if (!editorState.ensureSaveSpawnSource(entry)) return
+                val target = editorState.asmPlmSourceBridge?.saveTarget(editorState.currentRoomId,
+                    editorState.activeRoomAreaForEditing(), entry.param and 255) ?: return
+                when (target) {
+                    is AsmPlmPlacementTarget.Source -> navigate {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource("bank_8F.asm", target.lineIndex, columnIndex = target.columnIndex)
+                        leftTab = TAB_ASM
+                    }
+                    is AsmPlmPlacementTarget.Unavailable -> editorState.postStatus(target.reason)
                 }
             }
 
@@ -740,16 +773,10 @@ fun main() = application {
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
             ) {
-                // Project entry points (left) | Save + execution/export (right)
-                Row(
+                // Wrap complete controls, never squeeze their labels into vertical text.
+                ProjectToolbar(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left side
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
                         Button(
                             enabled = !romLoadInFlight && !editorState.romBuildInProgress && !asmWorkspaceState.previewBusy && !asmWorkspaceState.busy,
                             shape = RoundedCornerShape(6.dp),
@@ -758,28 +785,24 @@ fun main() = application {
                                 newProjectRom = null
                                 showNewProject = true
                             } },
-                        ) { Text("NEW", fontSize = fs.body) }
+                        ) { Text("NEW", fontSize = fs.body, softWrap = false) }
                         Button(
                             enabled = !romLoadInFlight && !editorState.romBuildInProgress && !asmWorkspaceState.previewBusy && !asmWorkspaceState.busy,
                             shape = RoundedCornerShape(6.dp),
                             onClick = { requestProjectAction {
                                 pickProjectOrRom()?.let { file -> scope.launch { openProjectOrRom(file) } }
                             } },
-                        ) { Text(if (romLoadInFlight) "Opening…" else "OPEN", fontSize = fs.body) }
+                        ) { Text(if (romLoadInFlight) "Opening…" else "OPEN", fontSize = fs.body, softWrap = false) }
                         if (romFileName != null) {
                             Text(
                                 "Loaded: $romFileName${if (romReadOnly) " (read-only)" else ""}",
                                 fontSize = fs.detail,
                                 color = MaterialTheme.colorScheme.onBackground,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 360.dp).align(Alignment.CenterVertically),
                             )
                         }
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    // Right side: project execution + Save + Export
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -843,6 +866,7 @@ fun main() = application {
                                         else -> "BUILD"
                                     },
                                     fontSize = fs.detail,
+                                    softWrap = false,
                                 )
                             }
                         }
@@ -859,7 +883,7 @@ fun main() = application {
                                 )
                                 Spacer(Modifier.width(4.dp))
                             }
-                            Text(if (editorState.romBuildInProgress) "RUNNING…" else "RUN", fontSize = fs.detail)
+                            Text(if (editorState.romBuildInProgress) "RUNNING…" else "RUN", fontSize = fs.detail, softWrap = false)
                         }
                         OutlinedButton(
                             onClick = {
@@ -885,7 +909,7 @@ fun main() = application {
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text("EMU", fontSize = fs.detail)
+                            Text("EMU", fontSize = fs.detail, softWrap = false)
                         }
                         Box {
                             Button(
@@ -901,7 +925,7 @@ fun main() = application {
                                 },
                                 enabled = romEditable,
                                 shape = RoundedCornerShape(6.dp),
-                            ) { Text("Validate", fontSize = fs.body) }
+                            ) { Text("Validate", fontSize = fs.body, softWrap = false) }
                             if (validationOpen && validationIssues != null) {
                                 ValidationPopup(
                                     issues = validationIssues!!,
@@ -927,7 +951,7 @@ fun main() = application {
                             shape = RoundedCornerShape(6.dp),
                         ) {
                             val hasUnsavedAsm = asmWorkspaceState.unsavedSourceFileIds.isNotEmpty()
-                            Text(if (editorState.dirty || hasUnsavedAsm) "Save*" else "Save", fontSize = fs.body)
+                            Text(if (editorState.dirty || hasUnsavedAsm) "Save*" else "Save", fontSize = fs.body, softWrap = false)
                         }
                         Button(
                             onClick = {
@@ -935,14 +959,14 @@ fun main() = application {
                             },
                             enabled = romEditable,
                             shape = RoundedCornerShape(6.dp),
-                        ) { Text("Export ROM", fontSize = fs.body) }
+                        ) { Text("Export ROM", fontSize = fs.body, softWrap = false) }
                         Button(
                             onClick = {
                                 romParser?.let { editorState.exportToIps(it) }
                             },
                             enabled = romEditable,
                             shape = RoundedCornerShape(6.dp),
-                        ) { Text("Export IPS", fontSize = fs.body) }
+                        ) { Text("Export IPS", fontSize = fs.body, softWrap = false) }
                         Box {
                             OutlinedButton(
                                 onClick = { settingsOpen = !settingsOpen },
@@ -999,7 +1023,6 @@ fun main() = application {
                                 )
                             }
                         }
-                    }
                 }
                 romLoadMessage?.takeIf { romLoadMessageDismissedFor != it }?.let { message ->
                     val noticeColor = if (romLoadMessageIsError) {
@@ -1394,6 +1417,8 @@ fun main() = application {
                                             onNavigateToAsm = ::openAsmAddress,
                                             roomKeyboardNavigationEnabled = leftTab == TAB_ROOMS,
                                             onNavigateToPlmPlacement = ::openPlmPlacement,
+                                            onNavigateToScrollCommands = ::openScrollCommands,
+                                            onNavigateToSaveSpawn = ::openSaveSpawn,
                                             showItemNames = showRoomItemNames,
                                             showMetaNames = showRoomMetaNames,
                                             highlightItems = highlightRoomItems,

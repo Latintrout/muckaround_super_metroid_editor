@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.ScrollCommand
 
 private val SCROLL_RED = Color(0xFFCC3333)
@@ -45,13 +48,16 @@ private val SCROLL_NONE = Color(0xFF444444)
  * Blue/Green/Red set the screen's scroll value when the trigger fires.
  */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun ScrollCommandEditor(
     roomWidthScreens: Int,
     roomHeightScreens: Int,
     initialCommands: List<ScrollCommand>,
     onSave: (List<ScrollCommand>) -> Unit,
     onCancel: () -> Unit,
+    allowEmpty: Boolean = false,
 ) {
+    val fs = LocalEditorTheme.current.fontSize.value
     // Map of screenIndex → scrollValue (only screens that are part of the command)
     val entries = remember {
         mutableStateMapOf<Int, Int>().also { map ->
@@ -64,19 +70,20 @@ fun ScrollCommandEditor(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
             .padding(6.dp)
     ) {
-        Text("Scroll Trigger", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("Scroll Trigger", fontSize = fs.body, fontWeight = FontWeight.Bold)
         Text("When Samus crosses this tile, change:",
-            fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
 
         // One-based screen grid. ROM indices remain zero-based in the command model.
-        val cellSize = 24.dp
-        val axisSize = 14.dp
+        val cellSize = 30.dp
+        val axisSize = 24.dp
+        Column(Modifier.horizontalScroll(rememberScrollState())) {
         Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
             Spacer(Modifier.size(axisSize))
             for (col in 0 until roomWidthScreens) {
                 Box(Modifier.size(cellSize), contentAlignment = Alignment.Center) {
-                    Text("${col + 1}", fontSize = 7.sp,
+                    Text("${col + 1}", fontSize = fs.detail,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -84,7 +91,7 @@ fun ScrollCommandEditor(
         for (row in 0 until roomHeightScreens) {
             Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
                 Box(Modifier.size(axisSize), contentAlignment = Alignment.Center) {
-                    Text("${row + 1}", fontSize = 7.sp,
+                    Text("${row + 1}", fontSize = fs.detail,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 for (col in 0 until roomWidthScreens) {
@@ -121,33 +128,34 @@ fun ScrollCommandEditor(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        Text(label, fontSize = fs.detail, fontWeight = FontWeight.Bold,
                             color = Color.White)
                     }
                 }
             }
         }
+        }
 
         Spacer(Modifier.height(4.dp))
         // Legend — wrap to avoid clipping
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             LegendDot(SCROLL_BLUE, "Blue")
             LegendDot(SCROLL_GREEN, "Green")
             LegendDot(SCROLL_RED, "Red")
             LegendDot(SCROLL_NONE, "None")
         }
         Text("Blue normal · Green open with lower view · Red blocks camera",
-            fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         Spacer(Modifier.height(2.dp))
         val cmdCount = entries.size
         Text("$cmdCount screen${if (cmdCount != 1) "s" else ""} affected",
-            fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         Spacer(Modifier.height(6.dp))
         // Save / Cancel
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val hasChanges = entries.isNotEmpty()
+            val hasChanges = allowEmpty || entries.isNotEmpty()
             Surface(
                 modifier = Modifier.weight(1f).height(26.dp)
                     .clickable(enabled = hasChanges) {
@@ -158,7 +166,7 @@ fun ScrollCommandEditor(
                 else MaterialTheme.colorScheme.surfaceVariant,
             ) {
                 Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
-                    Text("Save", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    Text("Apply", fontSize = fs.detail, fontWeight = FontWeight.Bold,
                         color = if (hasChanges) MaterialTheme.colorScheme.onPrimary
                         else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -169,7 +177,7 @@ fun ScrollCommandEditor(
                 color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
                 Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
-                    Text("Cancel", fontSize = 10.sp)
+                    Text("Cancel", fontSize = fs.detail)
                 }
             }
         }
@@ -180,6 +188,6 @@ fun ScrollCommandEditor(
 private fun LegendDot(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Box(Modifier.size(8.dp).background(color, RoundedCornerShape(4.dp)))
-        Text(label, fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

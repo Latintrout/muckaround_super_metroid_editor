@@ -98,10 +98,26 @@ Relevant source, definitions, ROM identity, and state membership invalidate them
 unrelated editor changes do not. Missing/corrupt snapshots rebuild from source,
 and invalid drafts cannot borrow an old cache as a current editable model.
 
+Scroll triggers also have reciprocal named command resources in Bank `$8F`.
+**Edit commands** edits this trigger in this state with copy-on-write isolation;
+**ASM commands** opens its declaration, where shared-source edits affect all
+references. Legacy custom command maps migrate with undo; cache snapshots retain
+names, not allocation addresses. Build resolves pointers and checks command bytes
+against actual Asar output. Initial room scroll tables and Door ASM remain
+separate resources. See [scroll-trigger authoring](../asm/reference_workspace.md#reciprocal-scroll-trigger-commands).
+
+Save stations now also pair PLM placement with source-owned fourteen-byte load
+records. GUI spawn fields and raw authored words are reciprocal, with one Apply/
+undo action and complete build claims. The area/slot record is shared across room
+states; only the final GUI removal releases it. Native engine-owned entries and
+foreign owners cannot be repurposed. Old GUI spawn overrides retire per adopted
+slot with metadata-aware source undo. Cross-area save migration remains guarded;
+see [save-station authoring](../asm/reference_workspace.md#reciprocal-save-station-spawns).
+
 Original fixed-address links still have fixed-size restrictions. Managed lists
-support growth/shrinkage; custom scroll-command authoring, changed resource links,
+and named command streams support growth/shrinkage; changed resource links,
 added-room projects and mixed source/GUI operations are guarded boundaries. Only
-objects have migrated: selectors, layouts and other resources keep their existing
+objects, named scroll commands and adopted save spawns have migrated: selectors, layouts and other resources keep their existing
 model/backend. This does **not** change the ordinary unlinked/ROM
 editing model described below. See the [source/GUI ownership contract](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
 
@@ -120,14 +136,32 @@ shared layout or make the active state's complete layout unique first. PLM, enem
 scroll, and FX resources continue
 to use copy-on-write so editing one state does not silently mutate a linked sibling.
 
-Collectible items have an additional explicit authoring scope. **This state** writes the item PLM
+Room PLMs have an explicit authoring scope. **Add new PLMs to → All states** is the default
+for items, stations, gates, door caps and scroll triggers/extensions; **This state** is opt-in.
+This preference only governs new placements. Existing objects keep their observed scope until
+the object's membership menu selects **Edit this state**, **Edit all states**, or **Apply to all states**.
+The badge reports actual membership, including partial membership, not the next-add preference.
+Deleting a shared object removes its matching copies; the menu also offers explicit selected-state
+and all-state removal. Distinct sibling variants/commands and incompatible gate/door-cap collision
+geometry block a broad operation instead of being silently overwritten.
+
+In ROM mode, **This state** writes the PLM
 delta to the selected `RoomStateEdits`; **All states** writes a canonical remove/add pair to the
 top-level `RoomEdits.plmChanges` stream and clears same-item overrides that would mask it in an
 existing branch. Because this is room-wide data rather than a snapshot of state IDs, it also applies
 to conditions created later. Every copy keeps one collection-bit parameter, so the game still treats
 the item as one pickup. A conflicting different item at the same coordinates in any state blocks the
-operation instead of being silently replaced. Stations, gates, doors, and scroll triggers remain
-state-scoped; the item scope control cannot globalize unrelated room logic.
+operation instead of being silently replaced. Authored ASM writes direct rows to each affected list;
+new conditions clone their template's list, including explicit exceptions. Equal rows in independent
+ASM lists remain independently editable in raw source. Save placements share one area/slot spawn;
+last-reference removal alone releases it. Scroll placement and commands are one undo transaction,
+and membership compares their commands, not an unresolved zero pointer. GUI shot-gate additions
+pair their body and shot-block rows at one anchor in one operation, preserving existing open/closed
+bodies. ROM-mode undo snapshots also retain save spawns and room/state command dictionaries.
+ROM gate-pattern stamps compare cross-state collision geometry before the stroke modifies it;
+their tiles still follow the layout scope, while PLMs follow their placement scope. Compound
+tile-plus-PLM stamps in source-owned rooms remain guarded until their joint source transaction exists.
+The serialized `itemScope`/`ItemStateScope` names remain historical storage names, not pickup-only semantics.
 
 Existing-room selector graphs are now authorable. The UI can add/duplicate/delete/reorder conditional
 branches, edit every vanilla condition plus generated equipment/beam, capacity, current health/ammo,

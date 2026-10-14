@@ -14,7 +14,7 @@ internal data class AsmPlmConsumer(val roomId: Int, val roomName: String, val st
 
 /** Immutable source identities and verified original layouts. No editable data is stored here. */
 internal class AsmPlmSourceCatalog(
-    private val originalText: String,
+    val originalText: String,
     private val originalMacros: String,
     val symbols: Map<String, Int>,
     val parser: RomParser,

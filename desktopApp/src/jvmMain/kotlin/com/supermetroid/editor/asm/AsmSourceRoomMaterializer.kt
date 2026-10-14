@@ -40,6 +40,8 @@ internal data class AsmRoomMaterialization(
     val eligibleWrites: Int,
     val skippedWrites: Int,
     val plmTables: List<AsmRoomPlmTable> = emptyList(),
+    val scrollTables: List<AsmRoomScrollTable> = emptyList(),
+    val saveTables: List<AsmRoomSaveTable> = emptyList(),
 ) {
     val isEmpty: Boolean get() = claims.isEmpty()
 
@@ -66,6 +68,8 @@ internal class AsmSourceRoomMaterializer {
         report: RomWritePlanReport,
         plannedRom: ByteArray? = null,
         compiledRomSize: Int = AsmProjectCompiler.ASM_ROM_SIZE,
+        sourceScrolls: Map<String, com.supermetroid.editor.rom.SourceScrollResource> = emptyMap(),
+        sourceSaves: Map<String, com.supermetroid.editor.rom.SourceSaveResource> = emptyMap(),
     ): AsmRoomMaterialization {
         if (!ProjectRoomExporter.hasRoomEdits(project)) return AsmRoomMaterialization.EMPTY
 
@@ -101,7 +105,9 @@ internal class AsmSourceRoomMaterializer {
         }
 
         val plmTables = plannedRom?.let { discoverAsmRoomPlmTables(project, report, it) }.orEmpty()
-        val typedClaims = plmTables.flatMap(AsmRoomPlmTable::claims)
+        val scrollTables = if (sourceScrolls.isEmpty()) emptyList() else discoverAsmRoomScrollTables(report, requireNotNull(plannedRom), sourceScrolls)
+        val saveTables = if (sourceSaves.isEmpty()) emptyList() else discoverAsmRoomSaveTables(report, requireNotNull(plannedRom), sourceSaves)
+        val typedClaims = plmTables.flatMap(AsmRoomPlmTable::claims) + scrollTables.map(AsmRoomScrollTable::claim) + saveTables.map(AsmRoomSaveTable::claim)
         val typedOffsets = hashSetOf<Int>()
         typedClaims.forEach { claim ->
             (claim.pcOffset until claim.endExclusive).forEach { pc ->
@@ -138,12 +144,15 @@ internal class AsmSourceRoomMaterializer {
             .toCollection(linkedSetOf())
 
         return AsmRoomMaterialization(
-            source = renderSource(rawClaims) + plmTables.joinToString("\n", prefix = "\n") { it.renderSource() },
+            source = renderSource(rawClaims) + scrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } +
+                plmTables.joinToString("\n", prefix = "\n") { it.renderSource() } + saveTables.joinToString("\n", prefix = "\n") { it.renderSource() },
             claims = rawClaims + typedClaims,
             roomIds = roomIds,
             eligibleWrites = writes.size,
             skippedWrites = 0,
             plmTables = plmTables,
+            scrollTables = scrollTables,
+            saveTables = saveTables,
         )
     }
 

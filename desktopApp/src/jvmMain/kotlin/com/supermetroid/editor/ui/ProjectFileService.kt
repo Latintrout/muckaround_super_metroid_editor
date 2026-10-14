@@ -9,6 +9,8 @@ import com.supermetroid.editor.asm.AsmPatchBackendRegistry
 import com.supermetroid.editor.asm.AsmProjectWorkspaceRepository
 import com.supermetroid.editor.asm.AsmPlmSourceCatalog
 import com.supermetroid.editor.asm.AsmRoomObjectSource
+import com.supermetroid.editor.asm.AsmScrollCommandSource
+import com.supermetroid.editor.asm.AsmWlaSymbolParser
 import com.supermetroid.editor.asm.PLM_SOURCE_FILE
 import com.supermetroid.editor.asm.AsmSourceAssetMaterializer
 import com.supermetroid.editor.asm.AsmSourcePatchMaterializer
@@ -19,15 +21,17 @@ import com.supermetroid.editor.data.ProjectPaths
 import com.supermetroid.editor.data.ProjectRomBuildMode
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.SmEditProjectFormat
+import com.supermetroid.editor.data.ScrollCommand
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
+import com.supermetroid.editor.rom.words
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
 
 internal object ProjectFileService {
     private val asmProjectCompiler = AsmProjectCompiler()
-    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v4"
+    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v6-save-resources"
     private const val MAX_PREPARED_ASM_BASES = 2
     private val preparedAsmBases = object : LinkedHashMap<String, AsmCompiledBuildBase>(
         MAX_PREPARED_ASM_BASES,
@@ -288,7 +292,35 @@ internal object ProjectFileService {
         val managedRooms = project.rooms.values.filter { it.asmPlmSourceVersion != 0 }
         if (managedRooms.isNotEmpty()) linkedCatalog.requireStandardMacro(linkedMacros)
         val managedSource = AsmRoomObjectSource(linkedSource, linkedCatalog.symbols)
-        val sourcePlmSets = managedRooms.associate { it.roomId to managedSource.resources(it) }
+        val sourcePlmSets = managedRooms.associate { room ->
+            val header = requireNotNull(romParser.readRoomHeader(room.roomId))
+            room.roomId to managedSource.resources(room, (room.roomHeaderChange?.width ?: header.width) * (room.roomHeaderChange?.height ?: header.height))
+        }
+        val sourceScrolls = sourcePlmSets.values.flatMap { states -> states.values.flatMap { it.scrollReferences.values } }
+            .groupBy { it.identity }.mapValues { (name, resources) ->
+                require(resources.distinct().size == 1) { "Shared scroll source $name has inconsistent values." }
+                resources.first()
+            }
+        val sourceSaves = sourcePlmSets.values.flatMap { states -> states.values.flatMap { it.saves } }.groupBy { it.identity }
+            .mapValues { (_, references) ->
+                require(references.distinct().size == 1) { "Shared save source has inconsistent fields." }
+                references.first().also { com.supermetroid.editor.rom.validateSourceSaveOwnership(it, romParser) }
+            }
+        // Numeric original pointers are fixed-layout references. Validate their current source too;
+        // raw byte syntax alone would happily compile invalid colors or a shifted command stream.
+        val originalScrollInputs = linkedMapOf<Int, List<ScrollCommand>>()
+        for (room in managedRooms) {
+            val header = requireNotNull(romParser.readRoomHeader(room.roomId))
+            val screens = (room.roomHeaderChange?.width ?: header.width) * (room.roomHeaderChange?.height ?: header.height)
+            for (resource in sourcePlmSets.getValue(room.roomId).values) resource.entries.forEachIndexed { index, entry ->
+                if (entry.id == 0xB703 && index !in resource.scrollReferences) {
+                    val commands = AsmScrollCommandSource.original(linkedSource, linkedCatalog.symbols,
+                        entry.param, romParser, screens, linkedCatalog.originalText)
+                    val prior = originalScrollInputs.put(entry.param, commands)
+                    require(prior == null || prior == commands) { "Shared original scroll commands have inconsistent values." }
+                }
+            }
+        }
         // Resolve known collisions before spending time in Asar. GUI-only lists stay GUI-owned.
         linkedCatalog.sourceBindings(project, linkedSource, linkedMacros)
         fun protectLinkedObjects(base: AsmCompiledBuildBase): AsmCompiledBuildBase = linkedCatalog.protectBuild(
@@ -304,6 +336,28 @@ internal object ProjectFileService {
             onLog("[ASM-BUILD] $progress")
             onStatus(progress)
         })
+        val compiledSaveParser = RomParser(initial.romBytes)
+        for (save in sourceSaves.values) {
+            val baseline = requireNotNull(romParser.readSaveEntry(save.area, save.slot))
+            val compiled = requireNotNull(compiledSaveParser.readSaveEntry(save.area, save.slot))
+            require(baseline.words() == compiled.words()) {
+                "Save slot ${save.area}:${save.slot} also changed in original Bank \$80 source. Resolve ownership before building the authored save record."
+            }
+        }
+        if (originalScrollInputs.isNotEmpty()) {
+            val built = RomParser(initial.romBytes)
+            val labels = AsmWlaSymbolParser.parse(initial.compilerSymbols.toString(Charsets.UTF_8)).labels
+            for ((pointer, expected) in originalScrollInputs) {
+                val name = linkedCatalog.symbols.entries.firstOrNull { it.value == pointer && it.key.startsWith("RoomPLM_") }?.key
+                require(name == null || labels[name] == (0x8F0000 or pointer)) {
+                    "$name moved from its original address. Use Edit commands to create a relocatable scroll resource."
+                }
+                val actual = AsmScrollCommandSource.original("", emptyMap(), pointer, built, 128)
+                require(actual == expected) {
+                    "Scroll pointer \$${pointer.toString(16).uppercase()} no longer matches the room preview. Use Edit commands to import a named resource."
+                }
+            }
+        }
         onLog("[ASM-BUILD] Planning editor-owned source assets…")
         val planningLog = mutableListOf<String>()
         val planned = RomExporter(
@@ -320,12 +374,18 @@ internal object ProjectFileService {
                 ?: "Could not validate editor data against the compiled ASM source"
         )
         val roomMaterialization = AsmSourceRoomMaterializer().materialize(
-            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size,
+            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves,
         )
         val authoredResources = managedRooms.flatMap { room -> room.states.map { state ->
             AsmRoomObjectSource.stateMacro(room.roomId, state.id) to managedSource.table(room.roomId, state.id).resource.name
         } }.toMap()
         val emitted = roomMaterialization.plmTables.filter { it.authoredMacro != null }
+        require(roomMaterialization.saveTables.map { it.resource.identity }.toSet() == sourceSaves.keys) {
+            "Authored save records could not be included atomically in this build; no ROM was produced."
+        }
+        require(roomMaterialization.scrollTables.map { it.resource.identity }.toSet() == sourceScrolls.keys) {
+            "Authored scroll source could not be included atomically in this room build; no ROM was produced."
+        }
         require(emitted.map { authoredResources.getValue(it.authoredMacro!!) }.toSet() == authoredResources.values.toSet() &&
             emitted.sumOf { it.pointerPcOffsets.size } == authoredResources.size) {
             "Authored object source could not be included atomically in this room build; no ROM was produced."

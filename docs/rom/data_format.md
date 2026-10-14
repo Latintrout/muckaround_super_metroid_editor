@@ -233,6 +233,12 @@ SMEDIT's generated PLM ASM uses explicit `dw`/`db` fields plus named table
 references and preserves this original layout. See the engine-format extension
 boundary in [`../asm/reference_workspace.md`](../asm/reference_workspace.md).
 
+Coordinates are not a universal footprint declaration. For example, Landing Site's
+escape list includes `$DB44` at `(8,8)`: its `$84:DB1E` setup selects an event
+pre-instruction and its `$84:DB42` list sleeps without drawing. GUI broad-placement
+conflict checks preserve that verified script-only row instead of treating it as
+a physical station/item at those coordinates. Unknown PLMs are not assumed inert.
+
 ### PLM Parameter Meanings
 
 | PLM Type       | Parameter meaning |
@@ -326,6 +332,14 @@ The **parameter** selects color and direction:
 
 Gate setup routine `C6E0` reads the parameter to select the appropriate
 instruction list for open/close animations.
+
+`$C836` is the downwards **shot block**, not the moving gate body. Vanilla room
+lists pair it with the downwards closed body `$C82A` (or open body `$C826`) at the
+same X/Y. `$C82A` setup at `$84:C6BE` spawns the gate projectile and writes a
+five-block BTS column below the anchor. The upwards counterparts are shot block
+`$C83A` and bodies `$C82E/$C832`. SMEDIT's GUI adds/removes a shot gate and its
+body in one scoped transaction, preserving existing open/closed body choices.
+The advanced **Gate Body (closed)** entry authors only that component.
 
 Gate patterns are 1×4 tiles (the gate extends downward from the PLM position).
 

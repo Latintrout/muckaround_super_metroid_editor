@@ -7,6 +7,8 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.ensureStateManifest
 import com.supermetroid.editor.ui.EditorState
+import com.supermetroid.editor.rom.SourceSaveResource
+import com.supermetroid.editor.rom.words
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
@@ -18,7 +20,350 @@ class AsmPlmSourceBridgeTest {
     private val source = "PLMPopulation_Test: ;8F8000;\n    %PLMPopEntry(${ '$' }EEDB, ${ '$' }02, ${ '$' }03, ${ '$' }0005) ; pickup\n    dw ${ '$' }0000\n"
     private val macros = "macro PLMPopEntry(ID, X, Y, Param)\n dw <ID>\n db <X>, <Y>\n dw <Param>\nendmacro\n"
 
-    private suspend fun fixture(withLevelData: Boolean = false): Triple<AsmWorkspaceState, AsmPlmSourceBridge, SmEditProject> {
+    private fun scopeEditor(bridge: AsmPlmSourceBridge, project: SmEditProject) = EditorState().apply {
+        testMode = true
+        initForProject(File(directory, "Test.smedit"), project)
+        asmPlmSourceBridge = bridge
+        loadRoom(0x91F8, bridge.catalog.parser, bridge.catalog.parser.readRoomHeader(0x91F8)!!)
+    }
+
+    @Test fun `new PLMs default all states with complete gates and future conditions`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        assertEquals(com.supermetroid.editor.data.ItemStateScope.ALL_STATES, editor.itemEditScope)
+        listOf(0xEEDF, 0xB6DF, 0xB6EB, 0xB6D3, 0xC836, 0xC8A2, 0xB647).forEachIndexed { index, id ->
+            editor.addPlm(id, 5 + index, 8, if (id == 0xC836) 8 else 0)
+        }
+        val additions = editor.workingPlms.filter { it.x in 5..11 }
+        assertEquals(8, additions.size, "The shot gate includes its closed body")
+        assertTrue(additions.all { editor.plmStateMembership(it).allStates })
+        val room = project.rooms.getValue("91F8")
+        val added = editor.addRoomState(room.states.last().id,
+            com.supermetroid.editor.rom.projectRoomStateCondition(com.supermetroid.editor.data.ProjectRoomStateConditionKind.EVENT_SET, 63), bridge.catalog.parser)
+        assertTrue(bridge.managedView(0x91F8, added).document!!.entries.containsAll(additions))
+        assertTrue(room.plmChanges.isEmpty() && room.states.all { it.plmChanges.isEmpty() })
+    }
+
+    @Test fun `existing private gates stay private when the new placement preference is all states`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.selectItemEditScope(com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        editor.addPlm(0xC836, 8, 8, 8)
+        editor.selectItemEditScope(com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
+        editor.addPlm(0xC836, 8, 8, 10)
+        val current = editor.currentPlmStateId()!!
+        val other = project.rooms.getValue("91F8").states.first { it.id != current }.id
+        assertEquals(10, editor.workingPlms.single { it.id == 0xC836 }.param)
+        assertFalse(editor.plmStateMembership(editor.workingPlms.single { it.id == 0xC836 }).allStates)
+        assertTrue(bridge.managedView(0x91F8, other).document!!.entries.none { RomParser.isGatePlm(it.id) })
+        val gate = editor.workingPlms.single { it.id == 0xC836 }
+        editor.applyPlmToAllStates(gate)
+        assertTrue(editor.plmStateMembership(gate).allStates)
+        editor.removePlm(8, 8, gate.id, com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        assertTrue(editor.workingPlms.none { RomParser.isGatePlm(it.id) })
+        assertEquals(2, bridge.managedView(0x91F8, other).document!!.entries.count { RomParser.isGatePlm(it.id) })
+        assertTrue(editor.undo())
+        assertTrue(editor.workingPlms.contains(gate))
+        assertTrue(editor.plmStateMembership(gate).allStates)
+    }
+
+    @Test fun `default all state additions cannot silently replace another states station or door variant`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        val current = editor.currentPlmStateId()!!
+        val other = project.rooms.getValue("91F8").states.first { it.id != current }.id
+        val refill = RomParser.PlmEntry(0xB6DF, 8, 8, 0)
+        bridge.editManaged(0x91F8, other, false, { false }, refill)
+        val before = bridge.sourceText()
+        editor.addPlm(0xB6EB, 8, 8, 0)
+        assertEquals(before, bridge.sourceText())
+        assertContains(editor.statusMessage, "occupies this position")
+        editor.addPlm(0xB6EB, 8, 8, 0, com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        assertTrue(editor.workingPlms.any { it.id == 0xB6EB })
+        assertTrue(bridge.managedView(0x91F8, other).document!!.entries.contains(refill))
+        bridge.editManaged(0x91F8, current, false, { false }, RomParser.PlmEntry(0xC8A2, 12, 8, 0))
+        bridge.editManaged(0x91F8, other, false, { false }, RomParser.PlmEntry(0xC85A, 12, 8, 0))
+        editor.refreshLinkedPlms()
+        editor.addPlm(0xC848, 12, 8, 0)
+        assertTrue(bridge.managedView(0x91F8, other).document!!.entries.any { it.id == 0xC85A })
+        val changed = editor.workingPlms.single { RomParser.isDoorCapPlm(it.id) }
+        val caps = bridge.sourceText()
+        editor.applyPlmToAllStates(changed)
+        assertEquals(caps, bridge.sourceText())
+        assertContains(editor.statusMessage, "different")
+    }
+
+    @Test fun `save scope isolates placements but retains one spawn until final removal`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true, withSaveData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        val helperState = project.rooms.getValue("91F8").states.first { it.id != editor.currentPlmStateId() }.id
+        val helper = RomParser.PlmEntry(0xDB44, 8, 8, 8)
+        bridge.editManaged(0x91F8, helperState, false, { false }, helper)
+        editor.addPlm(0xB76F, 8, 8, 0x8000)
+        val station = editor.workingPlms.single { it.id == 0xB76F }
+        assertTrue(editor.plmStateMembership(station).allStates)
+        editor.removePlm(8, 8, station.id, com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        assertFalse(bridge.saveSpawn(0x91F8, 0, 2)!!.cleared)
+        assertTrue(bridge.managedView(0x91F8, helperState).document!!.entries.contains(helper), "Script-only setup rows are neither physical conflicts nor replacement targets")
+        val other = project.rooms.getValue("91F8").states.first { it.id != editor.currentPlmStateId() }.id
+        assertTrue(bridge.managedView(0x91F8, other).document!!.entries.contains(station))
+        assertTrue(editor.undo())
+        editor.removePlm(8, 8, station.id)
+        assertTrue(bridge.saveSpawn(0x91F8, 0, 2)!!.cleared)
+        assertTrue(project.rooms.getValue("91F8").states.all { branch -> bridge.managedView(0x91F8, branch.id).document!!.entries.none { it.id == station.id } })
+        assertTrue(editor.undo())
+        assertFalse(bridge.saveSpawn(0x91F8, 0, 2)!!.cleared)
+    }
+
+    @Test fun `scroll scope includes command identity not the zero preview pointer`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        val commands = listOf(com.supermetroid.editor.data.ScrollCommand(0, 1))
+        editor.addScrollTriggerWithCommands(8, 8, commands)
+        val trigger = editor.workingPlms.single { it.id == 0xB703 }
+        assertTrue(editor.plmStateMembership(trigger).allStates)
+        val other = project.rooms.getValue("91F8").states.first { it.id != editor.currentPlmStateId() }.id
+        val private = listOf(com.supermetroid.editor.data.ScrollCommand(0, 0))
+        bridge.editScroll(0x91F8, other, 8, 8, private)
+        editor.refreshLinkedPlms()
+        assertEquals(trigger, bridge.managedView(0x91F8, other).document!!.entries.single { it.id == 0xB703 })
+        assertFalse(editor.plmStateMembership(trigger).allStates)
+        assertFalse(bridge.managedIsInAllStates(0x91F8, editor.currentPlmStateId()!!, trigger))
+        val next = listOf(com.supermetroid.editor.data.ScrollCommand(1, 2))
+        assertTrue(editor.updateScrollTriggerCommands(trigger, next))
+        assertEquals(next, editor.scrollCommandsFor(trigger))
+        assertEquals(private, bridge.scrollCommands(0x91F8, other, trigger))
+        val before = bridge.sourceText()
+        editor.applyPlmToAllStates(trigger)
+        assertEquals(before, bridge.sourceText(), "Distinct command streams must be resolved explicitly")
+    }
+
+    @Test fun `explicit edit this state detaches a complete shared gate in one undo`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.addPlm(0xC836, 8, 8, 8)
+        val gate = editor.workingPlms.single { it.id == 0xC836 }
+        editor.selectPlmEditScope(gate, com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        editor.addPlm(0xC836, 8, 8, 10)
+        val current = editor.currentPlmStateId()!!
+        val other = project.rooms.getValue("91F8").states.first { it.id != current }.id
+        assertEquals(10, editor.workingPlms.single { it.id == 0xC836 }.param)
+        assertEquals(8, bridge.managedView(0x91F8, other).document!!.entries.single { it.id == 0xC836 }.param)
+        assertTrue(editor.undo())
+        assertEquals(8, editor.workingPlms.single { it.id == 0xC836 }.param)
+        assertTrue(editor.plmStateMembership(gate).allStates)
+    }
+
+    @Test fun `gate body scope and deletion follow the complete gate rather than equal body rows`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.addPlm(0xC836, 8, 8, 8)
+        val body = editor.workingPlms.single { it.id == 0xC82A }
+        editor.selectPlmEditScope(body, com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        editor.addPlm(0xC836, 8, 8, 10)
+        assertFalse(editor.plmStateMembership(body).allStates)
+        editor.removePlm(8, 8, body.id)
+        assertTrue(editor.workingPlms.none { RomParser.isGatePlm(it.id) })
+        val other = project.rooms.getValue("91F8").states.first { it.id != editor.currentPlmStateId() }.id
+        assertEquals(8, bridge.managedView(0x91F8, other).document!!.entries.single { it.id == 0xC836 }.param)
+        assertTrue(editor.undo())
+        assertEquals(10, editor.workingPlms.single { it.id == 0xC836 }.param)
+        assertEquals(1, editor.workingPlms.count { it.id == 0xC82A })
+    }
+
+    @Test fun `save station placement spawn fields ASM edits undo reopen and cache share one authority`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true, withSaveData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(File(directory, "Test.smedit"), project)
+        editor.asmPlmSourceBridge = bridge
+        editor.loadRoom(0x91F8, bridge.catalog.parser, bridge.catalog.parser.readRoomHeader(0x91F8)!!)
+        editor.addPlm(0xB76F, 8, 8, 0x8000)
+        val station = editor.workingPlms.single { it.id == 0xB76F }
+        assertEquals(0x8002, station.param, "Skip gunship and foreign occupied slots")
+        val original = bridge.saveSpawn(0x91F8, 0, 2)!!
+        assertEquals(0x8000, original.words[1])
+        assertEquals(7, original.words[2], "Preserve the base record's door BTS, like the ROM exporter")
+        assertTrue(project.rooms.getValue("91F8").saveStationSpawns.isEmpty())
+        editor.updateSaveStationSpawnFields(0, 2, -32, 144, 256, 0, bridge.catalog.parser)
+        val fields = bridge.saveSpawn(0x91F8, 0, 2)!!
+        assertEquals(listOf(256, 0, 144, 0xFFE0), fields.words.drop(3))
+        assertEquals(-32, editor.effectiveSaveStationSpawn(0, 2, bridge.catalog.parser)!!.samusXSigned)
+        assertTrue(editor.undo())
+        assertEquals(original, bridge.saveSpawn(0x91F8, 0, 2), "One Apply action undoes camera and position together")
+        assertTrue(editor.redo())
+        assertEquals(fields, bridge.saveSpawn(0x91F8, 0, 2))
+        val beforeInvalid = bridge.sourceText()
+        editor.updateSaveStationSpawnFields(0, 2, 900000, 144, 256, 0, bridge.catalog.parser)
+        assertEquals(beforeInvalid, bridge.sourceText(), "Out-of-range input must not silently wrap")
+        val target = assertIs<AsmPlmPlacementTarget.Source>(bridge.saveTarget(0x91F8, 0, 2))
+        assertContains(bridge.sourceText().lines()[target.lineIndex], "macro SmeditObjects_91F8_Save_0_2")
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, bridge.sourceText().replace("dw ${'$'}FFE0", "dw ${'$'}FFF0"))
+        editor.refreshLinkedPlms()
+        assertEquals(-16, editor.effectiveSaveStationSpawn(0, 2, bridge.catalog.parser)!!.samusXSigned)
+        assertTrue(workspace.saveAllSources())
+        val reopened = AsmWorkspaceState(projectRepository = AsmProjectWorkspaceRepository(emptyList(), emptyList()))
+        reopened.bindProject(File(directory, "Test.smedit").path, true, progressive = true)
+        val restored = AsmPlmSourceBridge(bridge.catalog, reopened) { project }
+        restored.preloadProjections()
+        assertEquals(0xFFF0, restored.saveSpawn(0x91F8, 0, 2)!!.words[6])
+        val stable = restored.sourceText()
+        reopened.updateSourceEditText(PLM_SOURCE_FILE, stable.replace("dw ${'$'}FFF0", "dw ${'$'}9000000900"))
+        assertNotNull(restored.managedView(0x91F8, editor.currentPlmStateId()!!).problem)
+        assertFails { restored.updateSaveSpawn(fields) }
+        assertTrue(reopened.saveAllSources(), "Invalid source drafts must remain saveable")
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, stable)
+        editor.refreshLinkedPlms()
+        editor.removePlm(station.x, station.y, station.id)
+        assertTrue(bridge.saveSpawn(0x91F8, 0, 2)!!.cleared)
+        assertTrue(editor.undo())
+        assertFalse(bridge.saveSpawn(0x91F8, 0, 2)!!.cleared)
+        assertTrue(editor.workingPlms.contains(station))
+    }
+
+    @Test fun `legacy GUI save overrides migrate and restore with source ownership and metadata in one undo`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withSaveData = true)
+        val room = project.getOrCreateRoom(0x91F8)
+        val change = com.supermetroid.editor.data.SaveStationSpawnChange(0, 2, 0x91F8, 0x8000, 0, 0, 104, 0xFFE0)
+        room.saveStationSpawns += change
+        room.plmChanges += PlmChange("add", 0xB76F, 8, 8, 0x8002)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        assertTrue(room.saveStationSpawns.isEmpty())
+        assertEquals(0xFFE0, bridge.saveSpawn(0x91F8, 0, 2)!!.words[6])
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        assertEquals(listOf(change), room.saveStationSpawns)
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE))
+        assertTrue(room.saveStationSpawns.isEmpty())
+        assertEquals(0xFFE0, bridge.saveSpawn(0x91F8, 0, 2)!!.words[6])
+    }
+
+    @Test fun `ordinary stations gates door caps and extensions all round trip through the same PLM rows`() = runBlocking {
+        val (workspace, bridge, _) = fixture()
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val ids = listOf(0xB6DF, 0xB6EB, 0xB6D3, 0xC836, 0xC8A2, 0xB647)
+        ids.forEachIndexed { index, id -> bridge.editManaged(0x91F8, "state-1", false, { false }, RomParser.PlmEntry(id, 4 + index, 8, if (id == 0xC836) 8 else 0)) }
+        val doc = bridge.managedView(0x91F8, "state-1").document!!
+        assertTrue(ids.all { id -> doc.entries.any { it.id == id } })
+        val gateIndex = doc.entries.indexOfFirst { it.id == 0xC836 }
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, doc.replace(gateIndex, doc.entries[gateIndex].copy(param = 10)))
+        assertEquals(10, bridge.managedView(0x91F8, "state-1").document!!.entries.single { it.id == 0xC836 }.param)
+        assertTrue(workspace.saveAllSources())
+        assertContains(bridge.sourceText(), "Gate: Green (right)")
+        assertTrue(bridge.managedView(0x91F8, "state-2").document!!.entries.none { it.id in ids })
+    }
+
+    @Test fun `new unpaired save rows expose a noneditable invalid draft`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true, withSaveData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(File(directory, "Test.smedit"), project)
+        editor.asmPlmSourceBridge = bridge
+        editor.loadRoom(0x91F8, bridge.catalog.parser, bridge.catalog.parser.readRoomHeader(0x91F8)!!)
+        val stateId = editor.currentPlmStateId()!!
+        val source = AsmRoomObjectSource(bridge.sourceText())
+        val unpaired = source.edit(project.rooms.getValue("91F8"), stateId, false, { false }, RomParser.PlmEntry(0xB76F, 8, 8, 0x8002))
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, unpaired)
+        editor.refreshLinkedPlms()
+        assertContains(bridge.managedView(0x91F8, stateId).problem!!, "paired spawn record")
+        editor.addPlm(0xB6DF, 9, 8, 0)
+        assertEquals(unpaired, bridge.sourceText(), "A last-valid preview must not be an editable current model")
+        assertTrue(workspace.saveAllSources(), "Invalid drafts remain saveable")
+    }
+
+    @Test fun `save reservations in another area do not consume this areas same numbered slot`() = runBlocking {
+        val (_, bridge, project) = fixture(withSaveData = true, withSecondArea = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        bridge.migrateRoom(0xA000, "Second area fixture")
+        val room = project.rooms.getValue("A000")
+        val save = SourceSaveResource(AsmSaveStationSource.name(0xA000, 1, 2), 0xA000, 1, 2,
+            listOf(0xA000, 0x8010, 0, 0, 0, 104, 0))
+        bridge.editSaveStation(0xA000, room.states.single().id, { false }, RomParser.PlmEntry(0xB76F, 8, 8, 0x8002), save)
+        assertEquals(2, bridge.availableSaveSlot(0x91F8, 0))
+        assertEquals(0, bridge.availableSaveSlot(0xA000, 1))
+    }
+
+    @Test fun `scroll commands synchronize GUI ASM undo reopen and verified cache without duplicate project values`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(File(directory, "Test.smedit"), project)
+        editor.asmPlmSourceBridge = bridge
+        editor.loadRoom(0x91F8, bridge.catalog.parser, bridge.catalog.parser.readRoomHeader(0x91F8)!!)
+        val stateId = assertNotNull(editor.currentPlmStateId())
+        val otherStateId = project.rooms.getValue("91F8").states.single { it.id != stateId }.id
+        val commands = listOf(com.supermetroid.editor.data.ScrollCommand(0, 1), com.supermetroid.editor.data.ScrollCommand(3, 2))
+        editor.selectItemEditScope(com.supermetroid.editor.data.ItemStateScope.THIS_STATE)
+        editor.addScrollTriggerWithCommands(4, 5, commands)
+        val trigger = editor.workingPlms.single { it.id == 0xB703 }
+        assertEquals(commands, editor.scrollCommandsFor(trigger))
+        val target = assertIs<AsmPlmPlacementTarget.Source>(bridge.scrollTarget(0x91F8, stateId, trigger))
+        assertContains(bridge.sourceText().lines()[target.lineIndex], "macro SmeditObjects_91F8_Scroll_")
+        val beforeEdit = bridge.sourceText()
+        val next = listOf(com.supermetroid.editor.data.ScrollCommand(1, 0))
+        assertTrue(editor.updateScrollTriggerCommands(trigger, next, beforeEdit))
+        assertEquals(next, editor.scrollCommandsFor(trigger))
+        editor.undo()
+        assertEquals(commands, editor.scrollCommandsFor(trigger))
+        editor.redo()
+        assertEquals(next, editor.scrollCommandsFor(trigger))
+        val guiSource = bridge.sourceText()
+        val previewRevision = editor.editVersion
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, guiSource.replace("db ${'$'}01, ${'$'}00", "db ${'$'}01, ${'$'}02"))
+        editor.refreshLinkedPlms()
+        assertTrue(editor.editVersion > previewRevision, "Command-only ASM edits must invalidate runtime scroll diagnostics")
+        val asmCommands = listOf(com.supermetroid.editor.data.ScrollCommand(1, 2))
+        assertEquals(asmCommands, editor.scrollCommandsFor(trigger))
+        assertFalse(editor.updateScrollTriggerCommands(trigger, commands, guiSource), "Stale GUI drafts must not overwrite ASM")
+        assertTrue(workspace.saveAllSources())
+        assertContains(bridge.sourceText(), "Screen (2, 1) → Green")
+        val json = Json { encodeDefaults = true }
+        val restoredProject = json.decodeFromString<SmEditProject>(json.encodeToString(SmEditProject.serializer(), project))
+        val reopened = AsmWorkspaceState(projectRepository = AsmProjectWorkspaceRepository(emptyList(), emptyList()))
+        reopened.bindProject(File(directory, "Test.smedit").path, true, progressive = true)
+        val restored = AsmPlmSourceBridge(bridge.catalog, reopened) { restoredProject }
+        restored.preloadProjections()
+        assertEquals(asmCommands, restored.scrollCommands(0x91F8, stateId, trigger))
+        assertTrue(restoredProject.rooms.values.all { it.customScrollCommands.isEmpty() && it.states.all { s -> s.customScrollCommands.isEmpty() } })
+        assertTrue(restored.managedView(0x91F8, otherStateId).document!!.entries.none { it.id == 0xB703 })
+        val valid = restored.sourceText()
+        reopened.updateSourceEditText(PLM_SOURCE_FILE, valid.replace("db ${'$'}01, ${'$'}02", "db ${'$'}01, ${'$'}09"))
+        assertNotNull(restored.managedView(0x91F8, stateId).problem)
+        assertFails { restored.editScroll(0x91F8, stateId, 4, 5, commands) }
+        assertTrue(reopened.saveAllSources(), "Invalid drafts remain saveable; they are not buildable")
+    }
+
+    @Test fun `custom scroll migration undo redo restores both source and legacy metadata`() = runBlocking {
+        val (workspace, bridge, project) = fixture()
+        val room = project.getOrCreateRoom(0x91F8)
+        val commands = listOf(com.supermetroid.editor.data.ScrollCommand(0, 1))
+        room.customScrollCommands["cmd_0"] = commands.toMutableList()
+        room.plmChanges += PlmChange("add", 0xB703, 4, 5, 0xCC00)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val trigger = bridge.managedView(0x91F8, "state-1").document!!.entries.single { it.id == 0xB703 }
+        val legacy = RomParser.PlmEntry(0xB703, 4, 5, 0xCC00)
+        val target = placementAfterObjectMigration(legacy, bridge.managedView(0x91F8, "state-1").document!!.entries)
+        assertEquals(trigger, target)
+        assertIs<AsmPlmPlacementTarget.Source>(bridge.managedPlacement(0x91F8, "state-1", target!!))
+        assertNull(placementAfterObjectMigration(legacy, listOf(trigger, trigger)), "Ambiguous migrations must not guess")
+        assertNull(placementAfterObjectMigration(legacy.copy(param = 0x9000), listOf(trigger)), "Only migrated command IDs may be remapped")
+        assertEquals(commands, bridge.scrollCommands(0x91F8, "state-1", trigger))
+        assertTrue(room.customScrollCommands.isEmpty())
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        assertEquals(commands, room.customScrollCommands["cmd_0"]?.toList())
+        assertEquals(0xCC00, room.plmChanges.single().param)
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE))
+        assertTrue(room.customScrollCommands.isEmpty())
+        assertEquals(commands, bridge.scrollCommands(0x91F8, "state-1", trigger))
+    }
+
+    private suspend fun fixture(withLevelData: Boolean = false, withSaveData: Boolean = false, withSecondArea: Boolean = false): Triple<AsmWorkspaceState, AsmPlmSourceBridge, SmEditProject> {
         val root = File(directory, "reference")
         val src = File(root, "src").apply { mkdirs() }
         val data = File(root, "data").apply { mkdirs() }
@@ -33,7 +378,13 @@ class AsmPlmSourceBridgeTest {
         repository.initialize(projectFile.path, reference)
         val workspace = AsmWorkspaceState(projectRepository = repository)
         workspace.bindProject(projectFile.path, true)
-        val rom = objectSourceTestRom()
+        val rom = if (withSaveData) saveSourceTestRom() else objectSourceTestRom()
+        if (withSecondArea) {
+            fun word(pc: Int, value: Int) { rom[pc] = value.toByte(); rom[pc + 1] = (value ushr 8).toByte() }
+            rom[0x7A001] = 1; rom[0x7A004] = 1; rom[0x7A005] = 1
+            word(0x7A00B, 0xE5E6); word(0x7A00D + 20, 0x8000)
+            word(0x18010, 0xA000)
+        }
         if (withLevelData) {
             val level = ByteArray(2 + 32 * 32 * 3).also { it[1] = 8 } // 2048 layer-1 bytes + BTS
             LZ5Compressor.compress(level).copyInto(rom, 0x200000)

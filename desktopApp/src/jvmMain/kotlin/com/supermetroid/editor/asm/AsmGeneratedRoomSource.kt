@@ -27,9 +27,10 @@ internal data class AsmGeneratedRoomSource(
 
     companion object {
         const val FILE_NAME = "generated-rooms.asm"
-        private val label = Regex("^(SmeditRoom[A-Za-z0-9_]+):$")
+        private val label = Regex("^((?:SmeditRoom|SmeditObjects_)[A-Za-z0-9_]+):$")
         private val plm = Regex("SmeditRoom_([0-9A-F]+)_State([0-9]+)_Plms")
         private val roomLabel = Regex("SmeditRoom_([0-9A-F]+)_.*")
+        private val authoredRoom = Regex("SmeditObjects_([0-9A-F]+)_.*")
         private val roomMetadata = Regex("^; @room ([0-9A-F]+) (.+)$")
         private val sectionMetadata = Regex("^; @section (\\S+) (.+)$")
         private val origin = Regex("^org \\$([0-9A-Fa-f]{6})$")
@@ -44,15 +45,19 @@ internal data class AsmGeneratedRoomSource(
             val titles = lines.mapNotNull { sectionMetadata.matchEntire(it)?.groupValues?.let { it[1] to it[2] } }.toMap()
             val sections = definitions.filterKeys { !it.endsWith("_End") }.map { (name, line) ->
                 val match = plm.matchEntire(name)
-                val roomId = roomLabel.matchEntire(name)?.groupValues?.get(1)?.toIntOrNull(16)
+                val roomId = (roomLabel.matchEntire(name) ?: authoredRoom.matchEntire(name))?.groupValues?.get(1)?.toIntOrNull(16)
                 val address = (line - 1 downTo 0).firstNotNullOfOrNull { origin.matchEntire(lines[it])?.groupValues?.get(1) }
                 AsmGeneratedRoomSection(
                     label = name,
                     lineIndex = line,
                     roomId = roomId,
-                    title = titles[name] ?: if (match != null) {
-                        "Source state ${match.groupValues[2]} · Objects (PLMs)"
-                    } else address?.let { "Bytes at $${it.take(2)}:${it.drop(2)}" } ?: "Unmapped build write",
+                    title = titles[name] ?: when {
+                        match != null -> "Source state ${match.groupValues[2]} · Objects (PLMs)"
+                        name.startsWith("SmeditObjects_") && name.contains("_Scroll_") -> "Scroll trigger commands"
+                        name.startsWith("SmeditObjects_") && name.contains("_Save_") -> "Save spawn record"
+                        name.startsWith("SmeditObjects_") && name.endsWith("_Plms") -> "Authored objects (PLMs)"
+                        else -> address?.let { "Bytes at $${it.take(2)}:${it.drop(2)}" } ?: "Unmapped build write"
+                    },
                 )
             }
             return AsmGeneratedRoomSource(lines, generatedAt, definitions, sections, names,

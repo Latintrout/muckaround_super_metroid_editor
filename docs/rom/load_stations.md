@@ -65,3 +65,22 @@ slots. Later records and all Ceres/Debug records are special-purpose.
 counts, fields, save PLM ownership, classifications, and nine direct engine
 consumers against the pinned disassembly and rebuilt ROM. `parityReport`
 includes this as check R-13.
+
+## Reciprocal ASM authoring
+
+Source-owned rooms can now pair `$B76F` placement rows with named seven-word
+spawn macros. The values live in the same authored Bank `$8F` buffer; Build
+resolves the fixed area/slot destination in bank `$80`, claims all fourteen bytes,
+and checks real Asar output against the room planner. The original table row is
+baseline only once adopted; competing edits there block the build.
+
+The record is shared across states. A GUI removal releases it only after the last
+state stops using the slot. Released source records remain explicit zero writes,
+and slots are never silently transferred to another room. Protected engine-owned
+slots, mismatched incoming doors, invalid widths and missing placement/spawn links
+fail closed. See [save-station authoring and batch checks](../asm/reference_workspace.md#reciprocal-save-station-spawns).
+
+Pointer-table offsets are canonical headerless PC offsets. `areaSavePointer()`
+must add the optional 512-byte copier header when reading `$80:C4B5`; record
+addresses already go through `snesToPc()`. Synthetic regression tests now cover
+both forms, all seven fields, table limits and complete record claims.

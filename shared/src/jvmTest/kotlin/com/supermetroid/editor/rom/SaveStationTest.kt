@@ -13,6 +13,23 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
  */
 class SaveStationTest {
 
+    @Test fun `load station pointer table and every spawn word honor copier headers`() {
+        val body = ByteArray(0x300000)
+        fun word(pc: Int, value: Int) { body[pc] = value.toByte(); body[pc + 1] = (value ushr 8).toByte() }
+        listOf(0xC4C5, 0xC5CF, 0xC6D9, 0xC81B, 0xC917, 0xCA2F, 0xCB2B, 0xCC19).forEachIndexed { area, ptr -> word(0x44B5 + area * 2, ptr) }
+        val fields = listOf(0x91F8, 0x8000, 7, 256, 512, 104, 0xFFE0)
+        fields.forEachIndexed { index, value -> word(0x44E1 + index * 2, value) }
+        for (header in listOf(0, 0x200)) {
+            val parser = RomParser(ByteArray(header) + body)
+            assertEquals(0x80C4C5, parser.readLoadStationListAddress(0))
+            assertEquals(19, parser.saveEntryCount(0))
+            val entry = parser.readSaveEntry(0, 2)!!
+            assertEquals(fields, entry.words())
+            assertEquals(header + 0x44E1, entry.pcOffset)
+            assertNull(parser.readSaveEntry(0, 19))
+        }
+    }
+
     @Test
     fun `read Crateria save entry 0`() {
         val rp = TestRomHelper.loadRomParser() ?: return

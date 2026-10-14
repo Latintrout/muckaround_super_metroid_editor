@@ -986,8 +986,19 @@ Editing a row directly in ASM or the scalar dialog changes that list and any
 states sharing the whole list. Equal rows in different lists are independent;
 editing one does not silently rewrite the others. Use **All states** in the room
 view to deliberately apply a change to every list. The scope indicator describes
-current membership: an identical item present once in every state shows All states,
+current membership: an identical object present once in every state shows All states,
 not a hidden per-object link.
+
+The inspector's **Add new PLMs to** preference defaults to **All states** and applies
+to items, stations, gates, door caps and scroll triggers/extensions in both backends.
+It is not an existing object's scope indicator. Each object's membership menu shows
+its actual coverage and offers **Edit this state**, **Edit all states**, **Apply to all
+states**, and explicit removal scopes. Normal edits preserve existing membership;
+an intentional local edit detaches a shared list. A broad edit refuses distinct
+objects/command streams or incompatible gate/door-cap collision geometry in another
+state. Save rows keep one shared spawn; gate body/shot-block rows move together in
+GUI transactions. Raw ASM edits still affect the list/resource explicitly edited,
+not every independently duplicated row.
 
 In single-state rooms, All states and This state have the same membership. Adding
 a condition shares its template's existing List; a subsequent state-local placement
@@ -1051,9 +1062,8 @@ the project's room-state/ownership metadata. Ordinary Project Save includes all
 dirty source banks and checks already-saved managed room blocks for cleanup.
 
 Current boundaries: this conversion supports existing rooms in projects without
-added rooms. Custom scroll-command authoring, changed resource links, conflicting
-original-source edits and arbitrary macro expressions still need review. Save
-station placement/removal (which also owns spawn data), mixed tile/PLM operations
+added rooms. Changed resource links, conflicting
+original-source edits and arbitrary macro expressions still need review. Mixed tile/PLM operations
 and whole-room reset are guarded until their compound source transactions exist.
 Original fixed-layout declarations retain their earlier count/address restriction;
 the appended managed lists support growth/shrinkage and state-local detachment.
@@ -1066,9 +1076,168 @@ Site states with the established ROM exporter, then exercises GUI edits, shared
 undo, a new condition, source-list growth, real Asar output and cache reuse. No test
 reads or modifies a user's live Sandbox project.
 
-Next: source-aware compound edits/custom scroll resources, a first asset-owned
+Next: other source-aware compound edits, initial room scroll tables, a first asset-owned
 graphics example, and stable source identities for project-created rooms; then
 extend the same authority contract to the rest of the room graph.
+
+### Reciprocal scroll-trigger commands
+
+Source-owned room objects now support the referenced command resource of a `$B703`
+scroll trigger. In a source-owned room, select its tile → **Edit commands** to use
+the screen grid; **ASM commands** opens the exact command declaration. **ASM** on
+the object still opens its placement row. Creating a scroll behavior writes the
+placement and commands in one shared source/undo transaction.
+
+```asm
+macro SmeditObjects_ACB3_Scroll_1()
+    db $00, $01 ; Screen (1, 1) → Blue (normal)
+    db $03, $02 ; Screen (2, 2) → Green (open + lower view)
+    db $80 ; End of scroll commands
+endmacro
+
+; Inside each affected state's object-list macro:
+    %PLMPopEntry($B703, $04, $05, SmeditObjects_ACB3_Scroll_1&$FFFF)
+```
+
+Screen IDs in code are zero-based row-major indices; the GUI and generated comments
+use one-based screen coordinates. Each command is a byte screen index plus a byte
+scroll value (`0` red, `1` blue, `2` green); `$80` terminates the stream. This is
+**runtime trigger behavior**, not the room's initial scroll table or a simulation
+of the running camera. The grid uses the editor's configured font sizes and can
+scroll horizontally instead of shrinking cells in wide rooms.
+
+Command values are authoritative in the authored Bank `$8F` source. A named
+reference has no physical pointer until Build: its numeric preview parameter is
+an internal placeholder, not an address. The typed preview cache retains the
+resource name and verifies its body and room bounds against current source.
+Build allocates each referenced identity once in bank `$8F`, emits its label and
+macro invocation, then assembles the referencing PLM lists. Exact command bytes,
+terminators, list bytes, state pointers, complete allocation claims, and other
+write owners are checked against the established planner. No command values are
+duplicated in project JSON or reapplied as a second post-compile room patch.
+
+GUI edits target **this trigger in this state**. Shared lists and command resources
+are copied on write so another trigger/state is not changed implicitly. Editing a
+shared command macro directly in ASM updates all its references. Independent
+equal streams are not deduplicated by their contents. Unused supported owned
+macros are pruned; helpers mentioned by custom source (including disabled modules)
+remain protected. Source Save refreshes screen/value annotations and preserves
+handwritten notes. Stale open GUI drafts refuse to overwrite newer source.
+
+Existing custom room/state command maps migrate into named resources with their
+sharing preserved; source undo restores their legacy metadata. Original numeric
+ROM command pointers remain intact until a GUI edit creates a private named
+resource. Verified `RoomPLM_*` declarations are read from current project source,
+so supported literal ASM edits are visible immediately. Unknown hack pointers use
+the loaded ROM; a changed or unsupported known declaration does **not** silently
+fall back to old ROM bytes. Matching an address alone does not establish source
+ownership: a hack's differing ROM commands are retained when the source baseline
+is untouched, while changes on both sides require review. Build verifies original
+fixed pointers against actual compiler labels and command bytes; a mismatch
+blocks the build with guidance to import a named resource. Original declaration
+resizing is not a new general room-source layout guarantee; use the relocatable
+named form for GUI growth.
+
+The bounded codec rejects missing/misplaced terminators, non-byte expressions,
+invalid values, out-of-room screens, duplicate screen writes that the grid would
+otherwise discard, cross-room resource references, and ambiguous placements.
+An empty named stream is a valid no-op and remains visible as an empty-behavior
+diagnostic. Invalid drafts remain saveable, but source-owned edits/builds fail
+closed. The synthetic tests cover source/GUI round trips, shared-state isolation,
+undo, save/reopen, cache validation, growth/removal, header handling and conflicts;
+the strict real-Asar integration checks migration, growth, empty streams, actual
+pointers and preservation of a ROM-only patch in a disposable project.
+
+### Reciprocal save-station spawns
+
+Source-owned existing rooms now support save-station PLMs **and their paired
+load-station records**. In the tile inspector use **Add Station / Gate → Save
+Station**, then **Apply Spawn**, **Reset/Auto**, or **Spawn ASM** on the station.
+The ordinary **ASM** link still opens its placement. The spawn link adopts an
+unchanged native record on demand, then opens the authoritative authored fields.
+No extra toolbar or second editable generated-data page is introduced.
+
+```asm
+macro SmeditObjects_91F8_Save_0_2()
+    dw $91F8 ; Room · bank $8F
+    dw $8916 ; Incoming door · bank $83 (example: must actually enter this room)
+    dw $0000 ; Door BTS
+    dw $0000 ; Camera X
+    dw $0000 ; Camera Y
+    dw $0068 ; Samus Y · screen top
+    dw $FFE0 ; Samus X · screen center (-32)
+endmacro
+
+; In a state's PLM list: this parameter is a slot, NOT the record's address.
+    %PLMPopEntry($B76F, $08, $08, $8002) ; Save slot 2 in the room's area
+```
+
+The name encodes owning room, area, and slot. The seven words are one fourteen-byte
+bank-`$80` record; authored values live beside the PLM macros in the same Bank
+`$8F` source buffer, while the checked build placement invokes the macro at the
+actual load-table slot. Its original Bank `$80` declaration is baseline data,
+not a competing editable authority after adoption. Editing that baseline record
+too produces an ownership conflict before the authored record can overwrite it.
+
+The spawn is **shared across room states** because the engine indexes by area
+and slot, not by state. State-local placement still detaches the PLM list. Removing
+one state's station keeps its spawn while another state references it; removing
+the last reference through the GUI writes an explicit seven-zero-word released
+record. That declaration intentionally survives list cleanup, so reopening or
+rebuilding cannot resurrect the original slot. Raw ASM can retain an independent
+nonzero checkpoint record after removing its PLM; that is an explicit source
+choice, not an automatic deletion. Released source slots remain claimed by their
+room and may be reused there, not silently transferred to another room.
+
+Ordinary source saves are limited to areas `0..5` and indices `0..7`. Allocation
+reserves occupied native records, other rooms' authored records, and legacy GUI
+overrides. A matching room pointer is insufficient to claim the gunship: an occupied
+native record must also have a verified ordinary save PLM for that slot. Elevator,
+Ceres, debug, and other engine-owned destinations are not spare save capacity.
+The incoming door must enter the owning room; cross-area save migration is still
+a separate compound operation. Duplicate owners, a PLM pointing at a released or
+missing spawn, wrong rooms/doors, altered record widths and out-of-word values
+fail closed. Invalid drafts remain saveable and a last-good preview is not an
+editable current model.
+
+Placement plus spawn authoring is one source/undo transaction. **Apply Spawn** also
+updates camera and Samus fields in one undo step. Negative offsets use ordinary
+sixteen-bit two's-complement values; out-of-range GUI input is rejected rather
+than wrapped. Unchanged scalar spelling, CRLF, symbolic fields and handwritten
+notes survive GUI edits. Changing a symbolic field visually requires first making
+that expression a supported literal in ASM. Native door BTS is preserved when
+creating/adopting a record, and remains directly editable in authored source.
+Legacy GUI spawn overrides migrate into source with metadata restored by undo;
+there is no duplicate JSON spawn value for an adopted slot.
+
+Typed caches verify current save declarations, native ownership, area/state links
+and the base ROM. Builds claim all fourteen record bytes (including unchanged
+bytes), assemble the actual macro, check its byte count and exact planner output,
+and preserve the post-compile ROM-patch path. The regression tests cover headers,
+negative offsets, notes/symbols, slot protections, shared-state lifetime, stale and
+invalid previews, undo/reopen and mixed ASM/ROM-patch output. Header coverage also
+fixed a pre-existing parser bug: the load-station pointer-table read must include
+the copier-header offset, just like its target-record reads.
+
+#### Batch acceptance checks
+
+1. In an already source-owned room, add a save station through the tile inspector.
+   Select it, open **Spawn ASM**, change a Samus offset and verify the inspector.
+2. Change both camera and spawn fields with **Apply Spawn**; one Undo restores both.
+   Save/reopen and confirm the same values return without a full IDE index wait.
+3. Duplicate the room state, remove the station from one state, then from its last
+   state. Verify the first removal keeps the shared record and the last releases it;
+   Undo restores the station and record together.
+4. Build/Run with an unrelated existing ROM patch enabled. In the emulator, test
+   saving and resuming from the station on a suitable floor (the PLM does not build
+   room geometry for you).
+5. Batch-check energy/missile refill stations, map stations, gate color/direction,
+   door-cap variants and scroll extensions. These use the same direct PLM-row lens;
+   only save and scroll triggers require the new linked-resource codecs.
+6. Leave **Add new PLMs to → All states** selected and verify new placements appear
+   in every branch. Use an object's membership menu to **Edit this state**, recolor
+   a gate/door cap, and verify the sibling is unchanged. Undo restores the complete
+   operation. Distinct sibling variants should block **Apply to all states**.
 
 ## Next layers
 

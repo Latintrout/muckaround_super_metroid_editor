@@ -17,6 +17,14 @@ internal data class AsmPlmPlacementSnapshot(
     val reason: String,
 )
 
+/** Used only immediately after an explicit migration, never as a stale-selection fallback.
+ * Custom scroll IDs become named references (with an unallocated preview parameter). */
+internal fun placementAfterObjectMigration(entry: RomParser.PlmEntry, current: List<RomParser.PlmEntry>): RomParser.PlmEntry? {
+    current.singleOrNull { it == entry }?.let { return it }
+    if (entry.id != 0xB703 || (entry.param and 0xFF00) != 0xCC00) return null
+    return current.singleOrNull { it.id == entry.id && it.x == entry.x && it.y == entry.y && it.param == 0 }
+}
+
 internal fun AsmPlmDocument.placementTarget(entry: RomParser.PlmEntry): AsmPlmPlacementTarget {
     // Identical types can occur many times in one list. Never navigate by ID alone or guess
     // between identical records: source order can change independently of the room preview.

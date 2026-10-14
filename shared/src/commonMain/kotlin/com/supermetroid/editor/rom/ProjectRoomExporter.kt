@@ -11,7 +11,13 @@ import kotlin.math.min
 class ProjectRoomExportException(message: String) : IllegalStateException(message)
 
 /** Ephemeral decoded source input. Never serialized as another project object list. */
-data class SourcePlmResource(val identity: String, val entries: List<RomParser.PlmEntry>)
+data class SourcePlmResource(
+    val identity: String,
+    val entries: List<RomParser.PlmEntry>,
+    /** Row index -> referenced source resource. Numeric preview parameters are not build pointers. */
+    val scrollReferences: Map<Int, SourceScrollResource> = emptyMap(),
+    val saves: List<SourceSaveResource> = emptyList(),
+)
 
 data class ProjectRoomExportResult(
     val roomsPatched: Set<String>,
@@ -21,6 +27,8 @@ data class ProjectRoomExportResult(
     val newRoomIds: Map<String, Int> = emptyMap(),
     /** Stable project room ID -> allocated DoorDefs, in BTS/list order. */
     val newRoomDoorDefPtrs: Map<String, List<Int>> = emptyMap(),
+    /** Complete fixed records, including unchanged words, must have one source owner. */
+    val sourceSaveClaims: List<Pair<Int, String>> = emptyList(),
 )
 
 /**
@@ -48,6 +56,7 @@ class ProjectRoomExporter(
     }
 
     private val allocations = mutableListOf<RomAllocation>()
+    private val sourceSaveClaims = mutableListOf<Pair<Int, String>>()
     private var stateGraphRedirectRoutinePtr: Int? = null
     private var statePredicateRoutinePtr: Int? = null
     private var stateExpressionInterpreterPtr: Int? = null
@@ -75,6 +84,11 @@ class ProjectRoomExporter(
     }
 
     fun exportRooms(): ProjectRoomExportResult {
+        val saves = sourcePlmSets.values.flatMap { it.values.flatMap(SourcePlmResource::saves) }
+        saves.groupBy { it.area to it.slot }.forEach { (_, references) ->
+            require(references.distinct().size == 1) { "Two source owners claim the same save slot." }
+            validateSourceSaveOwnership(references.first(), romParser)
+        }
         val roomsPatched = linkedSetOf<String>()
         val materialized = ProjectNewRoomMaterializer(
             project = project,
@@ -277,6 +291,20 @@ class ProjectRoomExporter(
                     roomsPatched.add(roomKey)
                 }
             }
+            if (roomEdits.asmPlmSourceVersion != 0) {
+                for (save in sourcePlmSets.getValue(roomId).values.flatMap(SourcePlmResource::saves).distinct()) {
+                    require(save.ownerRoomId == roomId && save.area == (roomEdits.roomHeaderChange?.area ?: room.area)) {
+                        "Save source area/room ownership changed; cross-area save migration needs a compound source operation."
+                    }
+                    require(roomEdits.saveStationSpawns.none { it.area == save.area && it.saveIndex == save.slot }) {
+                        "Save slot has both GUI overrides and authored source."
+                    }
+                    val base = requireNotNull(romParser.readSaveEntry(save.area, save.slot))
+                    save.bytes().copyInto(romData, base.pcOffset)
+                    sourceSaveClaims += base.pcOffset to save.identity
+                    roomsPatched.add(roomKey)
+                }
+            }
         }
 
         return ProjectRoomExportResult(
@@ -284,6 +312,7 @@ class ProjectRoomExporter(
             allocations = allocations.toList(),
             newRoomIds = materialized.roomIdsByProjectId,
             newRoomDoorDefPtrs = materialized.doorDefPtrsByProjectId,
+            sourceSaveClaims = sourceSaveClaims,
         )
     }
 
@@ -292,20 +321,53 @@ class ProjectRoomExporter(
         require(inputs.keys == edits.states.map { it.id }.toSet()) { "Room $roomKey source state membership changed." }
         val states = romParser.inspectRoomStates(roomId).states
         val pointers = mutableMapOf<String, Pair<Int, List<RomParser.PlmEntry>>>()
+        val scrollPointers = mutableMapOf<String, Pair<Int, SourceScrollResource>>()
         for (state in edits.states) {
             val resource = inputs.getValue(state.id)
+            val room = requireNotNull(romParser.readRoomHeader(roomId))
+            val screenCount = (edits.roomHeaderChange?.width ?: room.width) * (edits.roomHeaderChange?.height ?: room.height)
+            for (entry in resource.entries.filter { it.id == 0xB76F }) {
+                val slot = entry.param and 0xFF
+                require(slot in 0..7) { "Save PLM slot is outside 0–7 (runtime masks indices with \$0007)." }
+                val area = edits.roomHeaderChange?.area ?: room.area
+                val owned = resource.saves.singleOrNull { it.area == area && it.slot == slot }
+                require(owned?.cleared != true) { "Save PLM references a released spawn slot." }
+                if (owned == null && edits.saveStationSpawns.none { it.area == area && it.saveIndex == slot && !it.clearSlot }) {
+                    val base = requireNotNull(romParser.readSaveEntry(area, slot))
+                    require(base.roomId == roomId) { "New save PLMs need a paired authored spawn record; add the station in the GUI first." }
+                    validateSourceSaveOwnership(SourceSaveResource("Original save", roomId, area, slot, base.words()), romParser)
+                }
+            }
+            require(resource.scrollReferences.keys.all { it in resource.entries.indices && resource.entries[it].id == 0xB703 }) {
+                "${resource.identity} has a scroll reference on a non-trigger row."
+            }
+            val entries = resource.entries.mapIndexed { index, entry ->
+                val scroll = resource.scrollReferences[index] ?: return@mapIndexed entry
+                validateScrollCommands(scroll.commands, screenCount)
+                val old = scrollPointers[scroll.identity]
+                val ptr = if (old != null) {
+                    require(old.second == scroll) { "Shared scroll source ${scroll.identity} has inconsistent values." }
+                    old.first
+                } else {
+                    val allocation = roomDataAllocator.allocate(serializeScrollCommands(scroll.commands), listOf(0x8F),
+                        "Room $roomKey source scrolls ${scroll.identity}")
+                        ?: failExport("Room $roomKey scroll source does not fit in bank \$8F")
+                    (romParser.pcToSnes(allocation.pcOffset) and 0xFFFF).also { scrollPointers[scroll.identity] = it to scroll }
+                }
+                entry.copy(param = ptr)
+            }
             require(resource.entries.all { it.id in 1..0xFFFF && it.x in 0..255 && it.y in 0..255 && it.param in 0..0xFFFF }) {
                 "${resource.identity} requires standard six-byte PLM records."
             }
             val existing = pointers[resource.identity]
             val pointer = if (existing != null) {
-                require(existing.second == resource.entries) { "Shared object source ${resource.identity} has inconsistent values." }
+                require(existing.second == entries) { "Shared object source ${resource.identity} has inconsistent values." }
                 existing.first
             } else {
-                val bytes = RomParser.serializePlmSet(resource.entries).map(Int::toByte).toByteArray()
+                val bytes = RomParser.serializePlmSet(entries).map(Int::toByte).toByteArray()
                 val allocation = roomDataAllocator.allocate(bytes, listOf(0x8F), "Room $roomKey source PLMs ${resource.identity}")
                     ?: failExport("Room $roomKey object source does not fit in bank \$8F")
-                (romParser.pcToSnes(allocation.pcOffset) and 0xFFFF).also { pointers[resource.identity] = it to resource.entries }
+                (romParser.pcToSnes(allocation.pcOffset) and 0xFFFF).also { pointers[resource.identity] = it to entries }
             }
             val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
                 ?: failExport("Room $roomKey source state ${state.id} has no state record")

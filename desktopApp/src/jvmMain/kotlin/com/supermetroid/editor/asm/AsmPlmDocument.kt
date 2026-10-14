@@ -9,7 +9,7 @@ internal data class AsmPlmDocument(
     val lineIndex: Int,
     val records: List<Record>,
 ) {
-    data class Record(val entry: RomParser.PlmEntry, val fields: List<IntRange>)
+    data class Record(val entry: RomParser.PlmEntry, val fields: List<IntRange>, val scrollResource: String? = null)
     val entries: List<RomParser.PlmEntry> get() = records.map { it.entry }
 
     /** Only changed scalar tokens are rewritten. All other bytes (including comments/CRLF) survive. */

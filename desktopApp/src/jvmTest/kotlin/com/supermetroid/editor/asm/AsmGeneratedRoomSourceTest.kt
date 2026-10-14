@@ -8,6 +8,22 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AsmGeneratedRoomSourceTest {
+    @Test fun `save placement reports are grouped with their owning room not mistaken for a second editable bank`() {
+        val save = com.supermetroid.editor.rom.SourceSaveResource("SmeditObjects_91F8_Save_0_2", 0x91F8, 0, 2,
+            listOf(0x91F8, 0x8000, 0, 0, 0, 104, 0xFFE0))
+        val report = assertNotNull(AsmGeneratedRoomSource.parse(AsmRoomSaveTable(save, 0x44E1).renderSource(), "test"))
+        assertEquals(0x91F8, report.sections.single().roomId)
+        assertEquals("Save spawn record", report.sections.single().title)
+    }
+    @Test fun `an entirely typed authored plan still has a report with room owned scroll and object sections`() {
+        val scroll = AsmRoomScrollTable(com.supermetroid.editor.rom.SourceScrollResource("SmeditObjects_ACB3_Scroll_1",
+            listOf(com.supermetroid.editor.data.ScrollCommand(0, 1))), 0x7F000)
+        val objects = AsmRoomPlmTable("SmeditObjects_ACB3_State_73746174652d31_Plms", 0x7F010,
+            listOf(RomParser.PlmEntry(0xB703, 1, 2, 0xF000)), listOf(0x7B014), "SmeditObjects_ACB3_State_73746174652d31")
+        val report = assertNotNull(AsmGeneratedRoomSource.parse(scroll.renderSource() + objects.renderSource(), "test"))
+        assertEquals(listOf("Scroll trigger commands", "Authored objects (PLMs)"), report.sections.map { it.title })
+        assertTrue(report.sections.all { it.roomId == 0xACB3 })
+    }
     @Test
     fun `actual emitted tables expose their room identity and symbolic references`() {
         val table = AsmRoomPlmTable(

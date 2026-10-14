@@ -1033,7 +1033,7 @@ class RomParser(
 
     private fun areaSavePointer(area: Int): Int? {
         if (area !in 0..7) return null
-        val ptrOff = SAVE_TABLE_PTR_PC + area * 2
+        val ptrOff = romStartOffset + SAVE_TABLE_PTR_PC + area * 2
         if (ptrOff + 1 >= romData.size) return null
         return (romData[ptrOff].toInt() and 0xFF) or ((romData[ptrOff + 1].toInt() and 0xFF) shl 8)
     }
@@ -1897,7 +1897,7 @@ class RomParser(
             GatePlmDef("Gate: Green (right)",  0xC836, 0x0A),
             GatePlmDef("Gate: Yellow (left)",  0xC836, 0x0C),
             GatePlmDef("Gate: Yellow (right)", 0xC836, 0x0E),
-            GatePlmDef("Gate Connector",       0xC82A, 0x8000),
+            GatePlmDef("Gate Body (closed)",   0xC82A, 0x8000),
         )
 
         fun stationNameForPlm(plmId: Int): String? =
@@ -1905,12 +1905,15 @@ class RomParser(
 
         fun gateNameForPlm(plmId: Int, param: Int): String? {
             if (plmId == 0xC836) return GATE_PLMS.find { it.param == (param and 0xFF) }?.name
-            if (plmId == 0xC82A) return "Gate Connector"
+            if (plmId == 0xC82A) return "Gate Body (closed)"
+            if (plmId == 0xC826) return "Gate Body (open)"
+            if (plmId == 0xC832) return "Gate Body (up, closed)"
+            if (plmId == 0xC82E) return "Gate Body (up, open)"
             return null
         }
 
         fun isStationPlm(plmId: Int): Boolean = STATION_PLMS.any { it.plmId == plmId }
-        fun isGatePlm(plmId: Int): Boolean = plmId == 0xC836 || plmId == 0xC82A
+        fun isGatePlm(plmId: Int): Boolean = plmId in listOf(0xC826, 0xC82A, 0xC82E, 0xC832, 0xC836, 0xC83A)
         fun isDoorCapPlm(plmId: Int): Boolean = doorCapColor(plmId) != null
         fun isScrollPlm(plmId: Int): Boolean =
             plmId == 0xB703 || plmId == 0xB63B || plmId == 0xB647 ||

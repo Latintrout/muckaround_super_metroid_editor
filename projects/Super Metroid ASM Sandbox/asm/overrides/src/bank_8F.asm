@@ -15701,6 +15701,7 @@ macro SmeditObjects_ACB3_List_1()
     %PLMPopEntry($EEE7, $1A, $0A, $005A) ; PLM: Bomb (Visible)
     %PLMPopEntry($EEE3, $06, $29, $005D) ; PLM: Power Bomb (Visible)
     %PLMPopEntry($EF23, $1C, $09, $0053) ; PLM: Morph Ball (Visible)
+    %PLMPopEntry($B6DF, $0D, $11, $0000) ; PLM: Energy Refill
     dw $0000 ; End of PLM list
 endmacro
 

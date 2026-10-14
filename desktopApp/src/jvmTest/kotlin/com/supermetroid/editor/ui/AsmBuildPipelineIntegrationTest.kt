@@ -23,6 +23,7 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.RomWriteKind
 import com.supermetroid.editor.rom.ensureStateManifest
 import com.supermetroid.editor.rom.projectRoomStateCondition
+import com.supermetroid.editor.rom.words
 import java.io.File
 import java.util.Base64
 import org.junit.jupiter.api.io.TempDir
@@ -33,10 +34,181 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 /** Explicit clean ROM/source fixtures; every project and compiler artifact lives in @TempDir. */
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
+
+    @Test fun `paired save PLM and spawn assemble atomically preserve patches and release only the final state`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(fixture.projectFile, project)
+        editor.asmPlmSourceBridge = bridge
+        editor.loadRoom(0x91F8, parser, parser.readRoomHeader(0x91F8)!!)
+        editor.addPlm(0xB76F, 8, 8, 0x8000)
+        val station = assertNotNull(editor.workingPlms.singleOrNull { it.id == 0xB76F }, editor.statusMessage)
+        val slot = station.param and 255
+        assertEquals(2, slot, "Crateria's gunship and original save retain their slots")
+        val stateId = editor.currentPlmStateId()!!
+        editor.updateSaveStationSpawnFields(0, slot, -32, 104, 0, 0, parser)
+        val authored = bridge.saveSpawn(0x91F8, 0, slot)!!
+        val legacy = SmEditProject("test.sfc")
+        val legacyRoom = legacy.getOrCreateRoom(0x91F8)
+        legacyRoom.ensureStateManifest(parser)
+        legacyRoom.plmChanges += PlmChange("add", station.id, station.x, station.y, station.param)
+        val w = authored.words
+        legacyRoom.saveStationSpawns += com.supermetroid.editor.data.SaveStationSpawnChange(0, slot, w[0], w[1], w[3], w[4], w[5], w[6])
+        val oracle = assertNotNull(RomExporter(legacy, parser).build())
+        project.patches += SmPatch("save-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        val logs = mutableListOf<String>()
+        suspend fun build(): RomBuildResult {
+            assertTrue(workspace.saveAllSources())
+            logs.clear()
+            return assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+        }
+        fun verify(result: RomBuildResult, expected: List<Int>) {
+            val built = RomParser(result.resultRom)
+            assertEquals(expected, built.readSaveEntry(0, slot)!!.words())
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertTrue(result.writeReport.writes.any { it.kind == RomWriteKind.ASM_ROOM && it.label.contains("Save_0_$slot") && it.bytes.size == 14 })
+            assertEquals(parser.readSaveEntry(0, 0)!!.words(), built.readSaveEntry(0, 0)!!.words(), "Gunship record untouched")
+            assertEquals(parser.readSaveEntry(0, 1)!!.words(), built.readSaveEntry(0, 1)!!.words(), "Other room's save untouched")
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        val first = build()
+        verify(first, authored.words)
+        assertEquals(RomParser(oracle.resultRom).readSaveEntry(0, slot)!!.words(), RomParser(first.resultRom).readSaveEntry(0, slot)!!.words())
+        assertEquals(RomParser(oracle.resultRom).parseRoomStatesWithData(0x91F8).map { RomParser(oracle.resultRom).parsePlmSet(it.plmSetPtr) },
+            RomParser(first.resultRom).parseRoomStatesWithData(0x91F8).map { RomParser(first.resultRom).parsePlmSet(it.plmSetPtr) })
+        val otherState = project.rooms.getValue("91F8").states.first { it.id != stateId }.id
+        assertTrue(project.rooms.getValue("91F8").states.all { branch ->
+            bridge.managedView(0x91F8, branch.id).document!!.entries.count { it == station } == 1
+        }, "A default GUI addition includes every state, without duplicates")
+        editor.removePlm(station.x, station.y, station.id, ItemStateScope.THIS_STATE)
+        assertFalse(bridge.saveSpawn(0x91F8, 0, slot)!!.cleared)
+        verify(build(), authored.words)
+        bridge.editSaveStation(0x91F8, otherState, { it == station }, null, authored, allStates = true)
+        assertTrue(bridge.saveSpawn(0x91F8, 0, slot)!!.cleared)
+        verify(build(), List(7) { 0 })
+        assertTrue(project.rooms.getValue("91F8").saveStationSpawns.isEmpty())
+    }
+
+    @Test fun `verified original scroll source edits agree with real Asar and resizing is blocked before assembly`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val catalog = AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser)
+        assertEquals(0x92B0, catalog.symbols["RoomPLM_LandingSite_0"])
+        val checkedStreams = mutableSetOf<Int>()
+        for ((pointer, consumers) in catalog.consumers) {
+            for (consumer in consumers.distinctBy { it.roomId }) {
+                val header = assertNotNull(parser.readRoomHeader(consumer.roomId))
+                for (trigger in parser.parsePlmSet(pointer).filter { it.id == 0xB703 }) {
+                    val decoded = com.supermetroid.editor.asm.AsmScrollCommandSource.original(catalog.originalText,
+                        catalog.symbols, trigger.param, parser, header.width * header.height, catalog.originalText)
+                    assertEquals(RomParser.decodeScrollCommands(parser, trigger.param, header.width).map { (screen, _, value) ->
+                        com.supermetroid.editor.data.ScrollCommand(screen, value)
+                    }, decoded, "${consumer.roomName}: ${trigger.param.toString(16)}")
+                    checkedStreams += trigger.param
+                }
+            }
+        }
+        assertTrue(checkedStreams.size > 100, "Cover the vanilla command graph, not only Landing Site")
+        val bridge = AsmPlmSourceBridge(catalog, workspace) { project }
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val stateId = project.rooms.getValue("91F8").states.first { state ->
+            bridge.managedView(0x91F8, state.id).document!!.entries.any { it.id == 0xB703 }
+        }.id
+        val trigger = bridge.managedView(0x91F8, stateId).document!!.entries.single { it.id == 0xB703 }
+        val text = bridge.sourceText()
+        val declaration = Regex("(?m)^RoomPLM_LandingSite_0:\\r?\\n[^\\r\\n]+").find(text)!!
+        val changed = declaration.value.replace("${'$'}13,${'$'}01", "${'$'}13,${'$'}00")
+        assertNotEquals(declaration.value, changed)
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, text.replaceRange(declaration.range, changed))
+        assertEquals(listOf(com.supermetroid.editor.data.ScrollCommand(0x13, 0)), bridge.scrollCommands(0x91F8, stateId, trigger))
+        assertTrue(workspace.saveAllSources())
+        val logs = mutableListOf<String>()
+        val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+        val built = RomParser(result.resultRom)
+        assertEquals(0, RomParser.decodeScrollCommands(built, trigger.param, 9).single().third)
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, bridge.sourceText().replace(changed, changed.replace("${'$'}80", "${'$'}01,${'$'}01,${'$'}80")))
+        assertTrue(workspace.saveAllSources())
+        logs.clear()
+        assertNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path))
+        assertTrue(logs.any { it.contains("original stream resizing") })
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
+
+    @Test fun `authored scroll commands migrate grow and assemble with real pointers without losing ROM patches`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val room = project.getOrCreateRoom(0xACB3)
+        val initialCommands = listOf(com.supermetroid.editor.data.ScrollCommand(0, 1), com.supermetroid.editor.data.ScrollCommand(3, 2))
+        room.customScrollCommands["cmd_0"] = initialCommands.toMutableList()
+        room.plmChanges += PlmChange("add", 0xB703, 4, 5, 0xCC00)
+        project.patches += SmPatch(id = "scroll-test-patch", name = "Independent test byte", enabled = true,
+            writes = mutableListOf(PatchWrite(offset = 0x2FFFF0, bytes = listOf(0x42))))
+        val oracle = assertNotNull(RomExporter(ProjectFileService.snapshotProject(project), parser).build())
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        bridge.migrateRoom(room.roomId, "Bubble Mountain")
+        val stateId = room.states.single().id
+        val logs = mutableListOf<String>()
+        fun build(): RomBuildResult {
+            logs.clear()
+            return assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+        }
+        fun verify(result: RomBuildResult, commands: List<com.supermetroid.editor.data.ScrollCommand>) {
+            val built = RomParser(result.resultRom)
+            val entries = built.parsePlmSet(built.parseRoomStatesWithData(room.roomId).single().plmSetPtr)
+            val trigger = entries.single { it.id == 0xB703 && it.x == 4 && it.y == 5 }
+            assertTrue(trigger.param in 0x8000..0xFFFF)
+            assertEquals(commands, RomParser.decodeScrollCommands(built, trigger.param, 2).map { (screen, _, value) ->
+                com.supermetroid.editor.data.ScrollCommand(screen, value)
+            })
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertTrue(result.writeReport.writes.any { it.kind == RomWriteKind.ASM_ROOM })
+            val generated = AsmBuildArtifactRepository().loadGeneratedRooms(fixture.projectFile.path)!!
+            assertTrue(generated.lines.any { it.contains("%SmeditObjects_ACB3_Scroll_") })
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        assertTrue(workspace.saveAllSources())
+        val first = build()
+        verify(first, initialCommands)
+        val built = RomParser(first.resultRom)
+        val oracleParser = RomParser(oracle.resultRom)
+        val firstEntries = built.parsePlmSet(built.parseRoomStatesWithData(room.roomId).single().plmSetPtr)
+        val oracleEntries = oracleParser.parsePlmSet(oracleParser.parseRoomStatesWithData(room.roomId).single().plmSetPtr)
+        assertEquals(oracleEntries.map { if (it.id == 0xB703) it.copy(param = 0) else it }, firstEntries.map { if (it.id == 0xB703) it.copy(param = 0) else it })
+        // Raw ASM updates the preview; then a GUI edit grows the same semantic resource.
+        workspace.updateSourceEditText(PLM_SOURCE_FILE, bridge.sourceText().replace("db ${'$'}00, ${'$'}01", "db ${'$'}00, ${'$'}00"))
+        val trigger = bridge.managedView(room.roomId, stateId).document!!.entries.single { it.id == 0xB703 }
+        assertEquals(0, bridge.scrollCommands(room.roomId, stateId, trigger).first().scrollValue)
+        val grown = listOf(com.supermetroid.editor.data.ScrollCommand(0, 0), com.supermetroid.editor.data.ScrollCommand(1, 1),
+            com.supermetroid.editor.data.ScrollCommand(2, 2), com.supermetroid.editor.data.ScrollCommand(3, 1))
+        bridge.editScroll(room.roomId, stateId, 4, 5, grown)
+        assertTrue(workspace.saveAllSources())
+        verify(build(), grown)
+        // Empty streams are legitimate no-ops, not truncated data; preserve the terminator.
+        bridge.editScroll(room.roomId, stateId, 4, 5, emptyList())
+        assertTrue(workspace.saveAllSources())
+        verify(build(), emptyList())
+    }
 
     @Test
     fun `single-state Bubble Mountain stays simple then grows shared state source with real Asar parity`() = runBlocking {

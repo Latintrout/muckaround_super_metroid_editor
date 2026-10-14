@@ -2,6 +2,7 @@ package com.supermetroid.editor.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.asm.AsmPlmSourceBridge
 import com.supermetroid.editor.data.CustomItemDef
@@ -20,6 +21,8 @@ import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.SaveStationSpawnChange
 import com.supermetroid.editor.data.ScrollChange
 import com.supermetroid.editor.data.ScrollCommand
+import com.supermetroid.editor.rom.SourceSaveResource
+import com.supermetroid.editor.rom.words
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.SmPatch
 import com.supermetroid.editor.data.StateDataChange
@@ -261,6 +264,9 @@ private data class ItemScopeSnapshot(
     val commonChanges: List<PlmChange>,
     val stateChanges: Map<String, List<PlmChange>>,
     val workingPlms: List<RomParser.PlmEntry>,
+    val saveSpawns: List<SaveStationSpawnChange>,
+    val commonScrollCommands: Map<String, List<ScrollCommand>>,
+    val stateScrollCommands: Map<String, Map<String, List<ScrollCommand>>>,
 )
 
 private data class ItemScopeUndo(
@@ -312,6 +318,7 @@ class EditorState(
     private val pendingPlmAdds = mutableListOf<PlmChange>()
     private val pendingPlmRemoves = mutableListOf<PlmChange>()
     private var pendingAllStateItemBefore: ItemScopeSnapshot? = null
+    private var pendingPlmGeometry: ByteArray? = null
     private val itemScopeSnapshots = java.util.IdentityHashMap<EditOperation, ItemScopeUndo>()
     private val layoutEditScopes = mutableMapOf<String, LayoutEditScope>()
     private var pendingLayoutEditAction: (() -> Unit)? = null
@@ -351,9 +358,10 @@ class EditorState(
     /** Stable project state identity; new/reordered states do not have a unique ROM source index. */
     var currentStateId by mutableStateOf<String?>(null)
         private set
-    /** Scope used when collectible items are added or removed. */
-    var itemEditScope by mutableStateOf(ItemStateScope.THIS_STATE)
+    /** Placement preference only. Existing objects keep their observed membership. */
+    var itemEditScope by mutableStateOf(ItemStateScope.ALL_STATES)
         private set
+    private val plmEditScopeOverrides = mutableStateMapOf<String, ItemStateScope>()
     private var currentRomParser: RomParser? = null
     private var dirtyValue by mutableStateOf(false)
     private var projectDirtyRevision = 0L
@@ -583,6 +591,7 @@ class EditorState(
     val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
     internal var asmPlmSourceBridge by mutableStateOf<AsmPlmSourceBridge?>(null)
     private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, Pair<String, String>>()
+    private var linkedObjectPreviewRevision: Triple<Int, String?, String>? = null
     internal var plmSourceMigrationProblem: String? = null
         private set
     internal var objectPreviewLoading by mutableStateOf(false)
@@ -622,6 +631,8 @@ class EditorState(
             return false
         }
         return runCatching {
+            val view = bridge.managedView(currentRoomId, stateId)
+            require(view.problem == null) { view.problem ?: "Invalid room source; resolve it in ASM before visual editing." }
             val before = bridge.sourceText()
             action(bridge, stateId)
             val after = bridge.sourceText()
@@ -672,13 +683,17 @@ class EditorState(
             }
             objectPreviewProblem = view.problem
             val entries = view.document?.entries.orEmpty()
-            if (_workingPlms != entries) {
+            val revision = Triple(currentRoomId, stateId, requireNotNull(asmPlmSourceBridge).sourceText())
+            val sourceChanged = linkedObjectPreviewRevision != revision
+            linkedObjectPreviewRevision = revision
+            if (_workingPlms != entries || sourceChanged) {
                 _workingPlms.clear()
                 _workingPlms.addAll(entries)
-                _editVersionState.value++
+                _editVersionState.value++ // Referenced command values can change without changing a PLM row.
             }
             return
         }
+        linkedObjectPreviewRevision = null
         objectPreviewProblem = null
         val pointer = currentPlmSourcePointer() ?: return
         val bridge = asmPlmSourceBridge ?: return
@@ -3618,8 +3633,10 @@ class EditorState(
         pendingPlmAdds.clear()
         pendingPlmRemoves.clear()
         pendingAllStateItemBefore = null
+        pendingPlmGeometry = null
         itemScopeSnapshots.clear()
-        itemEditScope = ItemStateScope.THIS_STATE
+        itemEditScope = ItemStateScope.ALL_STATES
+        plmEditScopeOverrides.clear()
         _workingPlms.clear()
         originalPlmCount = 0
         _workingDoors.clear()
@@ -3781,6 +3798,7 @@ class EditorState(
         pendingEdits.clear()
         pendingPositions.clear()
         pendingAllStateItemBefore = null
+        pendingPlmGeometry = null
         itemScopeSnapshots.clear()
 
         // Load scroll data for this room (resize if dimensions changed)
@@ -4366,6 +4384,22 @@ class EditorState(
         itemEditScope = scope
     }
 
+    private fun plmScopeKey(plm: RomParser.PlmEntry): String {
+        val family = itemFamilyName(plm.id) ?: when {
+            RomParser.isDoorCapPlm(plm.id) -> "door-cap"
+            RomParser.isGatePlm(plm.id) -> "gate"
+            else -> plm.id.toString()
+        }
+        return "$currentRoomId:${currentPlmStateId()}:${plm.x}:${plm.y}:$family"
+    }
+
+    fun plmEditScope(plm: RomParser.PlmEntry): ItemStateScope =
+        plmEditScopeOverrides[plmScopeKey(plm)] ?: plmStateMembership(plm).editScope
+
+    fun selectPlmEditScope(plm: RomParser.PlmEntry, scope: ItemStateScope) {
+        if (plm in _workingPlms) plmEditScopeOverrides[plmScopeKey(plm)] = scope
+    }
+
     private fun currentPlmChanges(): MutableList<PlmChange> {
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         return currentStateEdits()?.plmChanges ?: roomEdits.plmChanges
@@ -4377,6 +4411,11 @@ class EditorState(
             commonChanges = roomEdits.plmChanges.toList(),
             stateChanges = roomEdits.states.associate { it.id to it.plmChanges.toList() },
             workingPlms = _workingPlms.toList(),
+            saveSpawns = roomEdits.saveStationSpawns.toList(),
+            commonScrollCommands = roomEdits.customScrollCommands.mapValues { it.value.toList() },
+            stateScrollCommands = roomEdits.states.associate { state ->
+                state.id to state.customScrollCommands.mapValues { it.value.toList() }
+            },
         )
     }
 
@@ -4390,6 +4429,14 @@ class EditorState(
         }
         _workingPlms.clear()
         _workingPlms.addAll(snapshot.workingPlms)
+        roomEdits.saveStationSpawns.clear()
+        roomEdits.saveStationSpawns.addAll(snapshot.saveSpawns)
+        roomEdits.customScrollCommands.clear()
+        snapshot.commonScrollCommands.forEach { (id, commands) -> roomEdits.customScrollCommands[id] = commands.toMutableList() }
+        roomEdits.states.forEach { state ->
+            state.customScrollCommands.clear()
+            snapshot.stateScrollCommands[state.id].orEmpty().forEach { (id, commands) -> state.customScrollCommands[id] = commands.toMutableList() }
+        }
     }
 
     private fun itemFamilyName(plmId: Int): String? =
@@ -4415,7 +4462,9 @@ class EditorState(
         val parser = currentRomParser ?: return listOf("This state" to _workingPlms.toList())
         val roomEdits = project.rooms[project.roomKey(currentRoomId)]
         if (hasManagedPlms()) return roomEdits!!.states.map { state ->
-            state.condition.displaySummary(currentArea) to asmPlmSourceBridge?.managedView(currentRoomId, state.id)?.document?.entries.orEmpty()
+            val view = requireNotNull(asmPlmSourceBridge).managedView(currentRoomId, state.id)
+            require(view.problem == null) { view.problem ?: "Review invalid object source before editing." }
+            state.condition.displaySummary(currentArea) to requireNotNull(view.document).entries
         }
         val runtimeStates = parser.parseRoomStatesWithData(currentRoomId)
         if (roomEdits?.states.isNullOrEmpty()) {
@@ -4435,30 +4484,130 @@ class EditorState(
         }
     }
 
-    private fun itemChangesAt(
-        changes: List<PlmChange>,
-        plmId: Int,
-        x: Int,
-        y: Int,
-        param: Int,
-    ): Boolean = changes.lastOrNull { it.plmId == plmId && it.x == x && it.y == y }
-        ?.let { it.action == "add" && it.param == param } == true
-
-    /** The explicit authoring scope of an item, or null for untouched ROM state data. */
-    fun configuredItemScope(plm: RomParser.PlmEntry): ItemStateScope? {
-        if (!isEditorItemPlm(plm.id)) return null
-        if (hasManagedPlms()) return if (currentPlmStateId()?.let {
-                asmPlmSourceBridge?.managedIsInAllStates(currentRoomId, it, plm)
-            } == true) ItemStateScope.ALL_STATES else ItemStateScope.THIS_STATE
-        val roomEdits = project.rooms[project.roomKey(currentRoomId)] ?: return null
-        val selected = selectedStateEdits(roomEdits)
-        if (selected != null && itemChangesAt(selected.plmChanges, plm.id, plm.x, plm.y, plm.param)) {
-            return ItemStateScope.THIS_STATE
+    /** Equal placement AND linked behavior. Named scroll rows use param=0 until Build. */
+    fun plmStateMembership(plm: RomParser.PlmEntry): PlmStateMembership = runCatching {
+        val lists = effectiveAuthoredStatePlms()
+        val room = project.rooms[project.roomKey(currentRoomId)]
+        val currentCommands = if (plm.id == 0xB703) scrollCommandsFor(plm) else null
+        val matching = lists.withIndex().count { (index, list) ->
+            val entry = list.second.singleOrNull { it == plm } ?: return@count false
+            val bodyIds = gatePartnerIds(plm.id)
+            if (bodyIds.isNotEmpty() && list.second.filter { it.x == plm.x && it.y == plm.y && it.id in bodyIds } !=
+                _workingPlms.filter { it.x == plm.x && it.y == plm.y && it.id in bodyIds }) return@count false
+            if (plm.id != 0xB703) return@count true
+            val stateId = room?.states?.getOrNull(index)?.id
+            currentCommands != null && scrollCommandsFor(entry, stateId) == currentCommands
         }
-        return if (itemChangesAt(roomEdits.plmChanges, plm.id, plm.x, plm.y, plm.param)) {
-            ItemStateScope.ALL_STATES
-        } else {
-            null
+        PlmStateMembership(matching, lists.size)
+    }.getOrElse { PlmStateMembership(0, 0) }
+
+    fun configuredItemScope(plm: RomParser.PlmEntry): ItemStateScope? =
+        if (isEditorItemPlm(plm.id)) plmStateMembership(plm).editScope else null
+
+    private fun samePlmFamily(first: Int, second: Int): Boolean = first == second ||
+        (itemFamilyName(first)?.let { it == itemFamilyName(second) } == true) ||
+        (RomParser.isDoorCapPlm(first) && RomParser.isDoorCapPlm(second)) ||
+        (first in setOf(0xC826, 0xC82A) && second in setOf(0xC826, 0xC82A)) ||
+        (first in setOf(0xC82E, 0xC832) && second in setOf(0xC82E, 0xC832))
+
+    private fun gateBodyIds(shotId: Int): Set<Int> = when (shotId) {
+        0xC836 -> setOf(0xC826, 0xC82A)
+        0xC83A -> setOf(0xC82E, 0xC832)
+        else -> emptySet()
+    }
+
+    private fun gatePartnerIds(plmId: Int): Set<Int> = when (plmId) {
+        0xC826, 0xC82A -> setOf(0xC836)
+        0xC82E, 0xC832 -> setOf(0xC83A)
+        else -> gateBodyIds(plmId)
+    }
+
+    private fun plmPlacementScope(plmId: Int, x: Int, y: Int, override: ItemStateScope?): ItemStateScope {
+        if (override != null) return override
+        val existing = _workingPlms.singleOrNull { it.x == x && it.y == y && samePlmFamily(it.id, plmId) }
+        return existing?.let { plmEditScope(it) } ?: itemEditScope
+    }
+
+    /** Never let the placement preference erase another branch's distinct object or behavior. */
+    private fun validatePlmPlacement(plmId: Int, x: Int, y: Int, param: Int, scope: ItemStateScope,
+                                     commands: List<ScrollCommand>? = null, geometryReference: ByteArray? = null): Boolean = runCatching {
+        require(x in 0 until workingBlocksWide && y in 0 until workingBlocksTall && x <= 255 && y <= 255) {
+            "PLM placement must be inside the room and fit byte coordinates."
+        }
+        require(plmId in 1..0xFFFF && param in 0..0xFFFF) { "PLM types and parameters must fit a word." }
+        if (plmId in setOf(0xC836, 0xC83A)) require(param in 0..14 && param % 2 == 0) { "Gate color/direction must use an even selector from 0 to 14." }
+        if (plmId == 0xB76F) require((param and 255) in 0..7) { "Ordinary saves have only eight slots (0–7)." }
+        if (commands != null) require(commands.all {
+            it.screenIndex in 0 until (workingBlocksWide / 16) * (workingBlocksTall / 16) && it.scrollValue in 0..2
+        }) { "Scroll commands must target existing room screens and valid colors." }
+        if (isEditorItemPlm(plmId) && !validateItemPlacement(plmId, x, y, scope)) return false
+        validatePlmSharedGeometry(plmId, x, y, scope == ItemStateScope.ALL_STATES, geometryReference)
+        if (scope == ItemStateScope.THIS_STATE) return true
+        val lists = effectiveAuthoredStatePlms()
+        val room = project.rooms[project.roomKey(currentRoomId)]
+        val selected = _workingPlms.filter { it.x == x && it.y == y && samePlmFamily(it.id, plmId) }
+        for ((index, state) in lists.withIndex()) {
+            val here = state.second.filter { it.x == x && it.y == y }
+            require(here.count { samePlmFamily(it.id, plmId) } <= 1) {
+                "Multiple matching PLMs in ${state.first}; review them before applying to all states."
+            }
+            for (old in here) {
+                // Gate connectors and their shot blocks can legitimately share a tile.
+                val gatePair = old.id in gateBodyIds(plmId) || plmId in gateBodyIds(old.id)
+                // $DB44 selects an event pre-instruction and sleeps, without using X/Y
+                // or drawing tiles ($84:DB1E..DB48). It is a verified script-only PLM.
+                // Keep unknown helpers conservative; a name alone does not prove no footprint.
+                val scriptOnly = old.id == 0xDB44 || plmId == 0xDB44
+                val unrelated = !samePlmFamily(old.id, plmId) && !gatePair && !scriptOnly &&
+                    (isEditorItemPlm(old.id) || RomParser.isStationPlm(old.id) || RomParser.isDoorCapPlm(old.id) ||
+                        isEditorItemPlm(plmId) || RomParser.isStationPlm(plmId) || RomParser.isDoorCapPlm(plmId))
+                require(!unrelated) { "${RomParser.plmDisplayName(old.id, old.param)} occupies this position in ${state.first}. Use This state or resolve the conflict first." }
+                if (!samePlmFamily(old.id, plmId)) continue
+                require(isEditorItemPlm(plmId) || old in selected || (old.id == plmId && old.param == param) ||
+                    (plmId == 0xB703 && commands != null && scrollCommandsFor(old, room?.states?.getOrNull(index)?.id) == commands)) {
+                    "A different ${RomParser.plmDisplayName(old.id, old.param)} exists in ${state.first}. Use This state; it was not overwritten."
+                }
+                if (plmId == 0xB703 && old !in selected) {
+                    require(commands == null || scrollCommandsFor(old, room?.states?.getOrNull(index)?.id) == commands) {
+                        "Different scroll commands exist in ${state.first}. Use This state."
+                    }
+                } else if (plmId == 0xB703 && commands != null && old in selected &&
+                    room?.states?.getOrNull(index)?.id != currentPlmStateId()) {
+                    require(scrollCommandsFor(old, room?.states?.getOrNull(index)?.id) == scrollCommandsFor(old)) {
+                        "Different scroll commands exist in ${state.first}. Use This state."
+                    }
+                }
+            }
+        }
+        true
+    }.getOrElse { postStatus(it.message ?: "PLM scope needs review"); false }
+
+    /** The same coordinates must not silently target a different doorway/obstruction in another state. */
+    private fun validatePlmSharedGeometry(plmId: Int, x: Int, y: Int, allStates: Boolean, geometryReference: ByteArray?) {
+        val offsets = when {
+            RomParser.isDoorCapPlm(plmId) -> if (RomParser.doorCapIsHorizontal(plmId))
+                (0..3).map { it to 0 } else (0..3).map { 0 to it }
+            plmId in setOf(0xC836, 0xC826, 0xC82A) -> (0..5).map { 0 to it }
+            plmId in setOf(0xC83A, 0xC82E, 0xC832) -> (0..5).map { 0 to -it }
+            else -> return
+        }
+        val points = offsets.map { (dx, dy) -> x + dx to y + dy }
+        require(points.all { (px, py) -> px in 0 until workingBlocksWide && py in 0 until workingBlocksTall }) {
+            "The complete gate/door-cap footprint must fit the room."
+        }
+        if (!allStates) return
+        val parser = currentRomParser ?: return
+        val room = project.rooms[project.roomKey(currentRoomId)] ?: return
+        if (room.states.size < 2) return
+        fun collision(data: ByteArray, point: Pair<Int, Int>): Pair<Int?, Int?> =
+            levelWordAt(data, point.first, point.second, TILE_EDIT_LAYER_1, workingBlocksWide, workingBlocksTall)?.ushr(12) to
+                levelBtsAt(data, point.first, point.second, workingBlocksWide)
+        val selected = geometryReference ?: workingLevelData ?: error("Room layout is unavailable.")
+        for (state in room.states.filter { it.id != currentPlmStateId() }) {
+            val other = effectiveLevelDataForState(room, state, parser) ?: error("State layout is unavailable.")
+            require(points.all { collision(selected, it) == collision(other, it) }) {
+                "Gate/door-cap geometry differs in ${state.condition.displaySummary(currentArea)}. Use This state or align the layouts first."
+            }
         }
     }
 
@@ -4489,18 +4638,17 @@ class EditorState(
     }
 
     /**
-     * Canonicalize one collectible into the room-wide PLM stream. State-local
-     * overrides for the same item family are removed so no current branch can
+     * Canonicalize one object into the room-wide PLM stream. State-local
+     * overrides for the same object family are removed so no current branch can
      * mask it, while the room-wide remove/add pair also governs future states.
      */
     private fun addItemToAllStates(plmId: Int, x: Int, y: Int, param: Int): List<PlmChange> {
-        val family = checkNotNull(itemFamilyName(plmId))
         val roomEdits = project.getOrCreateRoom(currentRoomId)
-        val familyEntries = itemEntriesAt(x, y).map { it.second }
-            .filter { itemFamilyName(it.id) == family }
+        val familyEntries = effectiveAuthoredStatePlms().flatMap { it.second }
+            .filter { it.x == x && it.y == y && samePlmFamily(it.id, plmId) }
         val ids = (familyEntries.map { it.id } + plmId).distinct()
         fun isFamilyChange(change: PlmChange): Boolean =
-            change.x == x && change.y == y && itemFamilyName(change.plmId) == family
+            change.x == x && change.y == y && samePlmFamily(change.plmId, plmId)
 
         roomEdits.plmChanges.removeAll(::isFamilyChange)
         for (state in roomEdits.states) state.plmChanges.removeAll(::isFamilyChange)
@@ -4508,26 +4656,25 @@ class EditorState(
         val removals = ids.map { PlmChange("remove", it, x, y, param) }
         roomEdits.plmChanges.addAll(removals)
         roomEdits.plmChanges.add(PlmChange("add", plmId, x, y, param))
-        _workingPlms.removeAll { it.x == x && it.y == y && itemFamilyName(it.id) == family }
+        _workingPlms.removeAll { it.x == x && it.y == y && samePlmFamily(it.id, plmId) }
         _workingPlms.add(RomParser.PlmEntry(plmId, x, y, param))
         return familyEntries.distinct().map { PlmChange("remove", it.id, it.x, it.y, it.param) }
     }
 
     private fun removeItemFromAllStates(plm: RomParser.PlmEntry): List<PlmChange> {
-        val family = itemFamilyName(plm.id) ?: return emptyList()
         val roomEdits = project.getOrCreateRoom(currentRoomId)
-        val familyEntries = itemEntriesAt(plm.x, plm.y).map { it.second }
-            .filter { itemFamilyName(it.id) == family }
+        val familyEntries = effectiveAuthoredStatePlms().flatMap { it.second }
+            .filter { it.x == plm.x && it.y == plm.y && samePlmFamily(it.id, plm.id) }
         val ids = (familyEntries.map { it.id } + plm.id).distinct()
         fun isFamilyChange(change: PlmChange): Boolean =
-            change.x == plm.x && change.y == plm.y && itemFamilyName(change.plmId) == family
+            change.x == plm.x && change.y == plm.y && samePlmFamily(change.plmId, plm.id)
 
         roomEdits.plmChanges.removeAll(::isFamilyChange)
         for (state in roomEdits.states) state.plmChanges.removeAll(::isFamilyChange)
         val removals = ids.map { PlmChange("remove", it, plm.x, plm.y, plm.param) }
         roomEdits.plmChanges.addAll(removals)
         _workingPlms.removeAll {
-            it.x == plm.x && it.y == plm.y && itemFamilyName(it.id) == family
+            it.x == plm.x && it.y == plm.y && samePlmFamily(it.id, plm.id)
         }
         return removals
     }
@@ -4721,6 +4868,7 @@ class EditorState(
         pendingPlmAdds.clear()
         pendingPlmRemoves.clear()
         pendingAllStateItemBefore = null
+        pendingPlmGeometry = null
         itemScopeSnapshots.clear()
         undoVersion++
 
@@ -4922,6 +5070,7 @@ class EditorState(
         pendingPlmAdds.clear()
         pendingPlmRemoves.clear()
         pendingAllStateItemBefore = null
+        pendingPlmGeometry = workingLevelData?.copyOf()
     }
 
     /** Paint the full brush at map position (bx, by). Returns true if anything changed. */
@@ -4934,6 +5083,7 @@ class EditorState(
         ) return false
         if (activeRoomLayer == RoomEditLayer.LAYER2) return paintLayer2At(bx, by)
         val b = brush ?: return false
+        if (pendingPlmGeometry == null) pendingPlmGeometry = workingLevelData?.copyOf()
         if ((0 until b.rows).any { r -> (0 until b.cols).any { c -> b.plmAt(r, c) != null } } &&
             blockLinkedPlmMutation(allStates = itemEditScope == ItemStateScope.ALL_STATES)) return false
         // A brush stamp may contain both decorative tiles and a functional PLM.
@@ -5001,7 +5151,7 @@ class EditorState(
                     val plmId = plm.first
                     val param = plm.second
                     val isItem = isEditorItemPlm(plmId)
-                    val scope = if (isItem) itemEditScope else ItemStateScope.THIS_STATE
+                    val scope = plmPlacementScope(plmId, tx, ty, null)
                     if (isItem && !validateItemPlacement(plmId, tx, ty, scope)) {
                         rollbackStamp()
                         return false
@@ -5026,21 +5176,46 @@ class EditorState(
                         rollbackStamp()
                         return false
                     }
-                    if (isItem && scope == ItemStateScope.ALL_STATES) {
+                    if (!validatePlmPlacement(plmId, tx, ty, actualParam, scope, geometryReference = pendingPlmGeometry)) {
+                        rollbackStamp()
+                        return false
+                    }
+                    val bodyIds = gateBodyIds(plmId)
+                    val companion = if (bodyIds.isNotEmpty()) {
+                        val bodies = _workingPlms.filter { it.x == tx && it.y == ty && it.id in bodyIds }
+                        if (bodies.size > 1) { rollbackStamp(); postStatus("Multiple gate bodies; review them first."); return false }
+                        bodies.singleOrNull() ?: RomParser.PlmEntry(if (plmId == 0xC836) 0xC82A else 0xC832, tx, ty, 0x8000)
+                    } else null
+                    if (companion != null && !validatePlmPlacement(companion.id, tx, ty, companion.param, scope, geometryReference = pendingPlmGeometry)) {
+                        rollbackStamp()
+                        return false
+                    }
+                    if (scope == ItemStateScope.ALL_STATES) {
                         if (pendingAllStateItemBefore == null) pendingAllStateItemBefore = plmScopeBefore
+                        if (companion != null) {
+                            pendingPlmRemoves.addAll(addItemToAllStates(companion.id, tx, ty, companion.param))
+                            pendingPlmAdds.add(PlmChange("add", companion.id, tx, ty, companion.param))
+                        }
                         val removed = addItemToAllStates(plmId, tx, ty, actualParam)
                         pendingPlmRemoves.addAll(removed)
                         pendingPlmAdds.add(PlmChange("add", plmId, tx, ty, actualParam))
+                        if (plmId == 0xB76F && retainedSaveParam == null) ensureAutoSaveStationSpawn(tx, ty, actualParam and 255)
                         continue
                     }
                     val targetPlmChanges = currentPlmChanges()
                     // Remove existing PLMs at same position with same ID only
                     // after the replacement parameter has been secured.
-                    for (old in existing) {
+                    for (old in (existing + _workingPlms.filter { it.x == tx && it.y == ty && it.id in bodyIds }).distinct()) {
                         _workingPlms.remove(old)
                         val rc = PlmChange("remove", old.id, old.x, old.y, old.param)
                         targetPlmChanges.add(rc)
                         pendingPlmRemoves.add(rc)
+                    }
+                    if (companion != null) {
+                        _workingPlms.add(companion)
+                        val bodyAdd = PlmChange("add", companion.id, tx, ty, companion.param)
+                        targetPlmChanges.add(bodyAdd)
+                        pendingPlmAdds.add(bodyAdd)
                     }
                     _workingPlms.add(RomParser.PlmEntry(plmId, tx, ty, actualParam))
                     val addChange = PlmChange("add", plmId, tx, ty, actualParam)
@@ -5473,6 +5648,16 @@ class EditorState(
     }
 
     fun effectiveSaveStationSpawn(area: Int, saveIndex: Int, romParser: RomParser): EffectiveSaveStationSpawn? {
+        if (hasManagedPlms()) {
+            val resource = try { asmPlmSourceBridge?.saveSpawn(currentRoomId, area, saveIndex) }
+                catch (error: Exception) { objectPreviewProblem = error.message ?: "Invalid save spawn source"; return null }
+            if (resource != null) {
+                if (resource.cleared) return null
+                val w = resource.words
+                return EffectiveSaveStationSpawn(area, saveIndex, w[0], w[1], w[3], w[4], w[5], w[6],
+                    romParser.readSaveEntry(area, saveIndex)?.pcOffset, "ASM")
+            }
+        }
         val override = saveSpawnOverride(area, saveIndex)
         val romEntry = romParser.readSaveEntry(area, saveIndex)
         if (override != null) {
@@ -5527,6 +5712,16 @@ class EditorState(
     }
 
     private fun upsertSaveStationSpawn(change: SaveStationSpawnChange) {
+        if (hasManagedPlms()) {
+            editManagedPlms("Edit save spawn · ASM") { bridge, _ ->
+                val bts = bridge.saveSpawn(currentRoomId, change.area, change.saveIndex)?.words?.get(2)
+                    ?: currentRomParser?.readSaveEntry(change.area, change.saveIndex)?.doorBts ?: 0
+                bridge.updateSaveSpawn(SourceSaveResource(com.supermetroid.editor.asm.AsmSaveStationSource.name(currentRoomId, change.area, change.saveIndex),
+                    currentRoomId, change.area, change.saveIndex, listOf(change.roomId, change.doorPtr, bts,
+                        change.scrollX, change.scrollY, change.samusY, change.samusX)))
+            }
+            return
+        }
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         roomEdits.saveStationSpawns.removeAll { it.area == change.area && it.saveIndex == change.saveIndex }
         roomEdits.saveStationSpawns.add(change)
@@ -5541,7 +5736,7 @@ class EditorState(
     }
 
     private fun cleanupSaveStationSpawnIfUnreferenced(saveIndex: Int) {
-        if (_workingPlms.any { it.id == 0xB76F && (it.param and 0xFF) == saveIndex }) return
+        if (effectiveAuthoredStatePlms().any { (_, entries) -> entries.any { it.id == 0xB76F && (it.param and 0xFF) == saveIndex } }) return
         val roomEdits = project.rooms[project.roomKey(currentRoomId)] ?: return
         val removed = roomEdits.saveStationSpawns.removeAll {
             it.area == currentArea && it.saveIndex == saveIndex
@@ -5550,11 +5745,30 @@ class EditorState(
             dirty = true
             editVersion++
         }
+        // Removing the final original station must not resurrect its native checkpoint on export.
+        val native = currentAreaRomSaveEntries[saveIndex]
+        if (native?.roomId == currentRoomId) roomEdits.saveStationSpawns.add(
+            SaveStationSpawnChange(currentArea, saveIndex, currentRoomId, native.doorPtr,
+                native.scrollX, native.scrollY, native.samusY, native.samusX, clearSlot = true),
+        )
     }
 
     fun resetSaveStationSpawnToAuto(plm: RomParser.PlmEntry) {
         if (plm.id != 0xB76F) return
         upsertSaveStationSpawn(deriveSaveStationSpawn(plm.x, plm.y, plm.param and 0xFF))
+    }
+
+    internal fun ensureSaveSpawnSource(plm: RomParser.PlmEntry): Boolean {
+        if (!hasManagedPlms() || plm.id != 0xB76F || plm !in _workingPlms) return false
+        val parser = currentRomParser ?: return false
+        val slot = plm.param and 255
+        if (runCatching { asmPlmSourceBridge?.hasSaveSource(currentRoomId, currentArea, slot) == true }.getOrDefault(false)) return true
+        val base = effectiveSaveStationSpawn(currentArea, slot, parser) ?: return false
+        return editManagedPlms("Adopt save spawn · ASM") { bridge, _ ->
+            val bts = parser.readSaveEntry(currentArea, slot)?.doorBts ?: 0
+            bridge.updateSaveSpawn(SourceSaveResource(com.supermetroid.editor.asm.AsmSaveStationSource.name(currentRoomId, currentArea, slot),
+                currentRoomId, currentArea, slot, listOf(base.roomId, base.doorPtr, bts, base.scrollX, base.scrollY, base.samusY, base.samusX)))
+        }
     }
 
     fun updateSaveStationSpawnPosition(area: Int, saveIndex: Int, samusX: Int, samusY: Int, romParser: RomParser) {
@@ -5572,6 +5786,17 @@ class EditorState(
                 autoDerived = false,
             ),
         )
+    }
+
+    /** One Apply action, one authored-source undo step, even when both position and camera change. */
+    fun updateSaveStationSpawnFields(area: Int, saveIndex: Int, samusX: Int, samusY: Int, scrollX: Int, scrollY: Int, romParser: RomParser) {
+        if (samusX !in -32768..65535 || samusY !in -32768..65535 || scrollX !in 0..65535 || scrollY !in 0..65535) {
+            postStatus("Spawn offsets must fit a signed/unsigned 16-bit word; camera coordinates must be 0–65535. No edit applied.")
+            return
+        }
+        val base = effectiveSaveStationSpawn(area, saveIndex, romParser) ?: return
+        upsertSaveStationSpawn(SaveStationSpawnChange(area, saveIndex, base.roomId, base.doorPtr,
+            scrollX.toUnsigned16(), scrollY.toUnsigned16(), samusY.toUnsigned16(), samusX.toUnsigned16()))
     }
 
     fun updateSaveStationSpawnScroll(area: Int, saveIndex: Int, scrollX: Int, scrollY: Int, romParser: RomParser) {
@@ -5685,11 +5910,6 @@ class EditorState(
         param: Int,
         itemScopeOverride: ItemStateScope? = null,
     ) {
-        if (hasManagedPlms() && plmId == 0xB76F) {
-            postStatus("Save-station placement also changes spawn data; that combined edit is not source-aware yet.")
-            return
-        }
-        if (!hasManagedPlms() && blockLinkedPlmMutation(isEditorItemPlm(plmId) && (itemScopeOverride ?: itemEditScope) == ItemStateScope.ALL_STATES)) return
         val isItem = isEditorItemPlm(plmId)
         val isDoorCap = RomParser.isDoorCapPlm(plmId)
         val requestedDoorDirection = RomParser.doorCapDefFor(plmId)?.direction
@@ -5708,8 +5928,9 @@ class EditorState(
         }
         val targetX = doorPlacement?.anchorX ?: existingDoorCap?.x ?: x
         val targetY = doorPlacement?.anchorY ?: existingDoorCap?.y ?: y
-        val scope = if (isItem) itemScopeOverride ?: itemEditScope else ItemStateScope.THIS_STATE
-        if (isItem && !validateItemPlacement(plmId, targetX, targetY, scope)) return
+        val scope = itemScopeOverride ?: existingDoorCap?.let { plmEditScope(it) }
+            ?: plmPlacementScope(plmId, targetX, targetY, null)
+        if (!hasManagedPlms() && blockLinkedPlmMutation(scope == ItemStateScope.ALL_STATES)) return
         val family = itemFamilyName(plmId)
         val existing = _workingPlms.filter { plm ->
             val replacesSelectedShiftedCap = isDoorCap && plm == existingDoorCap
@@ -5721,30 +5942,69 @@ class EditorState(
                 )
             replacesSelectedShiftedCap || replacesAtResolvedAnchor
         }
-        val retainedSaveParam = existing.singleOrNull()
+        val counterparts = runCatching { effectiveAuthoredStatePlms().flatMap { it.second }
+            .filter { it.x == targetX && it.y == targetY && samePlmFamily(it.id, plmId) }.distinct() }
+            .getOrElse { postStatus("Object edit blocked: ${it.message ?: "Review object source first"}"); return }
+        val retained = existing.singleOrNull() ?: counterparts.singleOrNull().takeIf { scope == ItemStateScope.ALL_STATES }
+        val retainedSaveParam = retained
             ?.takeIf { plmId == 0xB76F && param == 0x8000 }
             ?.param
-        val retainedItemParam = existing.singleOrNull()
+        val retainedItemParam = retained
             ?.takeIf { isItem && param == 0 }
             ?.param
-        val actualParam = retainedSaveParam ?: retainedItemParam ?: autoAssignParam(plmId, param) ?: return
+        val actualParam = if (hasManagedPlms() && plmId == 0xB76F && retainedSaveParam == null && param == 0x8000) {
+            runCatching { asmPlmSourceBridge?.availableSaveSlot(currentRoomId, currentArea)?.let { 0x8000 or it }
+                ?: error("No free ordinary save slot in this area (maximum eight).")
+            }.getOrElse { postStatus(it.message ?: "Save slot allocation failed"); null } ?: return
+        } else retainedSaveParam ?: retainedItemParam ?: autoAssignParam(plmId, param) ?: return
+        val proposedCommands = if (plmId == 0xB703 && param != 0) {
+            scrollCommandsFor(RomParser.PlmEntry(plmId, targetX, targetY, actualParam))
+        } else null
+        if (!validatePlmPlacement(plmId, targetX, targetY, actualParam, scope, proposedCommands)) return
+        if (plmId == 0xB703 && proposedCommands == null) { postStatus("Scroll commands are unavailable; create or review the command list first."); return }
+        val bodyIds = gateBodyIds(plmId)
+        val companions = if (bodyIds.isNotEmpty()) {
+            val current = _workingPlms.filter { it.x == targetX && it.y == targetY && it.id in bodyIds }
+            if (current.size > 1) { postStatus("Multiple gate bodies occupy this tile; review them first."); return }
+            val body = current.singleOrNull() ?: RomParser.PlmEntry(if (plmId == 0xC836) 0xC82A else 0xC832, targetX, targetY, 0x8000)
+            if (!validatePlmPlacement(body.id, targetX, targetY, body.param, scope)) return
+            listOf(body)
+        } else emptyList()
         if (hasManagedPlms()) {
             editManagedPlms("Add ${RomParser.plmDisplayName(plmId)} · ASM") { bridge, stateId ->
+                if (plmId == 0xB76F) {
+                    val slot = actualParam and 255
+                    val existingSpawn = bridge.saveSpawn(currentRoomId, currentArea, slot)?.takeUnless { it.cleared }
+                    val derived = deriveSaveStationSpawn(targetX, targetY, slot)
+                    val values = if (retainedSaveParam != null) existingSpawn?.words ?: currentAreaRomSaveEntries[slot]
+                        ?.takeIf { it.roomId == currentRoomId }?.words() else null
+                    val spawn = existingSpawn?.takeIf { retainedSaveParam != null } ?: SourceSaveResource(
+                        com.supermetroid.editor.asm.AsmSaveStationSource.name(currentRoomId, currentArea, slot), currentRoomId, currentArea, slot,
+                        values ?: listOf(currentRoomId, derived.doorPtr, currentAreaRomSaveEntries[slot]?.doorBts ?: 0,
+                            derived.scrollX, derived.scrollY, derived.samusY, derived.samusX))
+                    bridge.editSaveStation(currentRoomId, stateId,
+                        { it.x == targetX && it.y == targetY && it.id == plmId },
+                        RomParser.PlmEntry(plmId, targetX, targetY, actualParam), spawn, scope == ItemStateScope.ALL_STATES)
+                    return@editManagedPlms
+                }
                 bridge.editManaged(currentRoomId, stateId, scope == ItemStateScope.ALL_STATES, { old ->
                     old in existing || (old.x == targetX && old.y == targetY &&
-                        (old.id == plmId || (family != null && itemFamilyName(old.id) == family)))
-                }, RomParser.PlmEntry(plmId, targetX, targetY, actualParam))
+                        (samePlmFamily(old.id, plmId) || old.id in bodyIds))
+                }, RomParser.PlmEntry(plmId, targetX, targetY, actualParam), companions)
             }
             return
         }
-        if (isItem && scope == ItemStateScope.ALL_STATES) {
-            val before = itemScopeSnapshot()
-            val removedChanges = addItemToAllStates(plmId, targetX, targetY, actualParam)
+        val before = itemScopeSnapshot()
+        if (scope == ItemStateScope.ALL_STATES) {
+            existing.filter { it.x != targetX || it.y != targetY }.forEach(::removeItemFromAllStates)
+            val removedChanges = companions.flatMap { addItemToAllStates(it.id, it.x, it.y, it.param) } +
+                addItemToAllStates(plmId, targetX, targetY, actualParam)
             val addChange = PlmChange("add", plmId, targetX, targetY, actualParam)
+            if (plmId == 0xB76F && retainedSaveParam == null) ensureAutoSaveStationSpawn(targetX, targetY, actualParam and 255)
             val name = customItemNameForPlm(plmId) ?: RomParser.plmDisplayName(plmId)
             val operation = EditOperation(
                 "Add $name to all states ($targetX,$targetY)",
-                plmAdds = listOf(addChange),
+                plmAdds = companions.map { PlmChange("add", it.id, it.x, it.y, it.param) } + addChange,
                 plmRemoves = removedChanges,
                 itemScope = ItemStateScope.ALL_STATES,
             )
@@ -5760,13 +6020,15 @@ class EditorState(
 
         val plmChanges = currentPlmChanges()
         val removedChanges = mutableListOf<PlmChange>()
-        for (old in existing) {
+        for (old in (existing + _workingPlms.filter { it.x == targetX && it.y == targetY && it.id in bodyIds }).distinct()) {
             _workingPlms.remove(old)
             val rc = PlmChange("remove", old.id, old.x, old.y, old.param)
             plmChanges.add(rc)
             removedChanges.add(rc)
         }
 
+        _workingPlms.addAll(companions)
+        companions.forEach { plmChanges.add(PlmChange("add", it.id, it.x, it.y, it.param)) }
         _workingPlms.add(RomParser.PlmEntry(plmId, targetX, targetY, actualParam))
         val addChange = PlmChange("add", plmId, targetX, targetY, actualParam)
         plmChanges.add(addChange)
@@ -5777,11 +6039,12 @@ class EditorState(
         val name = customItemNameForPlm(plmId) ?: RomParser.plmDisplayName(plmId)
         val op = EditOperation(
             "Add $name ($targetX,$targetY)",
-            plmAdds = listOf(addChange),
+            plmAdds = companions.map { PlmChange("add", it.id, it.x, it.y, it.param) } + addChange,
             plmRemoves = removedChanges,
-            itemScope = if (isItem) ItemStateScope.THIS_STATE else null,
+            itemScope = ItemStateScope.THIS_STATE,
         )
         undoStack.add(op)
+        itemScopeSnapshots[op] = ItemScopeUndo(before, itemScopeSnapshot())
         redoStack.clear()
         undoVersion++
         dirty = true
@@ -5813,6 +6076,36 @@ class EditorState(
         editVersion++
     }
 
+    /** The room inspector and trigger editor use the same source-aware read path. */
+    fun scrollCommandsFor(trigger: RomParser.PlmEntry, stateId: String? = currentPlmStateId()): List<ScrollCommand>? = runCatching {
+        if (hasManagedPlms()) {
+            return@runCatching requireNotNull(asmPlmSourceBridge).scrollCommands(currentRoomId, requireNotNull(stateId), trigger)
+        }
+        if ((trigger.param and 0xFF00) == 0xCC00) {
+            val id = "cmd_${trigger.param and 255}"
+            val room = project.rooms[project.roomKey(currentRoomId)]
+            val local = stateId?.let { room?.stateEditsForId(it)?.customScrollCommands?.get(id) }
+            (local ?: room?.customScrollCommands?.get(id))?.let { return@runCatching it.toList() }
+        }
+        val parser = requireNotNull(currentRomParser)
+        RomParser.decodeScrollCommands(parser, trigger.param, workingBlocksWide / 16).map { (screen, _, value) -> ScrollCommand(screen, value) }
+    }.getOrNull()
+
+    fun updateScrollTriggerCommands(trigger: RomParser.PlmEntry, entries: List<ScrollCommand>, expectedSource: String? = null): Boolean {
+        if (trigger !in _workingPlms || trigger.id != 0xB703) {
+            postStatus("Scroll trigger changed; select it again before editing commands.")
+            return false
+        }
+        val scope = plmEditScope(trigger)
+        if (!validatePlmPlacement(trigger.id, trigger.x, trigger.y, trigger.param, scope, entries)) return false
+        if (hasManagedPlms()) return editManagedPlms("Edit scroll commands · ASM") { bridge, stateId ->
+            require(expectedSource == null || bridge.sourceText() == expectedSource) { "Source changed; reopen the command editor before applying this draft." }
+            bridge.editScroll(currentRoomId, stateId, trigger.x, trigger.y, entries, scope == ItemStateScope.ALL_STATES)
+        }
+        addScrollTriggerWithCommands(trigger.x, trigger.y, entries, scope)
+        return true
+    }
+
     /** Get custom scroll commands for a command ID, or null if not found. */
     fun getScrollCommand(cmdId: String): List<ScrollCommand>? {
         val stateCommands = project.rooms[project.roomKey(currentRoomId)]
@@ -5823,18 +6116,57 @@ class EditorState(
     }
 
     /** Add a B703 scroll trigger with a new custom command set. Returns the PLM param (command ID encoded). */
-    fun addScrollTriggerWithCommands(x: Int, y: Int, entries: List<ScrollCommand>) {
-        if (blockLinkedPlmMutation()) return
-        val cmdId = createScrollCommand(entries)
+    fun addScrollTriggerWithCommands(x: Int, y: Int, entries: List<ScrollCommand>, scopeOverride: ItemStateScope? = null) {
+        val scope = plmPlacementScope(0xB703, x, y, scopeOverride)
+        if (!validatePlmPlacement(0xB703, x, y, 0, scope, entries)) return
+        if (hasManagedPlms()) {
+            editManagedPlms("Add scroll trigger · ASM") { bridge, stateId ->
+                bridge.editScroll(currentRoomId, stateId, x, y, entries, scope == ItemStateScope.ALL_STATES)
+            }
+            return
+        }
+        if (blockLinkedPlmMutation(scope == ItemStateScope.ALL_STATES)) return
+        val room = project.getOrCreateRoom(currentRoomId)
+        val used = room.customScrollCommands.keys + room.states.flatMap { it.customScrollCommands.keys }
+        val cmdIndex = (0..255).firstOrNull { "cmd_$it" !in used }
+            ?: run { postStatus("No free custom scroll command identifiers"); return }
+        val cmdId = "cmd_$cmdIndex"
+        val before = itemScopeSnapshot()
+        val commands = if (scope == ItemStateScope.ALL_STATES) room.customScrollCommands else currentScrollCommands()
+        commands[cmdId] = entries.toMutableList()
         // Use a custom param range starting from 0x0100 for custom commands
         // Format: 0xCC00 | cmdIndex (to distinguish from ROM pointers)
-        val cmdIndex = currentScrollCommands().keys.indexOf(cmdId)
         val customParam = 0xCC00 or (cmdIndex and 0xFF)
-        addPlm(0xB703, x, y, customParam)
+        // The commands and row are one transaction; do not revalidate an unallocated pointer.
+        val old = _workingPlms.filter { it.id == 0xB703 && it.x == x && it.y == y }
+        val removed = if (scope == ItemStateScope.ALL_STATES) addItemToAllStates(0xB703, x, y, customParam)
+            else old.map { PlmChange("remove", it.id, x, y, it.param) }.also { changes ->
+                currentPlmChanges().addAll(changes)
+                _workingPlms.removeAll(old.toSet())
+                _workingPlms.add(RomParser.PlmEntry(0xB703, x, y, customParam))
+                currentPlmChanges().add(PlmChange("add", 0xB703, x, y, customParam))
+            }
+        val operation = EditOperation("Edit scroll trigger", plmAdds = listOf(PlmChange("add", 0xB703, x, y, customParam)), plmRemoves = removed, itemScope = scope)
+        undoStack.add(operation)
+        itemScopeSnapshots[operation] = ItemScopeUndo(before, itemScopeSnapshot())
+        redoStack.clear()
+        undoVersion++
+        dirty = true
+        editVersion++
     }
 
     fun applyItemToAllStates(plm: RomParser.PlmEntry) {
         if (!isEditorItemPlm(plm.id)) return
+        applyPlmToAllStates(plm)
+    }
+
+    fun applyPlmToAllStates(plm: RomParser.PlmEntry) {
+        if (plm !in _workingPlms) { postStatus("Object changed; select it again."); return }
+        if (plm.id == 0xB703) {
+            val commands = scrollCommandsFor(plm) ?: run { postStatus("Scroll commands need source review"); return }
+            addScrollTriggerWithCommands(plm.x, plm.y, commands, ItemStateScope.ALL_STATES)
+            return
+        }
         addPlm(plm.id, plm.x, plm.y, plm.param, ItemStateScope.ALL_STATES)
     }
 
@@ -5844,28 +6176,36 @@ class EditorState(
         plmId: Int,
         itemScopeOverride: ItemStateScope? = null,
     ) {
-        if (hasManagedPlms() && plmId == 0xB76F) {
-            postStatus("Save-station removal also changes spawn data; that combined edit is not source-aware yet.")
-            return
-        }
-        if (!hasManagedPlms() && blockLinkedPlmMutation(isEditorItemPlm(plmId) && (itemScopeOverride ?: itemEditScope) == ItemStateScope.ALL_STATES)) return
-        val removed = _workingPlms.filter { it.x == x && it.y == y && it.id == plmId }
+        val bodyIds = gatePartnerIds(plmId)
+        val removed = _workingPlms.filter { it.x == x && it.y == y && (it.id == plmId || it.id in bodyIds) }
         if (removed.isEmpty()) return
-        val isItem = isEditorItemPlm(plmId)
-        val scope = if (isItem) itemScopeOverride ?: itemEditScope else ItemStateScope.THIS_STATE
+        val scope = itemScopeOverride ?: plmEditScope(removed.first { it.id == plmId })
+        if (!hasManagedPlms() && blockLinkedPlmMutation(scope == ItemStateScope.ALL_STATES)) return
         if (hasManagedPlms()) {
             val family = itemFamilyName(plmId)
             editManagedPlms("Remove ${RomParser.plmDisplayName(plmId)} · ASM") { bridge, stateId ->
+                if (plmId == 0xB76F) {
+                    require(removed.size == 1) { "Multiple stations occupy this tile; resolve them in ASM first." }
+                    val slot = removed.single().param and 255
+                    val save = bridge.saveSpawn(currentRoomId, currentArea, slot) ?: effectiveSaveStationSpawn(currentArea, slot, requireNotNull(currentRomParser))
+                        ?.let { base -> SourceSaveResource(com.supermetroid.editor.asm.AsmSaveStationSource.name(currentRoomId, currentArea, slot),
+                            currentRoomId, currentArea, slot, listOf(base.roomId, base.doorPtr,
+                                currentAreaRomSaveEntries[slot]?.doorBts ?: 0, base.scrollX, base.scrollY, base.samusY, base.samusX)) }
+                        ?: error("Station has no valid spawn record; review ASM before removal.")
+                    bridge.editSaveStation(currentRoomId, stateId, { it in removed }, null, save, scope == ItemStateScope.ALL_STATES)
+                    return@editManagedPlms
+                }
                 bridge.editManaged(currentRoomId, stateId, scope == ItemStateScope.ALL_STATES, { old ->
-                    old.x == x && old.y == y && (old.id == plmId ||
+                    old.x == x && old.y == y && (old.id == plmId || old.id in bodyIds ||
                         (scope == ItemStateScope.ALL_STATES && family != null && itemFamilyName(old.id) == family))
                 }, null)
             }
             return
         }
-        if (isItem && scope == ItemStateScope.ALL_STATES) {
-            val before = itemScopeSnapshot()
-            val changes = removeItemFromAllStates(removed.first())
+        val before = itemScopeSnapshot()
+        if (scope == ItemStateScope.ALL_STATES) {
+            val changes = removed.flatMap(::removeItemFromAllStates)
+            if (plmId == 0xB76F) cleanupSaveStationSpawnIfUnreferenced(removed.first().param and 255)
             val name = customItemNameForPlm(plmId) ?: RomParser.plmDisplayName(plmId)
             val operation = EditOperation(
                 "Remove $name from all states ($x,$y)",
@@ -5881,7 +6221,7 @@ class EditorState(
             postStatus("$name removed from all current and future room states.")
             return
         }
-        _workingPlms.removeAll { it.x == x && it.y == y && it.id == plmId }
+        _workingPlms.removeAll(removed.toSet())
         val changes = removed.map { PlmChange("remove", it.id, it.x, it.y, it.param) }
         currentPlmChanges().addAll(changes)
         for (old in removed) {
@@ -5892,9 +6232,10 @@ class EditorState(
         val op = EditOperation(
             "Remove $name ($x,$y)",
             plmRemoves = changes,
-            itemScope = if (isItem) ItemStateScope.THIS_STATE else null,
+            itemScope = ItemStateScope.THIS_STATE,
         )
         undoStack.add(op)
+        itemScopeSnapshots[op] = ItemScopeUndo(before, itemScopeSnapshot())
         redoStack.clear()
         undoVersion++
         dirty = true
@@ -7009,6 +7350,7 @@ class EditorState(
     }
 
     fun endStroke(description: String? = null) {
+        pendingPlmGeometry = null
         if (pendingEdits.isEmpty() && pendingPlmAdds.isEmpty()) return
         val layerLabel = if (pendingEdits.any { it.layer == TILE_EDIT_LAYER_2 }) "Layer 2 " else ""
         val desc = description ?: if (floatingSelection != null) {

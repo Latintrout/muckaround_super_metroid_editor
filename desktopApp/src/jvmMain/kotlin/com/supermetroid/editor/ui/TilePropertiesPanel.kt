@@ -92,6 +92,8 @@ internal fun TilePropertiesPanel(
     onWorkspaceChanged: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
+    onNavigateToScrollCommands: ((RomParser.PlmEntry) -> Unit)? = null,
+    onNavigateToSaveSpawn: ((RomParser.PlmEntry) -> Unit)? = null,
     onDismiss: () -> Unit,
     onDrag: (Offset) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -907,24 +909,24 @@ internal fun TilePropertiesPanel(
             Spacer(modifier = Modifier.height(4.dp))
             Text("Items / PLMs", fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            Text("Item add/remove scope", fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.outline)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Add new PLMs to", fontSize = uiFont.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(
+                    selected = editorState.itemEditScope == ItemStateScope.ALL_STATES,
+                    onClick = { editorState.selectItemEditScope(ItemStateScope.ALL_STATES) },
+                    label = { Text("All states", fontSize = uiFont.detail) },
+                    modifier = Modifier.heightIn(min = 30.dp),
+                )
                 FilterChip(
                     selected = editorState.itemEditScope == ItemStateScope.THIS_STATE,
                     onClick = { editorState.selectItemEditScope(ItemStateScope.THIS_STATE) },
                     label = { Text("This state", fontSize = LocalEditorTheme.current.fontSize.value.detail) },
-                    modifier = Modifier.height(26.dp),
-                )
-                FilterChip(
-                    selected = editorState.itemEditScope == ItemStateScope.ALL_STATES,
-                    onClick = { editorState.selectItemEditScope(ItemStateScope.ALL_STATES) },
-                    label = { Text("All states", fontSize = LocalEditorTheme.current.fontSize.value.detail) },
-                    modifier = Modifier.height(26.dp),
+                    modifier = Modifier.heightIn(min = 30.dp),
                 )
             }
             Text(
                 if (editorState.itemEditScope == ItemStateScope.ALL_STATES) {
-                    "Includes room conditions added later"
+                    "New conditions include these PLMs too"
                 } else {
                     "Only the selected room-state branch"
                 },
@@ -947,7 +949,6 @@ internal fun TilePropertiesPanel(
                 val iName = editorState.customItemNameForPlm(plm.id)
                     ?: RomParser.itemNameForPlm(plm.id)
                     ?: "PLM 0x${plm.id.toString(16)}"
-                val configuredScope = editorState.configuredItemScope(plm)
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -959,30 +960,13 @@ internal fun TilePropertiesPanel(
                             AsmPlmNavigationLinks(plm, onNavigateToPlmPlacement, onNavigateToAsm)
                         }
                         Text(
-                            "bit: 0x${plm.param.toString(16).uppercase().padStart(2, '0')} · " +
-                                when (configuredScope) {
-                                    ItemStateScope.ALL_STATES -> "All states"
-                                    ItemStateScope.THIS_STATE -> "This state"
-                                    null -> "Original state data"
-                                },
+                            "Pickup ID: 0x${plm.param.toString(16).uppercase().padStart(2, '0')}",
                             fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
-                            color = if (configuredScope == ItemStateScope.ALL_STATES) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        PlmScopeActions(editorState, plm)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (configuredScope != ItemStateScope.ALL_STATES) {
-                            TextButton(
-                                onClick = { editorState.applyItemToAllStates(plm) },
-                                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                                modifier = Modifier.height(24.dp),
-                            ) {
-                                Text("Apply to all", fontSize = LocalEditorTheme.current.fontSize.value.statusBar)
-                            }
-                        }
                         Text(
                             "✕",
                             modifier = Modifier
@@ -1013,6 +997,7 @@ internal fun TilePropertiesPanel(
                             )
                             AsmPlmNavigationLinks(plm, onNavigateToPlmPlacement, onNavigateToAsm)
                         }
+                        PlmScopeActions(editorState, plm, canRemove)
                         // Save station spawn details
                         if (plm.id == 0xB76F && romParser != null) {
                             val saveIdx = plm.param and 0xFF
@@ -1021,6 +1006,14 @@ internal fun TilePropertiesPanel(
                             if (saveEntry != null) {
                                 val detailColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                 Text("Save #$saveIdx (Area $area, ${saveEntry.source})", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = detailColor)
+                                if (editorState.hasManagedPlms()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Spawn shared across states", fontSize = uiFont.detail, color = detailColor, modifier = Modifier.weight(1f))
+                                        if (onNavigateToSaveSpawn != null) TextButton(onClick = { onNavigateToSaveSpawn(plm) }) {
+                                            Text("Spawn ASM", fontSize = uiFont.detail)
+                                        }
+                                    }
+                                }
                                 Row {
                                     Text("Spawn: ", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = detailColor)
                                     Text("X=${saveEntry.samusXSigned} Y=${saveEntry.samusYSigned}", fontSize = LocalEditorTheme.current.fontSize.value.detail,
@@ -1108,12 +1101,9 @@ internal fun TilePropertiesPanel(
                                             val sy = parseFlexibleInt(spawnYText)
                                             val scx = parseFlexibleInt(scrollXText)
                                             val scy = parseFlexibleInt(scrollYText)
-                                            if (sx != null && sy != null) {
-                                                editorState.updateSaveStationSpawnPosition(area, saveIdx, sx, sy, romParser)
-                                            }
-                                            if (scx != null && scy != null) {
-                                                editorState.updateSaveStationSpawnScroll(area, saveIdx, scx, scy, romParser)
-                                            }
+                                            if (sx != null && sy != null && scx != null && scy != null) {
+                                                editorState.updateSaveStationSpawnFields(area, saveIdx, sx, sy, scx, scy, romParser)
+                                            } else editorState.postStatus("Enter valid spawn and camera coordinates before applying.")
                                         },
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                         modifier = Modifier.heightIn(min = 30.dp)
@@ -1132,7 +1122,31 @@ internal fun TilePropertiesPanel(
                             val isCustom = (plm.param and 0xFF00) == 0xCC00
                             Text("When crossed:", fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (isCustom) {
+                            if (editorState.hasManagedPlms()) {
+                                val commands = editorState.scrollCommandsFor(plm)
+                                if (commands == null) {
+                                    Text("Commands need source review", fontSize = uiFont.detail, color = MaterialTheme.colorScheme.error)
+                                } else {
+                                    commands.forEach { cmd -> Text(RomParser.formatScrollCommand(cmd.screenIndex, cmd.scrollValue, rw),
+                                        fontSize = uiFont.detail, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    if (commands.isEmpty()) Text("No screens changed", fontSize = uiFont.detail, color = MaterialTheme.colorScheme.outline)
+                                    var draft by remember(plm) { mutableStateOf<Pair<String, List<com.supermetroid.editor.data.ScrollCommand>>?>(null) }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TextButton(onClick = { draft = if (draft != null) null else editorState.asmPlmSourceBridge!!.sourceText() to commands }) {
+                                            Text("Edit commands", fontSize = uiFont.detail)
+                                        }
+                                        if (onNavigateToScrollCommands != null) TextButton(onClick = { onNavigateToScrollCommands(plm) }) {
+                                            Text("ASM commands", fontSize = uiFont.detail)
+                                        }
+                                    }
+                                    draft?.let { (expectedSource, initial) ->
+                                        Text("This trigger · this state", fontSize = uiFont.detail, color = MaterialTheme.colorScheme.outline)
+                                        ScrollCommandEditor(rw, rh, initial,
+                                            onSave = { if (editorState.updateScrollTriggerCommands(plm, it, expectedSource)) draft = null },
+                                            onCancel = { draft = null }, allowEmpty = true)
+                                    }
+                                }
+                            } else if (isCustom) {
                                 val cmdIdx = plm.param and 0xFF
                                 val cmdId = "cmd_$cmdIdx"
                                 val cmds = editorState.getScrollCommand(cmdId)
@@ -1460,7 +1474,7 @@ internal fun TilePropertiesPanel(
                     val reusableCommandPtrs = reusableScrollCommandPtrs(
                         originalScrollTriggers,
                         editorState.workingPlms,
-                    )
+                    ).filter { it != 0 } // Named source resources have no allocated pointer until Build.
                     fun commandLines(cmdPtr: Int): List<String> {
                         return if (rw > 0 && (cmdPtr and 0xFF00) != 0xCC00) {
                             RomParser.decodeScrollCommands(romParser, cmdPtr, rw)
@@ -1534,6 +1548,18 @@ internal fun TilePropertiesPanel(
                             )
                         }
                         Divider()
+                    }
+                    if (editorState.hasManagedPlms()) {
+                        for (trigger in editorState.workingPlms.filter { it.id == 0xB703 && it.param == 0 }) {
+                            val commands = editorState.scrollCommandsFor(trigger) ?: continue
+                            DropdownMenuItem(
+                                text = { Text("Copy behavior from trigger (${trigger.x + 1}, ${trigger.y + 1})", fontSize = uiFont.detail) },
+                                onClick = {
+                                    addScrollExpanded = false
+                                    editorState.addScrollTriggerWithCommands(blockX, blockY, commands)
+                                },
+                            )
+                        }
                     }
                     DropdownMenuItem(
                         text = { Text("+ Create Scroll Behavior...", fontSize = LocalEditorTheme.current.fontSize.value.body, color = Color.White) },
@@ -2103,6 +2129,53 @@ private fun DoorDestinationPicker(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlmScopeActions(editor: EditorState, plm: RomParser.PlmEntry, canRemove: Boolean = true) {
+    val membership = editor.plmStateMembership(plm)
+    val editingScope = editor.plmEditScope(plm)
+    val scopeNote = if (editingScope == membership.editScope) "" else
+        if (editingScope == ItemStateScope.THIS_STATE) " · edit this state" else " · edit all states"
+    var expanded by remember(plm) { mutableStateOf(false) }
+    val font = LocalEditorTheme.current.fontSize.value
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            enabled = membership.totalStates > 0,
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+            modifier = Modifier.heightIn(min = 26.dp),
+        ) {
+            Text("${membership.label}$scopeNote ▾", fontSize = font.detail)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            val editScope = editor.plmEditScope(plm)
+            DropdownMenuItem(
+                text = { Text("${if (editScope == ItemStateScope.THIS_STATE) "✓ " else ""}Edit this state", fontSize = font.body) },
+                onClick = { expanded = false; editor.selectPlmEditScope(plm, ItemStateScope.THIS_STATE) },
+            )
+            if (membership.totalStates > 1) DropdownMenuItem(
+                text = { Text("${if (editScope == ItemStateScope.ALL_STATES) "✓ " else ""}Edit all states", fontSize = font.body) },
+                onClick = { expanded = false; editor.selectPlmEditScope(plm, ItemStateScope.ALL_STATES) },
+            )
+            Divider()
+            DropdownMenuItem(
+                text = { Text("Apply to all states", fontSize = font.body) },
+                enabled = !membership.allStates,
+                onClick = { expanded = false; editor.applyPlmToAllStates(plm) },
+            )
+            if (canRemove) {
+                DropdownMenuItem(
+                    text = { Text("Remove from this state", fontSize = font.body) },
+                    onClick = { expanded = false; editor.removePlm(plm.x, plm.y, plm.id, ItemStateScope.THIS_STATE) },
+                )
+                if (membership.totalStates > 1) DropdownMenuItem(
+                    text = { Text("Remove from all states", fontSize = font.body) },
+                    onClick = { expanded = false; editor.removePlm(plm.x, plm.y, plm.id, ItemStateScope.ALL_STATES) },
+                )
             }
         }
     }

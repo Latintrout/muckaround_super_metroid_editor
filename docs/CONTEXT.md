@@ -97,7 +97,7 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 | File | Contents |
 |------|----------|
-| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, selected-object placement vs. behavior links, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, reciprocal PLM authoring (fixed declarations plus automatic GUI-to-source object migration, relocatable macros, shared/private lists, All-states semantics, shared undo and build ownership), generated asset/room/patch inputs, Room Data/build reports, format checks, parity tests, and remaining compound operations, complete room-source authoring and runtime debugging. |
+| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, selected-object placement vs. behavior links, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, reciprocal PLM, scroll-trigger command and paired save-spawn authoring (fixed declarations plus automatic GUI-to-source object migration, relocatable macros, named resource references, shared/private lists, All-states semantics, shared undo, protected save slots and checked build ownership), generated asset/room/patch inputs, Room Data/build reports, format checks, parity tests, and remaining compound operations, complete room-source authoring and runtime debugging. |
 
 ### Project Planning (`docs/project/`)
 
@@ -276,12 +276,16 @@ preview, add, duplicate, delete, reorder, simulate, and export branches with sta
 typed or compound conditions. Layouts are whole resources: the first change to an unacknowledged
 shared layout asks whether to edit every linked state or make the active state's complete layout
 unique. The compact shared/unique indicator, resource-owned operations, make-unique/copy/share/revert
-commands, and selection-to-state copying use that same rule. Collectible item placement separately
-offers **This state** and **All states**. ROM-mode All-state items are stored as room-wide PLM deltas;
+commands, and selection-to-state copying use that same rule. **Add new PLMs to** defaults to
+**All states**, with **This state** opt-in for items, stations, gates, door caps and scroll triggers/extensions.
+Existing objects report their actual membership and retain their scope, with explicit per-object
+editing/removal choices. Distinct sibling variants/commands and incompatible gate/door-cap collision
+geometry block broad edits. Gate body/shot-block pairs and save-spawn lifetimes use atomic scoped operations.
+ROM-mode All-state objects are stored as room-wide PLM deltas;
 ASM-owned lists instead contain direct `%PLMPopEntry` rows in each affected list, without per-object
-Common helpers. These copies retain one collection-bit parameter, appear in conditions added later,
-and reject a different item already
-occupying those coordinates in any branch. `ELSE Default` is a fallback condition, not inherited
+Common helpers. Item copies retain one collection-bit parameter; new conditions inherit template contents
+and explicit exceptions. Placement rejects a different item already occupying those coordinates in
+any branch. `ELSE Default` is a fallback condition, not inherited
 base content. Relinking for other non-layout resources,
 persistent-state action authoring, and separate-background/custom-code
 authoring remain separate future features. Core project-owned room

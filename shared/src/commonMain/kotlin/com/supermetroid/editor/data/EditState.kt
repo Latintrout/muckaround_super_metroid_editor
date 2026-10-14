@@ -32,7 +32,7 @@ data class EditOperation(
     val edits: List<TileEdit> = emptyList(),
     val plmAdds: List<PlmChange> = emptyList(),
     val plmRemoves: List<PlmChange> = emptyList(),
-    /** Scope used by collectible-item PLM changes in this operation. */
+    /** Scope used by PLM changes (historical serialized field name retained). */
     val itemScope: ItemStateScope? = null,
     val enemyAdds: List<EnemyChange> = emptyList(),
     val enemyRemoves: List<EnemyChange> = emptyList(),
@@ -45,7 +45,7 @@ data class EditOperation(
 )
 
 /**
- * Authoring scope for collectible items.
+ * Authoring scope for room PLMs, including items, stations, gates and triggers.
  *
  * [ALL_STATES] is stored in [RoomEdits.plmChanges], so it applies to every
  * current room state and to conditions authored later. [THIS_STATE] is stored

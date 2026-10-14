@@ -19,6 +19,23 @@ class AsmRoomProjectionTest {
         return room to migration.text
     }
 
+    @Test fun `warm named scroll references retain exact source identity and invalidate for source commands or room bounds`() {
+        val (room, original) = roomSource()
+        val text = AsmRoomObjectSource(original).editScroll(room, "state-1", 4, 5,
+            listOf(com.supermetroid.editor.data.ScrollCommand(3, 2)), 2, 2)
+        val catalog = catalog()
+        AsmRoomProjectionRepository(directory).load(text, macros, listOf(room), catalog)
+        val warm = AsmRoomProjectionRepository(directory) { _, _ -> error("Warm source should not be decoded") }
+        val document = warm.load(text, macros, listOf(room), catalog).getValue(room.roomId).documents.getValue("state-1")
+        val row = document.records.last()
+        assertEquals("SmeditObjects_91F8_Scroll_1", row.scrollResource)
+        assertEquals(0, row.entry.param, "No allocation address may enter a durable preview")
+        val repository = AsmRoomProjectionRepository(directory)
+        assertTrue(repository.load(text.replace("db ${'$'}03, ${'$'}02", "db ${'$'}03, ${'$'}09"), macros, listOf(room), catalog).isEmpty())
+        room.roomHeaderChange = com.supermetroid.editor.data.RoomHeaderChange(width = 1, height = 1)
+        assertTrue(repository.load(text, macros, listOf(room), catalog).isEmpty(), "Out-of-room commands must not reuse a warm projection")
+    }
+
     @Test fun `warm typed projections restore exact state rows and navigation without parsing source`() {
         val (room, text) = roomSource()
         val catalog = catalog()

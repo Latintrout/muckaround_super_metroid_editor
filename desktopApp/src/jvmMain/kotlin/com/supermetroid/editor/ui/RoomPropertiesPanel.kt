@@ -1096,6 +1096,8 @@ fun RoomPropertiesPanel(
             val scrollH = editorState.workingBlocksTall / 16
             val visiblePlms = if (selectedIsActive) {
                 editorState.workingPlms
+            } else if (editorState.hasManagedPlms()) {
+                selectedStateId?.let { editorState.asmPlmSourceBridge?.managedView(room.roomId, it)?.document?.entries }.orEmpty()
             } else {
                 remember(plmSetPtr) { romParser.parsePlmSet(plmSetPtr) }
             }
@@ -1114,6 +1116,9 @@ fun RoomPropertiesPanel(
                     .map { analyzeDoorScrollAsm(romParser, it) }
                     .filter { it.writes.isNotEmpty() }
                 buildScrollRuntimeDiagnostics(visiblePlms, scrollW, scrollH, doorAnalyses) { trigger ->
+                    if (editorState.hasManagedPlms()) {
+                        editorState.scrollCommandsFor(trigger, selectedStateId)
+                    } else
                     if ((trigger.param and 0xFF00) == 0xCC00) {
                         editorState.getScrollCommand("cmd_${trigger.param and 0xFF}")
                     } else {

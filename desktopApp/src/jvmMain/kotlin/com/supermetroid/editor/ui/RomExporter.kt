@@ -465,6 +465,9 @@ internal class RomExporter(
                                 size = allocation.size,
                             )
                         }
+                        for ((pcOffset, label) in roomExportResult.sourceSaveClaims) {
+                            writePlan.claimCurrentRange(owner, "Source save $label", pcOffset - writePlan.headerSize, 14, RomWriteKind.ROOM)
+                        }
                     }
                 }
             } catch (e: ProjectRoomExportException) {

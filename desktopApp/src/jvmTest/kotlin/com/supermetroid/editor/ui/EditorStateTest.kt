@@ -1433,6 +1433,7 @@ class EditorStateTest {
 
         @BeforeEach
         fun setUpRoom() {
+            state.initTestLevel(blocksWide = 64, blocksTall = 32)
             state.setRoomIdForTest(0x91F8)
         }
 
@@ -1684,6 +1685,9 @@ class EditorStateTest {
 
     @Nested
     inner class SaveStationSpawns {
+        @BeforeEach
+        fun setUpRoom() { state.initTestLevel(blocksWide = 16, blocksTall = 16) }
+
         @Test
         fun `repainting an existing save station preserves its AreaSave index`() {
             state.setRoomIdForTest(0x93D5)

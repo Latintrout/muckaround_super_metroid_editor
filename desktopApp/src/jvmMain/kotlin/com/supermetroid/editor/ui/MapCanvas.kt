@@ -252,6 +252,8 @@ fun MapCanvas(
     onWorkspaceChanged: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
+    onNavigateToScrollCommands: ((RomParser.PlmEntry) -> Unit)? = null,
+    onNavigateToSaveSpawn: ((RomParser.PlmEntry) -> Unit)? = null,
     roomKeyboardNavigationEnabled: Boolean = true,
     showItemNames: Boolean = true,
     showMetaNames: Boolean = true,
@@ -1896,6 +1898,8 @@ fun MapCanvas(
                                     onWorkspaceChanged = onWorkspaceChanged,
                                     onNavigateToAsm = onNavigateToAsm,
                                     onNavigateToPlmPlacement = onNavigateToPlmPlacement,
+                                    onNavigateToScrollCommands = onNavigateToScrollCommands,
+                                    onNavigateToSaveSpawn = onNavigateToSaveSpawn,
                                     onDismiss = { propsExpanded = false; mapFocusReq.requestFocus() },
                                     onDrag = ::dragPropertiesPanel,
                                     modifier = Modifier
