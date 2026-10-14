@@ -259,28 +259,7 @@ class RomParser(
         val hasLiquid: Boolean get() = liquidSurfaceStart != 0xFFFF
 
         companion object {
-            // Names from SMILE source (FX1_1.frx Layer3Type dropdown)
-            val FX_TYPE_NAMES = mapOf(
-                0x00 to "None",
-                0x02 to "Lava",
-                0x04 to "Acid",
-                0x06 to "Water",
-                0x08 to "Spores",
-                0x0A to "Rain",
-                0x0C to "Fog",
-                0x0E to "Haze",
-                0x10 to "Dense Fog",
-                0x16 to "Firefleas",
-                0x18 to "Lightning",
-                0x1A to "Smoke",
-                0x1C to "Heat Shimmer",
-                0x20 to "Sky Scrolling",
-                0x24 to "Fireflea FX",
-                0x26 to "4 Statues",
-                0x28 to "Ceres Elevator",
-                0x2A to "Ceres Ridley",
-                0x2C to "Haze",
-            )
+            val FX_TYPE_NAMES = NativeFxTypes.names
 
             // C byte bitfield (from SMILE SmileMod1.bas)
             val LIQUID_OPTION_NAMES = mapOf(

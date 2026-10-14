@@ -50,6 +50,7 @@ class ProjectRoomExporter(
     private val onLog: (String) -> Unit = {},
     private val sourcePlmSets: Map<Int, Map<String, SourcePlmResource>> = emptyMap(),
     private val sourceInitialScrolls: Map<Int, Map<String, SourceInitialScrollResource>> = emptyMap(),
+    private val sourceFx: Map<Int, Map<String, SourceFxResource>> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -156,6 +157,13 @@ class ProjectRoomExporter(
 
         for ((roomKey, roomEdits) in effectiveEdits) {
             if (!roomEdits.hasEdits) continue
+            if (roomEdits.asmFxSourceVersion != 0) {
+                requireDoorRoutedFxOwnership(roomEdits, romParser)
+                require(roomEdits.asmFxSourceVersion == 1 && roomEdits.roomId in sourceFx) { "Room $roomKey requires its decoded FX source." }
+                require(roomEdits.fxChange == null && roomEdits.states.all { it.fxChange == null && it.doorFxChanges.isEmpty() }) {
+                    "Room $roomKey has both authored FX and GUI effect overrides."
+                }
+            }
             if (roomEdits.asmInitialScrollSourceVersion != 0) {
                 require(roomEdits.asmInitialScrollSourceVersion == 1 && roomEdits.roomId in sourceInitialScrolls) {
                     "Room $roomKey requires its decoded initial scroll source."
@@ -297,6 +305,10 @@ class ProjectRoomExporter(
                 applySourceInitialScrolls(roomKey, roomId, roomEdits, rewrittenStateOffsets, effectiveWidth, effectiveHeight)
                 roomsPatched.add(roomKey)
             }
+            if (roomEdits.asmFxSourceVersion != 0) {
+                applySourceFx(roomKey, roomId, roomEdits, rewrittenStateOffsets)
+                roomsPatched.add(roomKey)
+            }
             if (roomEdits.stateGraphChanged) roomsPatched.add(roomKey)
 
             if (roomEdits.saveStationSpawns.isNotEmpty()) {
@@ -412,6 +424,32 @@ class ProjectRoomExporter(
             val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
                 ?: failExport("Initial scroll source state ${state.id} has no writable state record")
             writeU16(romData, offset + 14, ptr)
+        }
+    }
+
+    private fun applySourceFx(roomKey: String, roomId: Int, edits: RoomEdits, rewritten: Map<String, Int>) {
+        val inputs = sourceFx.getValue(roomId)
+        require(inputs.keys == edits.states.map { it.id }.toSet()) { "FX source state membership changed." }
+        val states = romParser.inspectRoomStates(roomId).states
+        if (rewritten.isEmpty()) require(edits.states.size == states.size &&
+            edits.states.mapNotNull { it.sourceStateIndex }.toSet() == states.indices.toSet()) { "FX needs a complete state manifest or rebuilt graph." }
+        val pointers = mutableMapOf<String, Pair<Int, SourceFxResource>>()
+        val effectiveParser = RomParser(romData)
+        for (state in edits.states) {
+            val resource = inputs.getValue(state.id)
+            validateSourceFxDoors(roomId, resource, effectiveParser)
+            val existing = pointers[resource.identity]
+            val pointer = if (existing != null) {
+                require(existing.second == resource) { "Shared FX source has inconsistent values." }
+                existing.first
+            } else {
+                val allocation = roomDataAllocator.allocate(resource.bytes(), listOf(0x83), "Room $roomKey source FX ${resource.identity}")
+                    ?: failExport("Room $roomKey FX source does not fit bank \$83")
+                (allocation.snesAddress and 0xFFFF).also { pointers[resource.identity] = it to resource }
+            }
+            val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
+                ?: failExport("FX source state ${state.id} has no state record")
+            writeU16(romData, offset + 6, pointer)
         }
     }
 

@@ -60,6 +60,8 @@ data class AppSettings(
     val roomEditorShowFlatSlopeSurfaces: Boolean = true,
     /** Stable TileOverlay names. Null keeps legacy defaults; an empty list means all off. */
     val roomEditorEnabledTileOverlays: List<String>? = null,
+    /** Stable Rooms sidebar tab name; view preference, not project content. */
+    val roomSidebarTab: String = "TILESET",
     val mainSidebarWidthDp: Float = 340f,
     val sidebarBottomPaneHeightDp: Float = 0f,
     val asmProblemsPaneHeightDp: Float = 180f,

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
@@ -51,7 +52,9 @@ fun TilesetPreview(
     room: RoomInfo?,
     romParser: RomParser?,
     editorState: EditorState? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    verticalScrollState: ScrollState = rememberScrollState(),
+    horizontalScrollState: ScrollState = rememberScrollState(),
 ) {
     var gridData by remember { mutableStateOf<TilesetGridData?>(null) }
     var tilesetId by remember { mutableStateOf<Int?>(null) }
@@ -100,8 +103,8 @@ fun TilesetPreview(
                         val bitmap = remember(data, selStart, selEnd) {
                             tilesetGridWithSelection(data, selStart, selEnd).toComposeImageBitmap()
                         }
-                        val hScroll = rememberScrollState()
-                        val vScroll = rememberScrollState()
+                        val hScroll = horizontalScrollState
+                        val vScroll = verticalScrollState
                         val coroutineScope = rememberCoroutineScope()
 
                         var isPanning by remember { mutableStateOf(false) }

@@ -11,6 +11,48 @@ import kotlin.test.*
 /** ROM-only authoring must obey the same scope policy as authored ASM, without external fixtures. */
 class PlmStateScopeTest {
     @TempDir lateinit var directory: File
+
+    @Test fun `ROM object fields keep all state scope and form one reversible exportable operation`() {
+        val (editor, parser) = fixture()
+        editor.addPlm(0xEEDB, 12, 9, 0x60)
+        val before = editor.workingPlms.toList()
+        val old = before.single { it.x == 12 && it.y == 9 && it.id == 0xEEDB }
+        val replacement = old.copy(id = 0xEEDF, x = 13)
+        editor.updateRoomObjectFields(editor.currentRoomId, editor.currentPlmStateId(), before, before.indexOf(old), replacement)
+        assertContains(editor.workingPlms, replacement)
+        assertTrue(editor.plmStateMembership(replacement).allStates)
+        assertTrue(editor.undo())
+        assertEquals(before, editor.workingPlms)
+        assertTrue(editor.redo())
+        assertContains(editor.workingPlms, replacement)
+        val target = parser.getRomData().copyOf()
+        ProjectRoomExporter(editor.project, parser, target).exportRooms()
+        val built = RomParser(target)
+        built.parseRoomStatesWithData(editor.currentRoomId).forEach { state ->
+            assertContains(built.parsePlmSet(state.plmSetPtr), replacement)
+            assertFalse(old in built.parsePlmSet(state.plmSetPtr))
+        }
+        assertFalse(editor.project.asmWorkspace.enabled)
+    }
+
+    @Test fun `ROM object fields preserve private placement and stale or compound edits fail before mutation`() {
+        val (editor, parser) = fixture()
+        editor.addPlm(0xEEDB, 12, 9, 0x60, ItemStateScope.THIS_STATE)
+        val before = editor.workingPlms.toList()
+        val old = before.single { it.x == 12 && it.y == 9 && it.id == 0xEEDB }
+        val state = editor.currentPlmStateId()
+        val replacement = old.copy(id = 0xEEDF)
+        editor.updateRoomObjectFields(editor.currentRoomId, state, before, before.indexOf(old), replacement)
+        assertFalse(editor.plmStateMembership(replacement).allStates)
+        assertFails { editor.updateRoomObjectFields(editor.currentRoomId, state, before, before.indexOf(old), old) }
+        val current = editor.workingPlms.toList()
+        assertFails { editor.updateRoomObjectFields(editor.currentRoomId, state, current, current.indexOf(replacement), replacement.copy(id = 0xB76F)) }
+        assertFails { editor.updateRoomObjectFields(editor.currentRoomId, state, current, current.indexOf(replacement), replacement.copy(x = 255)) }
+        assertEquals(current, editor.workingPlms)
+        val sibling = editor.project.rooms.getValue("91F8").states.first { it.id != state }.id
+        editor.switchRoomState(sibling, parser)
+        assertFalse(replacement in editor.workingPlms)
+    }
     private fun fixture(project: SmEditProject = SmEditProject("test.sfc")): Pair<EditorState, RomParser> {
         val bytes = saveSourceTestRom()
         val level = ByteArray(2 + 32 * 32 * 3).also { it[1] = 8 }

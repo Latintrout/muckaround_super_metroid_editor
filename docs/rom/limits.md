@@ -12,7 +12,7 @@ logic (`EditorState.exportToRom()`).
 |----------|-----------|-----------------|------------|-------|
 | **PLMs** (items, doors, save stations, gates…) | Terminated by `0x0000` | **256** (parser safety cap) | 6 bytes | Total set = `(N × 6) + 2` bytes |
 | **Enemies** | Terminated by `0xFFFF` | ~60 per set | 16 bytes | Bank `$A1` free space is the real cap |
-| **FX entries** | Terminated by `doorSelect == 0` | **16** (parser safety cap) | 16 bytes | Bank `$83` |
+| **FX entries** | Full Default header (`doorSelect == 0`) or 2-byte `$FFFF` stop | **16** (parser/authoring safety cap, not hardware) | 16 bytes | Bank `$83`; runtime-indexed tails need separate ownership |
 | **Room scrolls** | 1 byte per screen | **50 bytes** (max 50 screens) | 1 byte | Bank `$8F` |
 | **Room dimensions** | 0x0F × 0x0F (16 × 16 screens) | **50 screens** max area | — | `width × height ≤ 50` |
 | **Room map rectangle** | 64 × 31 coordinate cells | `x + width ≤ 64`, `y + height ≤ 31` | — | Pause-map storage is 64×32, but its first stored row is engine padding |
@@ -100,7 +100,7 @@ tilemap streaming disabled, and Y = fixed. This byte behavior is implemented by 
 engine's layer 2 position and background-update routines; the value is not a single
 enumerated “scroll mode.”
 
-## FX Types (Layer3Type byte — from SMILE FX1_1.frx)
+## FX Types (native dispatch at $83:AC18–AC45)
 
 | Byte | Type | Liquid Physics |
 |------|------|---------------|
@@ -111,37 +111,47 @@ enumerated “scroll mode.”
 | `0x08` | Spores | — |
 | `0x0A` | Rain | — |
 | `0x0C` | Fog | — |
-| `0x0E` | Haze | — |
-| `0x10` | Dense Fog | — |
-| `0x16` | Firefleas | — |
-| `0x18` | Lightning | — |
-| `0x1A` | Smoke | — |
-| `0x1C` | Heat Shimmer | — |
-| `0x20` | Sky Scrolling | — |
-| `0x24` | Fireflea FX | — |
-| `0x26` | 4 Statues | — |
-| `0x28` | Ceres Elevator | — |
-| `0x2A` | Ceres Ridley | — |
-| `0x2C` | Haze | — |
+| `0x0E`–`0x1E` (even) | Unused — `RTL` setup handler | Not supported named effects |
+| `0x20` | Scrolling Sky | — |
+| `0x22` | Scrolling Sky (unused variant) | — |
+| `0x24` | Fireflea | — |
+| `0x26` | Tourian Statues | — |
+| `0x28` | Ceres Ridley | — |
+| `0x2A` | Ceres Elevator | — |
+| `0x2C` | Ceres Haze | — |
 
 Liquid physics index: `(fxType & 0xF) >> 1` → 1=Lava, 2=Acid, 3=Water.
 
-### FX Data Structure (16 bytes per entry, from SMILE SmileMod1.bas)
+The native bank-`$83` dispatch uses even **byte offsets**, not sequential indices.
+SMEDIT's `NativeFxTypes` drives UI/header names and generated comments from this
+table. Historical SMILE labels such as `$18 = Lightning`, `$16 = Firefleas` and
+`$0E = Haze` do not name implemented handlers at those slots. An `RTL` setup handler
+does not mean every header field is inert: the loader still loads blend/options,
+palette and animated-tile values. New source-owned FX accepts only even offsets
+`$00-$2C`. Successful assembly of another byte does not prove it is a valid type.
+
+### FX Data Structure (16 bytes per entry)
+
+Verified against `Load_FX_Header` at `$89:AB82-$89:ACC2`. A complete Default
+header ends normal lookup. Otherwise the table needs the **two-byte** `$FFFF`
+door-word stop; an empty table consists only of that stop. Do not confuse it with
+a 16-byte header. Mother Brain has additional runtime-indexed records after
+Default; they are guarded from the initial reciprocal FX migration.
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| +0 | 2 | doorSelect | 0=default, else door ID that triggers this FX |
+| +0 | 2 | doorSelect | 0=Default, else incoming bank-$83 DoorDef pointer; FFFF=stop (no remaining fields) |
 | +2 | 2 | liquidSurfaceStart | Initial liquid height (0xFFFF = no liquid) |
 | +4 | 2 | liquidSurfaceNew | Target liquid height |
-| +6 | 2 | liquidSpeed | Speed of surface movement |
-| +8 | 1 | liquidDelay | Delay before liquid moves |
+| +6 | 2 | liquidSpeed | Signed 8.8 surface velocity |
+| +8 | 1 | liquidDelay | Frame timer; 00 does not start movement |
 | +9 | 1 | fxType (Layer3Type) | See table above |
 | +10 | 1 | fxBitA | Layer rendering control |
 | +11 | 1 | fxBitB | Additional layer rendering |
 | +12 | 1 | fxBitC | Liquid options bitfield |
 | +13 | 1 | paletteFxBitflags | Palette glow toggles |
 | +14 | 1 | tileAnimBitflags | Animated tile toggles |
-| +15 | 1 | paletteBlend | Palette blend index |
+| +15 | 1 | paletteBlend | Byte offset into native blend-color tables |
 
 ### Liquid Options (fxBitC bitfield)
 

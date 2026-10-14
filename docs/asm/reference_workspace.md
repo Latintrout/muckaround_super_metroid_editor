@@ -1308,6 +1308,81 @@ generation changing an adopted initial grid are guarded rather than partially
 translated. A joint source-aware resize/generation transaction and explicit
 re-sharing controls are future work.
 
+## Reciprocal room FX
+
+**Room Info → Default FX → ASM** opens the selected state's authored header in
+`bank_83.asm`. Each existing door-specific row also has an **ASM** link. A visual
+FX edit automatically adopts the room's supported tables in ASM mode, independently
+of PLMs or initial scrolls. ROM-patching mode retains its normal FX overrides.
+
+The authored table contains readable, commented `dw`/`db` fields: four words
+(incoming door, liquid start, target, signed 8.8 speed), then eight bytes
+(delay, type, A/B/C options, palette effects, animated tiles, palette blend).
+State wrappers name the table; JSON records only `asmFxSourceVersion = 1`, not
+a second copy of its values. Adoption imports existing common/state/door overrides
+and retires them with metadata-aware Undo/Redo.
+
+Generated type fields include the native effect name, for example
+`db $06 ; FX Type - Water`. GUI edits and Save refresh those generated names while
+preserving scalar values, CRLF and semicolon-separated handwritten notes. The
+dropdown, decoded header and writer share `NativeFxTypes`; old SMILE labels such
+as `$18 = Lightning` are not used as native handler names. `$0E-$1E` are explicitly
+Unused/no-op-handler slots in this dispatch. Invalid drafts still save unchanged.
+
+Ordered incoming-door headers remain intact. The engine chooses the first match
+or the complete Default header (`door = $0000`); that header ends lookup itself.
+A table without Default ends with the **two-byte** `dw $FFFF` stop, which also
+represents an empty/no-FX table. Editing Default in such a table adds a complete
+header without removing its door branches. FX type is an **even byte offset** into
+the native dispatch table (`$00-$2C`), not a sequential enum. Palette blend is also
+a byte offset, not an arbitrary palette ID.
+
+GUI edits detach a shared table for the selected state. Raw edits affect every
+state wrapper referencing that table. Room-wide FX operations update each distinct
+resource once; new conditions inherit their template and later detach on editing.
+Independent equal-valued tables never become aliases. Scalar edits preserve manual
+notes and whitespace. Save/GUI cleanup removes unreachable owned declarations while
+keeping references from custom ASM. The lightweight startup index includes both
+banks `$8F` and `$83`, so FX adoption does not wait for the full IDE index.
+
+The typed lens validates every active wrapper, field width, record layout, selector
+order, unique selectors, incoming-door destination, native type offset, stop and
+bank boundary. Invalid drafts remain saveable; the last-good preview is marked with
+the problem, and GUI writes cannot overwrite it. Format failures retain an authored
+file/line in the build drawer; an unsafe FX type links directly to its field.
+The map previews **Default FX**,
+not a simulated incoming-door choice or later runtime mutation. Door-specific
+values remain editable in their separate rows.
+
+Build decodes saved source, allocates whole tables in bank `$83`, invokes the
+authored macros at checked placements, and emits symbolic state pointers at `+$06`.
+Complete resource/pointer claims and final Asar-byte parity compose with PLM,
+initial-scroll and save-spawn authoring, state-graph relocation and ordinary ROM
+patches. Conflicting edits to original state pointers/FX bytes fail explicitly.
+The initial source-built native loader at `$89:AB82-$89:ACC2` and dispatch pointers
+at `$83:AC18-$83:AC45` must match the loaded baseline; custom layouts/dispatches need
+a matching codec. These checks are bounded ABI checks, not proof of arbitrary hack
+runtime behavior.
+
+**Indexed FX is a separate boundary.** Mother Brain's table at `$83:A0A4` has
+two additional headers *after* Default, selected by her AI through `Load_FX_Entry`
+(`$89:AB02`). Moving only the door-visible prefix would break her acid transitions.
+Adoption therefore blocks that native table without replacing source or metadata.
+Supporting it needs explicit indexed records/consumers, not a relaxed door parser.
+Project-created rooms and compound whole-room reset/FX generation remain guarded
+until they have a joint source transaction. Arbitrary expressions are not interpreted
+by this first FX lens.
+
+Acceptance: in an ASM project use **Room Info → Default FX**, change water/height,
+open **ASM**, edit a field, return and switch states. Check Undo/Redo, save/reopen,
+and Build/Run with an unrelated patch enabled. Also check a room with incoming-door
+FX: editing one branch must preserve Default and its siblings. `AsmFxSourceTest`
+covers reciprocal edits, adoption, aliases, invalid drafts, startup-independent
+preview, notes, strict reads, state cloning and headered allocation/ownership.
+`asmBuildIntegrationTest --tests '*authored FX compose*'` verifies real Asar output
+alongside PLMs, initial scrolls, door variants, empty tables, added states and ROM
+patches; fixtures are isolated and the base ROM remains immutable.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -1327,8 +1402,8 @@ Follow-up work can now be incremental:
    result navigation are implemented. The separate reciprocal authoring pilot now
    shares fixed-layout declarations and relocatable authored object macros with the
    GUI, including state exceptions and copy-on-write. Initial screen grids,
-   scroll-trigger commands and paired save-spawn records now use the same authority
-   contract. Next prioritize FX tables, then enemy population/GFX pairing and one
+   scroll-trigger commands, paired save-spawn records and ordinary door/default FX
+   now use the same authority contract. Next prioritize enemy population/GFX pairing and one
    asset-owned graphics example, alongside compound operations. Then extend full
    authoring to rewritten state graphs, level data, doors, headers, and state selectors;
    then give project-created rooms stable source

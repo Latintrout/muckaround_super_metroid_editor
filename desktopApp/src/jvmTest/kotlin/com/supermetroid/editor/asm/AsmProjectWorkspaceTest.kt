@@ -23,6 +23,7 @@ class AsmProjectWorkspaceTest {
 
     private fun roomReference(): AsmReferenceWorkspace = fakeReference(emptyList()).also { reference ->
         File(reference.root, "src/bank_8F.asm").writeText("org ${'$'}8F8000\nTestObjects:\n    dw ${'$'}0000\n")
+        File(reference.root, "src/bank_83.asm").writeText("org ${'$'}838000\nTestFx:\n    dw ${'$'}FFFF\n")
         File(reference.root, "src/macros.asm").writeText("; macros\n")
     }
 
@@ -109,20 +110,30 @@ class AsmProjectWorkspaceTest {
             state.bindProject(file.path, true, progressive = true)
             assertEquals(false, state.projectWorkspace?.indexComplete)
             assertNotNull(state.workspace?.index?.file(PLM_SOURCE_FILE))
+            assertNotNull(state.workspace?.index?.file(FX_SOURCE_FILE))
+            assertTrue(state.projectSourceText(FX_SOURCE_FILE).contains("TestFx:"), "Room FX must never adopt an empty bank while the full IDE index is pending")
             assertEquals(null, state.workspace?.index?.file("bank_80.asm"))
+            assertThrows<IllegalArgumentException> { state.projectSourceText("bank_80.asm") }
             assertTrue(state.sourceIndexingInProgress)
             assertFalse(state.busy)
             withTimeout(5_000) { started.await() }
             state.openSource(PLM_SOURCE_FILE, 2)
             val changed = state.projectSourceText(PLM_SOURCE_FILE) + "; newer typing\n"
             state.updateSourceEditText(PLM_SOURCE_FILE, changed)
+            val fxBefore = state.projectSourceText(FX_SOURCE_FILE)
+            state.replaceProjectSource(FX_SOURCE_FILE, fxBefore, fxBefore + "; newer FX\n")
             val caret = state.selectedLineIndex to state.selectedColumnIndex
+            assertTrue(state.hasUnsavedSourceChanges(PLM_SOURCE_FILE))
+            assertTrue(state.saveAllSources(), state.error)
+            assertEquals(fxBefore + "; newer FX\n", File(state.projectWorkspace!!.workingDirectory, "src/$FX_SOURCE_FILE").readText())
             release.complete(Unit)
             state.awaitSourceIndexing()
             assertEquals(true, state.projectWorkspace?.indexComplete)
             assertNotNull(state.workspace?.index?.file("bank_80.asm"))
             assertEquals(changed, state.projectSourceText(PLM_SOURCE_FILE))
-            assertTrue(state.hasUnsavedSourceChanges(PLM_SOURCE_FILE))
+            assertEquals(fxBefore + "; newer FX\n", state.projectSourceText(FX_SOURCE_FILE))
+            assertFalse(state.hasUnsavedSourceChanges(PLM_SOURCE_FILE))
+            assertFalse(state.hasUnsavedSourceChanges(FX_SOURCE_FILE))
             assertEquals(caret, state.selectedLineIndex to state.selectedColumnIndex)
         } finally { release.complete(Unit); state.awaitSourceIndexing() }
     }

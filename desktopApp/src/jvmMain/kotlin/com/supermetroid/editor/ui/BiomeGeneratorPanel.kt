@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -71,6 +72,7 @@ fun BiomeGeneratorPanel(
     romParser: RomParser?,
     rooms: List<RoomInfo>,
     modifier: Modifier = Modifier,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     val styleChoices = remember {
         listOf(BiomeStyle.PIPE_MAZE) +
@@ -256,7 +258,7 @@ fun BiomeGeneratorPanel(
     }
 
     Column(
-        modifier = modifier.padding(8.dp).verticalScroll(rememberScrollState()),
+        modifier = modifier.padding(8.dp).verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(

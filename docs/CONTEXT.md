@@ -97,7 +97,7 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 | File | Contents |
 |------|----------|
-| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, selected-object placement vs. behavior links, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, reciprocal PLM, scroll-trigger command and paired save-spawn authoring (fixed declarations plus automatic GUI-to-source object migration, relocatable macros, named resource references, shared/private lists, All-states semantics, shared undo, protected save slots and checked build ownership), generated asset/room/patch inputs, Room Data/build reports, format checks, parity tests, and remaining compound operations, complete room-source authoring and runtime debugging. |
+| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, selected-object placement vs. behavior links, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, reciprocal PLM, scroll-trigger, save-spawn, initial-scroll and ordinary FX authoring (shared/private source authority, state isolation, shared undo and checked build ownership), guarded runtime-indexed Mother Brain FX, generated asset/room/patch inputs, Room Data/build reports, format checks, parity tests, and remaining compound operations, complete room-source authoring and runtime debugging. |
 
 ### Project Planning (`docs/project/`)
 

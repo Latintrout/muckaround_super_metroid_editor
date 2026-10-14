@@ -5,6 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.asm.AsmPlmSourceBridge
+import com.supermetroid.editor.asm.PLM_SOURCE_FILE
+import com.supermetroid.editor.asm.FX_SOURCE_FILE
+import com.supermetroid.editor.rom.withFxChange
+import com.supermetroid.editor.rom.emptyDefaultFxEntry
 import com.supermetroid.editor.data.CustomItemDef
 import com.supermetroid.editor.data.CommunitySamusSpriteSource
 import com.supermetroid.editor.data.DoorChange
@@ -407,7 +411,7 @@ class EditorState(
 
     fun setProjectRomBuildMode(mode: ProjectRomBuildMode) {
         if (mode == ProjectRomBuildMode.PATCHED_ROM && (project.asmWorkspace.plmSourceBindings.isNotEmpty() ||
-                project.rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 })) {
+                project.rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 })) {
             postStatus("Source-authored room data requires ASM mode.")
             return
         }
@@ -591,7 +595,7 @@ class EditorState(
     private val _workingPlms = mutableListOf<RomParser.PlmEntry>()
     val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
     internal var asmPlmSourceBridge by mutableStateOf<AsmPlmSourceBridge?>(null)
-    private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, Pair<String, String>>()
+    private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, Triple<String, String, String>>()
     private var linkedObjectPreviewRevision: Triple<Int, String?, String>? = null
     internal var plmSourceMigrationProblem: String? = null
         private set
@@ -600,6 +604,64 @@ class EditorState(
         private set
     internal var initialScrollPreviewProblem by mutableStateOf<String?>(null)
         private set
+    internal var fxPreviewProblem by mutableStateOf<String?>(null)
+        private set
+    private var linkedFxPreview: Pair<String, List<RomParser.FxEntry>>? = null
+
+    internal fun hasManagedFx(): Boolean = (project.rooms[project.roomKey(currentRoomId)]?.asmFxSourceVersion ?: 0) != 0
+
+    internal fun ensureFxSource(roomName: String): Boolean = runCatching {
+        requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }.fx.migrate(currentRoomId, roomName)
+        currentStateId = currentPlmStateId()
+        refreshFx()
+        true
+    }.getOrElse { postStatus("FX edit blocked: ${it.message}"); false }
+
+    /** One preview route for native overrides and authored FX. No compilation or IDE-index dependency. */
+    internal fun effectiveFxEntries(roomId: Int, parser: RomParser, stateId: String? = if (roomId == currentRoomId) currentPlmStateId() else null): List<RomParser.FxEntry> {
+        val room = project.rooms[project.roomKey(roomId)]
+        val index = if (roomId == currentRoomId) currentStateIndex else parser.preferredPreviewStateIndex(roomId)
+        val state = room?.stateEditsForId(stateId) ?: room?.stateEditsForSourceIndex(index) ?: room?.states?.lastOrNull()
+        if ((room?.asmFxSourceVersion ?: 0) != 0) return state?.let { asmPlmSourceBridge?.fx?.view(roomId, it.id)?.resource?.entries }.orEmpty()
+        val native = parser.parseRoomStatesWithData(roomId).getOrNull(state?.baseSourceStateIndex() ?: index)
+        val pointer = native?.fxPtr ?: parser.readRoomHeader(roomId)?.fxPtr ?: return emptyList()
+        var entries = parser.parseFxEntries(pointer)
+        val change = state?.fxChange ?: room?.fxChange
+        if (entries.none { it.doorSelect == 0 } && change != null) entries = entries + emptyDefaultFxEntry()
+        return entries.map { entry ->
+            if (entry.doorSelect == 0) entry.withFxChange(room?.fxChange).withFxChange(state?.fxChange)
+            else entry.withFxChange(state?.doorFxChanges?.entries?.firstOrNull { it.key.toIntOrNull(16) == entry.doorSelect }?.value)
+        }
+    }
+
+    private fun refreshFx() {
+        if (!hasManagedFx()) { fxPreviewProblem = null; linkedFxPreview = null; return }
+        val bridge = asmPlmSourceBridge?.fx
+        val stateId = currentPlmStateId()
+        if (bridge == null || stateId == null) { fxPreviewProblem = "FX source is loading…"; return }
+        val view = bridge.view(currentRoomId, stateId)
+        fxPreviewProblem = view.problem
+        val preview = "$currentRoomId:$stateId" to view.resource?.entries.orEmpty()
+        if (preview != linkedFxPreview) { linkedFxPreview = preview; _editVersionState.value++ }
+    }
+
+    private fun editSourceFx(stateId: String, door: Int, change: FxChange?, allStates: Boolean = false) {
+        if (change == null) return // Source-mode GUI edits are scalar updates, not clearing a parallel override.
+        if (!ensureFxSource(currentRomParser?.readRoomHeader(currentRoomId)?.name ?: "Room ${currentRoomId.toString(16).uppercase()}")) return
+        runCatching {
+            val bridge = requireNotNull(asmPlmSourceBridge)
+            val before = bridge.fx.sourceText()
+            bridge.fx.edit(currentRoomId, stateId, door, change, allStates)
+            val after = bridge.fx.sourceText()
+            if (before != after) {
+                val op = EditOperation(if (door == 0) "Edit Default FX · ASM" else "Edit door FX · ASM")
+                managedPlmUndo[op] = Triple(FX_SOURCE_FILE, before, after)
+                undoStack.add(op); redoStack.clear(); undoVersion++
+                refreshFx()
+                editVersion++
+            }
+        }.onFailure { postStatus("FX edit blocked: ${it.message}") }
+    }
 
     internal fun ensureInitialScrollSource(roomName: String): Boolean = runCatching {
         val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
@@ -671,7 +733,7 @@ class EditorState(
             val after = bridge.sourceText()
             if (before != after) {
                 val op = EditOperation(name, emptyList())
-                managedPlmUndo[op] = before to after
+                managedPlmUndo[op] = Triple(PLM_SOURCE_FILE, before, after)
                 undoStack.add(op)
                 redoStack.clear()
                 undoVersion++
@@ -704,6 +766,7 @@ class EditorState(
 
     internal fun refreshLinkedPlms() {
         refreshInitialScrolls()
+        refreshFx()
         if (hasManagedPlms()) {
             val stateId = currentPlmStateId()
             val view = stateId?.let { asmPlmSourceBridge?.managedView(currentRoomId, it) }
@@ -3618,6 +3681,8 @@ class EditorState(
         objectPreviewLoading = false
         objectPreviewProblem = null
         initialScrollPreviewProblem = null
+        fxPreviewProblem = null
+        linkedFxPreview = null
         dirty = false
         patchesSeeded = false
         if (seedPatches) {
@@ -6093,6 +6158,44 @@ class EditorState(
         }
     }
 
+    /** Scalar object dialog for ROM projects; one scope-preserving, reversible operation. */
+    internal fun updateRoomObjectFields(roomId: Int, stateId: String?, expected: List<RomParser.PlmEntry>, index: Int, entry: RomParser.PlmEntry) {
+        require(project.asmWorkspace.buildMode == ProjectRomBuildMode.PATCHED_ROM && !hasManagedPlms()) { "Use the current object source in ASM mode." }
+        require(currentRoomId == roomId && currentPlmStateId() == stateId && _workingPlms == expected && index in expected.indices) {
+            "Room objects changed; reopen this object before applying."
+        }
+        com.supermetroid.editor.asm.AsmPlmDocument.validateEntry(entry)
+        val original = expected[index]
+        if (entry == original) return
+        require(entry.x < workingBlocksWide && entry.y < workingBlocksTall) { "Object coordinates are outside the room." }
+        require(expected.count { it.id == original.id && it.x == original.x && it.y == original.y } == 1) { "Duplicate placements need review before field editing." }
+        require(listOf(original, entry).none { it.id == 0xB76F || it.id == 0xB703 || RomParser.isGatePlm(it.id) }) {
+            "Use the map's station, scroll or gate controls to keep paired data together."
+        }
+        require(!blockLinkedPlmMutation()) { "Review object source before changing fields." }
+        val scope = plmEditScope(original)
+        val branches = if (scope == ItemStateScope.ALL_STATES) effectiveAuthoredStatePlms().map { it.second } else listOf(expected)
+        require(branches.all { values -> values.count { it == original } == 1 }) { "State variants differ; choose Edit this state on the map first." }
+        require(branches.all { values -> values.none { other -> other != original && other.x == entry.x && other.y == entry.y &&
+            (other.id == entry.id || (isEditorItemPlm(entry.id) && isEditorItemPlm(other.id))) } }) { "Another object already occupies the destination." }
+        require(!isEditorItemPlm(entry.id) || entry.param in 0..0x1FF) { "Item pickup flag IDs must fit 0x000–0x1FF." }
+        val before = itemScopeSnapshot()
+        val removed = PlmChange("remove", original.id, original.x, original.y, original.param)
+        val added = PlmChange("add", entry.id, entry.x, entry.y, entry.param)
+        if (scope == ItemStateScope.ALL_STATES) {
+            removeItemFromAllStates(original)
+            addItemToAllStates(entry.id, entry.x, entry.y, entry.param)
+        } else {
+            currentPlmChanges().addAll(listOf(removed, added))
+            _workingPlms[index] = entry
+        }
+        val operation = EditOperation("Edit ${RomParser.plmDisplayName(original.id)}", plmAdds = listOf(added), plmRemoves = listOf(removed), itemScope = scope)
+        undoStack.add(operation)
+        itemScopeSnapshots[operation] = ItemScopeUndo(before, itemScopeSnapshot())
+        redoStack.clear(); undoVersion++
+        dirty = true; editVersion++
+    }
+
     // ─── Custom scroll command management ─────────────────────
 
     /** Create a new custom scroll command set, returns the command ID. */
@@ -6525,7 +6628,7 @@ class EditorState(
                 val after = bridge.sourceText()
                 if (before != after) {
                     val op = EditOperation("Initial Screen Scroll ${oneBasedRoomCoordinate(screenX, screenY)} → ${listOf("Red", "Blue", "Green")[newValue]}")
-                    managedPlmUndo[op] = before to after
+                    managedPlmUndo[op] = Triple(PLM_SOURCE_FILE, before, after)
                     undoStack.add(op)
                     redoStack.clear()
                     undoVersion++
@@ -6609,6 +6712,10 @@ class EditorState(
     // ─── FX editing ─────────────────────────────────────────────
 
     fun setFxChange(change: FxChange) {
+        if (project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) {
+            currentStateEdits()?.id?.let { editSourceFx(it, 0, change, allStates = true) }
+            return
+        }
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         roomEdits.fxChange = change
         dirty = true
@@ -6616,6 +6723,7 @@ class EditorState(
     }
 
     fun setRoomStateFxChange(stateId: String, change: FxChange?, romParser: RomParser) {
+        if (project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) { editSourceFx(stateId, 0, change); return }
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         roomEdits.ensureStateManifest(romParser)
         val stateEdits = roomEdits.stateEditsForId(stateId)
@@ -6632,7 +6740,8 @@ class EditorState(
         change: FxChange?,
         romParser: RomParser,
     ) {
-        require(doorSelect in 1..0xFFFF) { "Door-specific FX requires a non-zero 16-bit door pointer" }
+        require(doorSelect in 0x8000..0xFFFE) { "Door-specific FX requires a bank-\$83 door pointer, not \$FFFF." }
+        if (project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) { editSourceFx(stateId, doorSelect, change); return }
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         roomEdits.ensureStateManifest(romParser)
         val stateEdits = roomEdits.stateEditsForId(stateId)
@@ -7226,13 +7335,17 @@ class EditorState(
             val view = bridge.initialScrolls.view(currentRoomId, template.id)
             require(view.problem == null) { view.problem ?: "Resolve the initial scroll draft before cloning its state." }
         }
+        if (hasManagedFx()) {
+            val view = requireNotNull(asmPlmSourceBridge) { "Wait for the FX source before cloning this state." }.fx.view(currentRoomId, template.id)
+            require(view.problem == null) { view.problem ?: "Resolve the FX draft before cloning its state." }
+        }
         var ordinal = 1
         var id: String
         do {
             id = "state-new-$ordinal"
             ordinal++
         } while (roomEdits.states.any { it.id == id } || asmPlmSourceBridge?.hasStateSource(currentRoomId, id) == true ||
-            asmPlmSourceBridge?.initialScrolls?.hasState(currentRoomId, id) == true)
+            asmPlmSourceBridge?.initialScrolls?.hasState(currentRoomId, id) == true || asmPlmSourceBridge?.fx?.hasState(currentRoomId, id) == true)
 
         val newState = RoomStateEdits(
             id = id,
@@ -7258,6 +7371,7 @@ class EditorState(
             bridge.cloneManagedState(currentRoomId, template.id, newState.id)
         }
         asmPlmSourceBridge?.initialScrolls?.cloneState(currentRoomId, template.id, newState.id)
+        asmPlmSourceBridge?.fx?.cloneState(currentRoomId, template.id, newState.id)
         roomEdits.states.add(insertionIndex, newState)
         roomEdits.stateGraphChanged = true
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
@@ -7650,7 +7764,7 @@ class EditorState(
             }
             val roomKey = project.roomKey(roomId)
             val romRoom = headersById[roomId]
-            if ((project.rooms[roomKey]?.asmInitialScrollSourceVersion ?: 0) != 0) {
+            if ((project.rooms[roomKey]?.asmInitialScrollSourceVersion ?: 0) != 0 || (project.rooms[roomKey]?.asmFxSourceVersion ?: 0) != 0) {
                 skipped++
                 manualSkipped++
                 continue
@@ -8151,7 +8265,7 @@ class EditorState(
     }
 
     fun resetCurrentRoomToOriginal(romParser: RomParser): Boolean {
-        if (hasManagedPlms() || (project.rooms[project.roomKey(currentRoomId)]?.asmInitialScrollSourceVersion ?: 0) != 0) {
+        if (hasManagedPlms() || hasManagedInitialScrolls() || hasManagedFx()) {
             postStatus("This room owns authored source. Whole-room reset is not source-aware yet; use ASM Undo before resetting the room.")
             return false
         }
@@ -8222,6 +8336,10 @@ class EditorState(
      * dressed with the theme tileset's vocabulary.
      */
     fun applyBiomeTheme(theme: BiomeTheme, romParser: RomParser) {
+        if (theme.fxType != null && hasManagedFx()) {
+            postStatus("Theme blocked: combined palette/layout/FX edits are not source-aware yet. No changes applied.")
+            return
+        }
         if (theme.tilesetId == null && theme.paletteEffectId == null && theme.fxType == null) return
         val targetTileset = theme.tilesetId ?: currentTilesetId
         val roomEdits = project.getOrCreateRoom(currentRoomId)
@@ -8291,9 +8409,9 @@ class EditorState(
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
         val pending = undoStack.last()
-        managedPlmUndo[pending]?.let { (_, after) ->
+        managedPlmUndo[pending]?.let { (fileId, _, after) ->
             return runCatching {
-                requireNotNull(asmPlmSourceBridge).undoSource(after)
+                requireNotNull(asmPlmSourceBridge).undoSource(after, fileId)
                 undoStack.removeAt(undoStack.lastIndex)
                 redoStack.add(pending)
                 undoVersion++
@@ -8380,9 +8498,9 @@ class EditorState(
     fun redo(): Boolean {
         if (redoStack.isEmpty()) return false
         val pending = redoStack.last()
-        managedPlmUndo[pending]?.let { (before, _) ->
+        managedPlmUndo[pending]?.let { (fileId, before, _) ->
             return runCatching {
-                requireNotNull(asmPlmSourceBridge).redoSource(before)
+                requireNotNull(asmPlmSourceBridge).redoSource(before, fileId)
                 redoStack.removeAt(redoStack.lastIndex)
                 undoStack.add(pending)
                 undoVersion++

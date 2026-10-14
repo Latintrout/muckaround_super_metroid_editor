@@ -999,10 +999,10 @@ fun MapCanvas(
                             }
 
                             // Layer 3 FX overlay data + fxType for animation
-                            val layer3Info = remember(roomHeader, activeOverlays.contains(TileOverlay.LAYER3)) {
+                            val layer3Info = remember(roomHeader, activeOverlays.contains(TileOverlay.LAYER3), editVersion) {
                                 if (!activeOverlays.contains(TileOverlay.LAYER3) || roomHeader == null) null
                                 else {
-                                    val fxEntries = romParser.parseFxEntries(roomHeader.fxPtr)
+                                    val fxEntries = editorState?.effectiveFxEntries(roomHeader.roomId, romParser) ?: romParser.parseFxEntries(roomHeader.fxPtr)
                                     val defaultFx = fxEntries.lastOrNull { it.doorSelect == 0 }
                                     val fxType = defaultFx?.fxType ?: 0
                                     if (fxType == 0) null
@@ -1442,14 +1442,12 @@ fun MapCanvas(
                                     }
                                     // Liquid level overlay (water/lava/acid)
                                     if (roomHeader != null && overlayToggles[TileOverlay.LIQUID] == true) {
-                                        val fxEntries = remember(roomHeader.fxPtr) { romParser.parseFxEntries(roomHeader.fxPtr) }
+                                        val fxEntries = remember(roomHeader.fxPtr, editVersion) {
+                                            editorState?.effectiveFxEntries(roomHeader.roomId, romParser) ?: romParser.parseFxEntries(roomHeader.fxPtr)
+                                        }
                                         val defaultFx = fxEntries.lastOrNull { it.doorSelect == 0 }
-                                        // Apply editor FX override if present
-                                        val editorFxChange = editorState?.project?.rooms?.get(
-                                            editorState.project.roomKey(roomHeader.roomId)
-                                        )?.fxChange
-                                        val effectiveFxType = editorFxChange?.fxType ?: defaultFx?.fxType ?: 0
-                                        val effectiveLiquidStart = editorFxChange?.liquidSurfaceStart ?: defaultFx?.liquidSurfaceStart ?: 0xFFFF
+                                        val effectiveFxType = defaultFx?.fxType ?: 0
+                                        val effectiveLiquidStart = defaultFx?.liquidSurfaceStart ?: 0xFFFF
                                         if (effectiveLiquidStart != 0xFFFF) {
                                             val liquidY = effectiveLiquidStart
                                             val liquidColor = when (liquidPhysicsIndex(effectiveFxType)) {

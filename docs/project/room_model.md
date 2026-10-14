@@ -62,6 +62,30 @@ is conventionally used as an always-false selector that skips its state pointer.
 
 ## Current Boundary
 
+Room Info's **Edit Objects** dialog is a normal visual field editor, not an ASM
+mode selector. A separate right-aligned **ASM** action opens source. ROM-mode field
+edits retain the object's observed/selected state scope and use one undoable delta
+transaction; station, gate and scroll compound changes stay in their dedicated map
+controls. Source-owned dialogs retain their existing shared-list/expression rules
+without ASM-specific titles. The Rooms bottom tab is an immediate global preference,
+not project content; its four viewport scroll states survive main-view/subtab
+navigation in the current session. Only the tab selection is persisted across app
+restarts. Scroll offsets clamp naturally when content/viewport size changes.
+
+Ordinary room FX now uses the same reciprocal authority in ASM projects.
+**Room Info → Default FX → ASM** or a door row's **ASM** link adopts effective
+values into `bank_83.asm`; `asmFxSourceVersion = 1` retains ownership only and
+common/state/door deltas retire with Undo/Redo. Complete ordered tables preserve
+incoming-door branches, Default and the two-byte no-FX stop. State-local visual
+edits detach shared resources; raw edits affect all aliases. New states inherit
+their template. Typed preview does not depend on the full IDE index, invalid
+drafts cannot be overwritten by GUI, and Build checks whole bank-$83 allocations,
+state `+$06` pointers and actual Asar bytes alongside existing ROM patches.
+The map previews Default, not entrance-specific or later runtime changes.
+Mother Brain's after-Default runtime-indexed FX records, custom header/dispatch
+layouts, added-room adoption and compound generation/reset are explicit guarded
+boundaries. See [room FX authoring](../asm/reference_workspace.md#reciprocal-room-fx).
+
 Initial Screen Scrolls are also reciprocal in ASM projects. A grid change or its
 **ASM** link adopts that room's effective starting scrolls, including legacy common
 and state overrides, into `bank_8F.asm`. `asmInitialScrollSourceVersion = 1` stores
@@ -130,7 +154,8 @@ see [save-station authoring](../asm/reference_workspace.md#reciprocal-save-stati
 Original fixed-address links still have fixed-size restrictions. Managed lists
 and named command streams support growth/shrinkage; changed resource links,
 added-room projects and mixed source/GUI operations are guarded boundaries. Only
-objects, named scroll commands and adopted save spawns have migrated: selectors, layouts and other resources keep their existing
+objects, named scroll commands, adopted save spawns, initial scroll grids and
+ordinary FX tables have migrated: selectors, layouts and other resources keep their existing
 model/backend. This does **not** change the ordinary unlinked/ROM
 editing model described below. See the [source/GUI ownership contract](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
 

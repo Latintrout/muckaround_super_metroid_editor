@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.ScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
@@ -1117,7 +1118,8 @@ fun PatternEditorCanvas(
 @Composable
 fun PatternThumbnailList(
     editorState: EditorState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     @Suppress("UNUSED_VARIABLE") val pv = editorState.patternVersion
@@ -1146,7 +1148,7 @@ fun PatternThumbnailList(
         }
 
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             for (pat in patterns) {

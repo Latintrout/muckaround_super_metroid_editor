@@ -230,6 +230,40 @@ for authored source/GUI ownership.
 
 ---
 
+## Room FX headers (bank $83)
+
+State `+$06` points to an ordered table of 16-byte headers: four little-endian
+words (incoming DoorDef, liquid start Y, target Y, signed 8.8 velocity), then
+eight bytes (delay, FX type, layer-blend A, layer-blend B, liquid options C,
+palette-FX bitset, animated-tile bitset, palette-blend byte offset).
+
+`Load_FX_Header` at `$89:AB82-$89:ACC2` selects the first matching incoming door,
+or the full Default header whose door word is `$0000`. That Default ends lookup;
+do **not** append another stop/header to describe ordinary door fallback. Without
+Default, a **two-byte** `$FFFF` word ends lookup with no FX. A pointer of `$0000`
+also skips loading. SMEDIT's bounded authored codec supports at most 16 headers,
+checks every record fits bank `$83`, and requires door-specific records to name
+DoorDefs entering the owning room.
+
+FX type is an even **byte offset** into the 23 function pointers at
+`$83:AC18-$83:AC45` (`$00-$2C`); odd values can construct an invalid handler
+pointer. SMEDIT's shared `NativeFxTypes` names drive decoded headers, UI choices and
+generated source comments. Native `$28` is Ceres Ridley and `$2A` is Ceres Elevator. Some old SMILE
+names for other slots describe effects not implemented by this dispatch: offsets
+`$0E-$1E` point to an `RTL` stub. Consult the native function table when extending
+the UI rather than treating legacy labels as engine guarantees.
+
+`Load_FX_Entry` at `$89:AB02-$89:AB81` is a **different** indexed consumer
+(`index & 7`, then ×16). Mother Brain's table starts at `$83:A0A4` with Default
+and has headers at `$83:A0B4/$83:A0C4` used by AI calls at `$A9:86EE/$A9:888F`.
+Those rows are invisible to normal door lookup but must survive relocation.
+The current reciprocal FX pilot explicitly guards this table until indexed
+headers and consumers have a typed ownership model. ROM-mode FX editing retains
+its existing behavior. See [FX source/GUI authoring](../asm/reference_workspace.md#reciprocal-room-fx)
+and [field offsets](limits.md#fx-data-structure-16-bytes-per-entry).
+
+---
+
 ## PLM Set Format (bank $8F)
 
 Each PLM entry is **6 bytes**. The set is terminated by a 2-byte `0x0000`.

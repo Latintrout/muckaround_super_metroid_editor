@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.requiredSizeIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -74,27 +75,7 @@ private val CRE_BITFLAG_NAMES = mapOf(
 
 
 // Names from SMILE source (FX1_1.frx Layer3Type dropdown)
-private val FX_TYPE_OPTIONS = listOf(
-    0x00 to "None",
-    0x02 to "Lava",
-    0x04 to "Acid",
-    0x06 to "Water",
-    0x08 to "Spores",
-    0x0A to "Rain",
-    0x0C to "Fog",
-    0x0E to "Haze",
-    0x10 to "Dense Fog",
-    0x16 to "Firefleas",
-    0x18 to "Lightning",
-    0x1A to "Smoke",
-    0x1C to "Heat Shimmer",
-    0x20 to "Sky Scrolling",
-    0x24 to "Fireflea FX",
-    0x26 to "4 Statues",
-    0x28 to "Ceres Elevator",
-    0x2A to "Ceres Ridley",
-    0x2C to "Haze",
-)
+private val FX_TYPE_OPTIONS = com.supermetroid.editor.rom.NativeFxTypes.names.toList()
 
 private val SCROLL_COLORS = mapOf(
     0x00 to Color(0xFFCC3030),
@@ -120,7 +101,9 @@ fun RoomPropertiesPanel(
     onNavigateToMap: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
+    onNavigateToFx: ((String, Int?) -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     val stateInspection = remember(room.roomId, romParser) { romParser.inspectRoomStates(room.roomId) }
     // Track project-backed changes so authored state count/order is reflected immediately.
@@ -224,7 +207,9 @@ fun RoomPropertiesPanel(
     }
     val stateData = allStateData.getOrNull(selectedStateIdx).orEmpty()
     val fxPtr = stateData["fxPtr"] ?: room.fxPtr
-    val fxEntries = remember(fxPtr) { romParser.parseFxEntries(fxPtr) }
+    val sourceFxOwned = (roomEdits?.asmFxSourceVersion ?: 0) != 0
+    val fxEntries = if (sourceFxOwned) editorState.effectiveFxEntries(room.roomId, romParser, selectedStateItem?.id)
+        else remember(fxPtr) { romParser.parseFxEntries(fxPtr) }
     val hasFxTable = fxEntries.isNotEmpty()
     val defaultFx = fxEntries.lastOrNull { it.doorSelect == 0 } ?: RomParser.FxEntry(
         doorSelect = 0,
@@ -277,17 +262,17 @@ fun RoomPropertiesPanel(
     } else null
 
     // FX edit state — keyed by stable state ID so it survives reordering.
-    var editFxType by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.fxType ?: defaultFx.fxType) }
-    var editLiquidStart by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.liquidSurfaceStart ?: defaultFx.liquidSurfaceStart) }
-    var editLiquidNew by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.liquidSurfaceNew ?: defaultFx.liquidSurfaceNew) }
-    var editLiquidSpeed by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.liquidSpeed ?: defaultFx.liquidSpeed) }
-    var editLiquidDelay by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.liquidDelay ?: defaultFx.liquidDelay) }
-    var editFxBitA by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.fxBitA ?: defaultFx.fxBitA) }
-    var editFxBitB by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.fxBitB ?: defaultFx.fxBitB) }
-    var editFxBitC by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.fxBitC ?: defaultFx.fxBitC) }
-    var editPaletteFxBits by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.paletteFxBitflags ?: defaultFx.paletteFxBitflags) }
-    var editTileAnimBits by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.tileAnimBitflags ?: defaultFx.tileAnimBitflags) }
-    var editPaletteBlend by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedFx?.paletteBlend ?: defaultFx.paletteBlend) }
+    var editFxType by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.fxType ?: defaultFx.fxType) }
+    var editLiquidStart by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.liquidSurfaceStart ?: defaultFx.liquidSurfaceStart) }
+    var editLiquidNew by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.liquidSurfaceNew ?: defaultFx.liquidSurfaceNew) }
+    var editLiquidSpeed by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.liquidSpeed ?: defaultFx.liquidSpeed) }
+    var editLiquidDelay by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.liquidDelay ?: defaultFx.liquidDelay) }
+    var editFxBitA by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.fxBitA ?: defaultFx.fxBitA) }
+    var editFxBitB by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.fxBitB ?: defaultFx.fxBitB) }
+    var editFxBitC by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.fxBitC ?: defaultFx.fxBitC) }
+    var editPaletteFxBits by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.paletteFxBitflags ?: defaultFx.paletteFxBitflags) }
+    var editTileAnimBits by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.tileAnimBitflags ?: defaultFx.tileAnimBitflags) }
+    var editPaletteBlend by remember(room.roomId, selectedStateItem?.id, defaultFx, savedFx) { mutableStateOf(savedFx?.paletteBlend ?: defaultFx.paletteBlend) }
     var editingDoorFx by remember(room.roomId, selectedStateItem?.id) { mutableStateOf<Int?>(null) }
 
     // State data edit state — keyed by (roomId, stateIdx) so fields reset on state switch
@@ -362,7 +347,7 @@ fun RoomPropertiesPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -672,6 +657,13 @@ fun RoomPropertiesPanel(
         val stateDifferences = changedRoomStateSections(stateData, defaultStateData)
 
         fun sharingDescription(field: String, value: Int): String {
+            if (field == "fxPtr" && sourceFxOwned) {
+                val source = selectedStateItem?.id?.let { editorState.asmPlmSourceBridge?.fx?.view(room.roomId, it) }
+                if (source?.problem != null) return "Source needs repair"
+                val identity = source?.resource?.identity ?: return "Source loading…"
+                val count = states.count { editorState.asmPlmSourceBridge?.fx?.view(room.roomId, it.id)?.resource?.identity == identity }
+                return if (count == 1) "This state" else "$count states share this table"
+            }
             if (states.size <= 1) return "Only state"
             if (field == "levelDataPtr" && selectedStateEdits != null) {
                 val resourceId = selectedStateEdits.resources.level
@@ -869,10 +861,12 @@ fun RoomPropertiesPanel(
             "Effects",
             "${FX_TYPE_OPTIONS.firstOrNull { it.first == editFxType }?.second ?: "Unknown (${hex8(editFxType)})"} · " +
                 sharingDescription("fxPtr", fxPtr),
+            onNavigateToFx?.takeIf { editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE }
+                ?.let { open -> { selectedStateItem?.id?.let { open(it, null) }; Unit } },
         )
         PropertyRow("Placed Objects", "$plmCount objects · ${sharingDescription("plmSetPtr", plmSetPtr)}")
-        if (editorState.project.asmWorkspace.enabled && selectedIsActive) {
-            LinkedPlmSourcePanel(editorState, plmSetPtr, asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
+        if (selectedIsActive) {
+            RoomObjectsPanel(editorState, plmSetPtr, asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
         }
         PropertyRow("Enemy Actors", "$enemyCount actors · ${sharingDescription("enemySetPtr", enemySetPtr)}")
         PropertyRow("Enemy Graphics", "$gfxCount slots · ${sharingDescription("enemyGfxPtr", enemyGfxPtr)}")
@@ -915,7 +909,8 @@ fun RoomPropertiesPanel(
             PropertyRow(
                 "FX Data",
                 if (fxPtr == 0) "None" else "\$83:${hex16(fxPtr).removePrefix("0x")}",
-                asmLink(fxPtr.takeIf { it != 0 }?.let { RomConstants.BANK_FX or it }),
+                if (sourceFxOwned) onNavigateToFx?.let { open -> { selectedStateItem?.id?.let { open(it, null) }; Unit } }
+                else asmLink(fxPtr.takeIf { it != 0 }?.let { RomConstants.BANK_FX or it }),
             )
             PropertyRow("Object Set", "\$8F:${hex16(plmSetPtr).removePrefix("0x")}", asmLink(RomConstants.BANK_ROOM_DATA or plmSetPtr))
             PropertyRow("Enemy Set", "\$A1:${hex16(enemySetPtr).removePrefix("0x")}", asmLink(RomConstants.BANK_ENEMY_SET or enemySetPtr))
@@ -941,6 +936,12 @@ fun RoomPropertiesPanel(
 
         // ── FX Data (editable) ──
         SectionHeader("FX Data")
+        editorState.fxPreviewProblem?.let { Text(it, fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error) }
+        if (onNavigateToFx != null && editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
+            PropertyRow("Default FX", FX_TYPE_OPTIONS.firstOrNull { it.first == editFxType }?.second ?: defaultFx.fxTypeName) {
+                selectedStateItem?.id?.let { onNavigateToFx(it, 0) }
+            }
+        }
         if (!hasFxTable) {
             Text(
                 "No effects yet. Choosing a type creates a private FX table for this state.",
@@ -983,6 +984,12 @@ fun RoomPropertiesPanel(
                             contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
                         ) {
                             Text("Edit", fontSize = ROOM_INFO_COMPACT_FONT_SIZE)
+                        }
+                        if (onNavigateToFx != null && editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
+                            TextButton(onClick = { selectedStateItem?.id?.let { onNavigateToFx(it, fx.doorSelect) } },
+                                modifier = Modifier.height(26.dp), contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) {
+                                Text("ASM", fontSize = ROOM_INFO_COMPACT_FONT_SIZE)
+                            }
                         }
                     }
                 }

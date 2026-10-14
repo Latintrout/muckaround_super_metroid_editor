@@ -123,6 +123,7 @@ import com.supermetroid.editor.ui.PatchEditorCanvas
 import com.supermetroid.editor.ui.PatchListPanel
 import com.supermetroid.editor.ui.PatternEditorCanvas
 import com.supermetroid.editor.ui.RoomsTabSidebar
+import com.supermetroid.editor.ui.RoomsSidebarState
 import com.supermetroid.editor.ui.RoomListView
 import com.supermetroid.editor.ui.SettingsPopup
 import com.supermetroid.editor.ui.SoundEditorCanvas
@@ -321,6 +322,7 @@ fun main() = application {
     }
     
     val appSettings = remember { AppConfig.load() }
+    val roomsSidebarState = remember { RoomsSidebarState(appSettings.roomSidebarTab) }
     var showRoomItemNames by remember { mutableStateOf(appSettings.roomEditorShowItemNames) }
     var showRoomMetaNames by remember { mutableStateOf(appSettings.roomEditorShowMetaNames) }
     var highlightRoomItems by remember { mutableStateOf(appSettings.roomEditorHighlightItems) }
@@ -602,6 +604,16 @@ fun main() = application {
                         asmWorkspaceState.openSource("bank_8F.asm", line)
                         leftTab = TAB_ASM
                     } }.onFailure { editorState.postStatus(it.message ?: "Initial scroll source is unavailable.") }
+            }
+
+            fun openFx(stateId: String, door: Int?) {
+                if (!editorState.ensureFxSource(selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}")) return
+                runCatching { requireNotNull(editorState.asmPlmSourceBridge).fx.line(editorState.currentRoomId, stateId, door) }
+                    .onSuccess { line -> navigate {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource("bank_83.asm", line)
+                        leftTab = TAB_ASM
+                    } }.onFailure { editorState.postStatus(it.message ?: "FX source is unavailable.") }
             }
 
             fun openSaveSpawn(entry: RomParser.PlmEntry) {
@@ -1263,6 +1275,7 @@ fun main() = application {
                                             onRoomSelected = ::selectRoomFromNavigation,
                                             romParser = romParser,
                                             editorState = editorState,
+                                            sidebarState = roomsSidebarState,
                                             onCreateRoom = { request ->
                                                 runCatching {
                                                     val parser = checkNotNull(romParser) { "Open a ROM first" }
@@ -1307,6 +1320,7 @@ fun main() = application {
                                             },
                                             onNavigateToAsm = ::openAsmAddress,
                                             onNavigateToInitialScrolls = ::openInitialScrolls,
+                                            onNavigateToFx = ::openFx,
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },
                                             modifier = Modifier.fillMaxSize(),
                                         )

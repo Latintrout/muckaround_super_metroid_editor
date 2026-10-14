@@ -206,8 +206,16 @@ operations may remain, but are not replayed as independent object inputs. Missin
 source, unknown versions or competing deltas block builds, including ROM-only
 export. An older editor must reject this schema rather than silently lose source
 ownership. Project Save persists source and metadata together; the normal
-backup-on-schema-upgrade rule applies. Other room resources keep their existing
-representation.
+backup-on-schema-upgrade rule applies.
+
+The same beta schema has optional `asmInitialScrollSourceVersion` and
+`asmFxSourceVersion` room capability markers (default 0, current supported value 1).
+They own starting screen grids in `bank_8F.asm` and ordinary FX tables in
+`bank_83.asm`, respectively. Adoption retires the corresponding room/state deltas;
+stable state IDs link source wrappers, not compiled allocation addresses. Missing
+source, unsupported marker values or competing metadata fail builds explicitly.
+These markers are not copies of typed preview caches. Other resources retain their
+existing representation until their own reciprocal codec is implemented.
 
 Schema 10 adds `asmWorkspace.plmSourceBindings`: source label, original bank-$8F
 pointer and fixed record count. These are ownership/layout identities, not copied

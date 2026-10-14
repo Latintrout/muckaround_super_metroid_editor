@@ -27,6 +27,7 @@ internal class AsmPlmSourceBridge(
 ) : AsmSourceSaveParticipant {
     var onMetadataChanged: () -> Unit = {}
     val initialScrolls = AsmInitialScrollBridge(catalog, workspace, project) { onMetadataChanged() }
+    val fx = AsmFxBridge(catalog, workspace, project) { onMetadataChanged() }
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
     private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
@@ -70,11 +71,13 @@ internal class AsmPlmSourceBridge(
 
     init { if (registerSaveParticipant) workspace.sourceSaveParticipant = this }
 
-    override val sourceFileIds: Set<String> get() = if (project().rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 }) {
-        setOf(PLM_SOURCE_FILE)
-    } else emptySet()
+    override val sourceFileIds: Set<String> get() = buildSet {
+        if (project().rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 }) add(PLM_SOURCE_FILE)
+        if (project().rooms.values.any { it.asmFxSourceVersion != 0 }) add(FX_SOURCE_FILE)
+    }
 
     override fun prepare(fileId: String, text: String): () -> String {
+        if (fileId == FX_SOURCE_FILE && fileId in sourceFileIds) return fx.prepare(text)
         if (fileId != PLM_SOURCE_FILE || fileId !in sourceFileIds) return { text }
         val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
         val initialRooms = project().rooms.values.filter { it.asmInitialScrollSourceVersion != 0 }.map { room ->
@@ -114,13 +117,13 @@ internal class AsmPlmSourceBridge(
     fun isManaged(roomId: Int): Boolean = (project().rooms[project().roomKey(roomId)]?.asmPlmSourceVersion ?: 0) != 0
 
     fun sourceText(): String = workspace.projectSourceText(PLM_SOURCE_FILE)
-    fun undoSource(expected: String) {
-        require(sourceText() == expected) { "Source changed; undo the newer edit in ASM first." }
-        check(workspace.undoSourceEdit(PLM_SOURCE_FILE)) { "Could not undo this source edit." }
+    fun undoSource(expected: String, fileId: String = PLM_SOURCE_FILE) {
+        require(workspace.projectSourceText(fileId) == expected) { "Source changed; undo the newer edit in ASM first." }
+        check(workspace.undoSourceEdit(fileId)) { "Could not undo this source edit." }
     }
-    fun redoSource(expected: String) {
-        require(sourceText() == expected) { "Source changed; redo this edit in ASM instead." }
-        check(workspace.redoSourceEdit(PLM_SOURCE_FILE)) { "Could not redo this source edit." }
+    fun redoSource(expected: String, fileId: String = PLM_SOURCE_FILE) {
+        require(workspace.projectSourceText(fileId) == expected) { "Source changed; redo this edit in ASM instead." }
+        check(workspace.redoSourceEdit(fileId)) { "Could not redo this source edit." }
     }
     fun hasStateSource(roomId: Int, stateId: String): Boolean = isManaged(roomId) && managedSource().contains(AsmRoomObjectSource.stateMacro(roomId, stateId))
 

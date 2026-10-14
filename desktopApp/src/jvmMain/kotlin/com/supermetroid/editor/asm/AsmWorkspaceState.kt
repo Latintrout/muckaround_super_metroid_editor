@@ -742,11 +742,15 @@ internal class AsmWorkspaceState(
     /** Semantic editors share the very same document/undo stack, independent of which browser tab is visible. */
     fun projectSourceText(fileId: String): String {
         sourceBuffers[fileId]?.let { return it }
-        val text = projectWorkspace?.referenceWorkspace?.index?.file(fileId)?.file?.readText().orEmpty()
-        if (projectWorkspace != null) {
-            savedSourceTexts[fileId] = text
-            sourceBuffers[fileId] = text
+        val active = projectWorkspace ?: return ""
+        // A partial/missing index entry is not an empty document. Never let a
+        // semantic writer replace a bank it has not actually loaded.
+        val source = requireNotNull(active.referenceWorkspace.index.file(fileId)) {
+            "ASM source $fileId is unavailable. Wait for indexing or repair the project source."
         }
+        val text = source.file.readText()
+        savedSourceTexts[fileId] = text
+        sourceBuffers[fileId] = text
         return text
     }
 

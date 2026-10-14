@@ -10,6 +10,8 @@ import com.supermetroid.editor.asm.AsmPlmSourceBridge
 import com.supermetroid.editor.asm.AsmWorkspaceState
 import com.supermetroid.editor.asm.AsmRoomObjectSource
 import com.supermetroid.editor.asm.PLM_SOURCE_FILE
+import com.supermetroid.editor.asm.FX_SOURCE_FILE
+import com.supermetroid.editor.asm.authoredMacroBody
 import kotlinx.coroutines.runBlocking
 import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.ItemStateScope
@@ -40,6 +42,103 @@ import kotlin.test.assertContains
 /** Explicit clean ROM/source fixtures; every project and compiler artifact lives in @TempDir. */
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
+
+    @Test fun `authored FX compose with PLMs scrolls door variants new states and ROM patches with real Asar parity`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(fixture.projectFile, project)
+        editor.asmPlmSourceBridge = bridge
+        editor.loadRoom(0x91F8, parser, parser.readRoomHeader(0x91F8)!!)
+        assertTrue(editor.ensureCurrentPlmSource("Landing Site"))
+        editor.setScroll(0, 0, if (editor.workingScrolls[0] == 0) 1 else 0, editor.workingBlocksWide / 16)
+        val landing = project.rooms.getValue("91F8")
+        val landingState = editor.currentPlmStateId()!!
+        editor.setRoomStateFxChange(landingState, com.supermetroid.editor.data.FxChange(fxType = 6,
+            liquidSurfaceStart = 0x0100, liquidSurfaceNew = 0x0080, liquidSpeed = 0xFFF0, liquidDelay = 30), parser)
+        assertEquals(1, landing.asmFxSourceVersion, editor.statusMessage)
+        assertEquals(0x0100, editor.effectiveFxEntries(landing.roomId, parser).last().liquidSurfaceStart)
+        val routed = parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }.first { room ->
+            room.roomId != 0xDD58 && parser.parseRoomStatesWithData(room.roomId).any { state -> parser.parseFxEntries(state.fxPtr).any { it.doorSelect != 0 } }
+        }
+        bridge.fx.migrate(routed.roomId, routed.name)
+        val routedRoom = project.rooms.getValue(project.roomKey(routed.roomId))
+        val routedState = routedRoom.states.first { bridge.fx.view(routed.roomId, it.id).resource!!.entries.any { fx -> fx.doorSelect != 0 } }.id
+        val doorEntry = bridge.fx.view(routed.roomId, routedState).resource!!.entries.first { it.doorSelect != 0 }
+        val originalDefault = bridge.fx.view(routed.roomId, routedState).resource!!.entries.lastOrNull { it.doorSelect == 0 }
+        editor.loadRoom(routed.roomId, parser, routed)
+        editor.switchRoomState(routedState, parser)
+        editor.setRoomStateDoorFxChange(routedState, doorEntry.doorSelect, com.supermetroid.editor.data.FxChange(liquidDelay = 60, liquidSpeed = 0xFFE0), parser)
+        assertEquals(originalDefault, bridge.fx.view(routed.roomId, routedState).resource!!.entries.lastOrNull { it.doorSelect == 0 })
+        val empty = parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }.first { room ->
+            room.roomId != 0xDD58 && parser.parseRoomStatesWithData(room.roomId).all { parser.parseFxEntries(it.fxPtr).isEmpty() }
+        }
+        bridge.fx.migrate(empty.roomId, empty.name)
+        val emptyRoom = project.rooms.getValue(project.roomKey(empty.roomId))
+        bridge.fx.edit(empty.roomId, emptyRoom.states.last().id, 0, com.supermetroid.editor.data.FxChange(fxType = 2, liquidSurfaceStart = 0x0040))
+        project.patches += SmPatch("fx-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        suspend fun buildAndVerify() {
+            assertTrue(workspace.saveAllSources(), workspace.error ?: "Source save failed: busy=${workspace.busy}, progress=${workspace.progress}")
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            for (room in listOf(landing, routedRoom, emptyRoom)) {
+                val states = built.parseRoomStatesWithData(room.roomId)
+                val inputs = room.states.map { bridge.fx.view(room.roomId, it.id).resource!! }
+                inputs.forEachIndexed { index, expected ->
+                    assertEquals(expected.entries, built.parseFxEntries(states[index].fxPtr))
+                    assertContentEquals(expected.bytes(), com.supermetroid.editor.rom.readSourceFxResource(built, states[index].fxPtr, expected.identity).bytes())
+                }
+                val identities = inputs.mapIndexed { index, input -> input.identity to states[index].fxPtr }.groupBy({ it.first }, { it.second })
+                assertTrue(identities.values.all { it.distinct().size == 1 })
+                assertEquals(identities.size, identities.values.map { it.first() }.distinct().size)
+            }
+            val builtLanding = built.parseRoomStatesWithData(landing.roomId)
+            landing.states.forEachIndexed { index, state ->
+                assertEquals(bridge.managedView(landing.roomId, state.id).document!!.entries, built.parsePlmSet(builtLanding[index].plmSetPtr))
+                assertEquals(bridge.initialScrolls.view(landing.roomId, state.id).resource!!.values,
+                    built.parseScrollData(builtLanding[index].scrollPtr, built.readRoomHeader(landing.roomId)!!.width, built.readRoomHeader(landing.roomId)!!.height).toList())
+            }
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertTrue(result.writeReport.writes.any { it.owner == "patch:fx-test-patch" })
+            assertContains(AsmBuildArtifactRepository().loadGeneratedRooms(fixture.projectFile.path)!!.lines.joinToString("\n"), "; FX placement; values live in bank_83.asm.")
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify()
+        val selected = bridge.fx.view(landing.roomId, landingState).resource!!
+        val before = bridge.fx.sourceText()
+        val body = authoredMacroBody(before, selected.identity)
+        workspace.replaceProjectSource(FX_SOURCE_FILE, before, before.replace(body, body.replace("dw \$0100 ; Liquid Start", "dw \$0080 ; Liquid Start")))
+        editor.loadRoom(landing.roomId, parser, parser.readRoomHeader(landing.roomId)!!)
+        editor.switchRoomState(landingState, parser)
+        editor.refreshLinkedPlms()
+        assertEquals(0x0080, editor.effectiveFxEntries(landing.roomId, parser).last().liquidSurfaceStart)
+        val added = editor.addRoomState(landingState, projectRoomStateCondition(ProjectRoomStateConditionKind.EVENT_SET, 0x0B), parser)
+        bridge.fx.edit(landing.roomId, added, 0, com.supermetroid.editor.data.FxChange(paletteBlend = 0x40))
+        buildAndVerify()
+        val sourceBeforeGuard = bridge.fx.sourceText()
+        assertTrue(runCatching { bridge.fx.migrate(0xDD58, "Mother Brain") }.isFailure)
+        assertEquals(sourceBeforeGuard, bridge.fx.sourceText(), "Never drop Mother Brain's indexed battle FX tail")
+        val currentFx = bridge.fx.view(landing.roomId, landingState).resource!!
+        val currentBody = authoredMacroBody(sourceBeforeGuard, currentFx.identity)
+        val invalid = sourceBeforeGuard.replace(currentBody, currentBody.replace("db \$06 ; FX Type", "db \$03 ; FX Type"))
+        assertNotEquals(sourceBeforeGuard, invalid)
+        workspace.replaceProjectSource(FX_SOURCE_FILE, sourceBeforeGuard, invalid)
+        assertTrue(workspace.saveAllSources(), workspace.error)
+        val errors = mutableListOf<String>()
+        assertNull(ProjectFileService.buildRom(project, parser, errors::add, errors::add, fixture.projectFile.path), errors.joinToString("\n"))
+        val failure = AsmBuildArtifactRepository().load(fixture.projectFile.path)!!
+        assertFalse(failure.succeeded)
+        val diagnostic = failure.diagnostics.first { it.fileId == FX_SOURCE_FILE }
+        assertContains(invalid.lines()[assertNotNull(diagnostic.lineIndex)], "db \$03 ; FX Type")
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
 
     @Test fun `initial screen scrolls assemble with state isolation sentinels new states and ordinary patches`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()

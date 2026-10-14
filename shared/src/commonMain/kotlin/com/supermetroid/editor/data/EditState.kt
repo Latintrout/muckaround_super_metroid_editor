@@ -495,9 +495,11 @@ data class RoomEdits(
     var asmPlmSourceVersion: Int = 0,
     /** Initial per-screen scroll values live in bank_8F.asm; JSON stores ownership only. */
     var asmInitialScrollSourceVersion: Int = 0,
+    /** FX header values live in project bank_83.asm; JSON stores ownership only. */
+    var asmFxSourceVersion: Int = 0,
 ) {
     val hasEdits: Boolean get() =
-        asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
+        asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
             states.any { it.hasEdits } || operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||

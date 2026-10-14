@@ -12,9 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -37,6 +35,7 @@ internal fun RoomsTabSidebar(
     onRoomSelected: (RoomInfo) -> Unit,
     romParser: RomParser?,
     editorState: EditorState,
+    sidebarState: RoomsSidebarState,
     onCreateRoom: (NewRoomCreationRequest) -> String?,
     onDeleteRoom: (Int) -> String?,
     onWorkspaceChanged: () -> Unit,
@@ -46,11 +45,12 @@ internal fun RoomsTabSidebar(
     onNavigateToMap: () -> Unit,
     onNavigateToAsm: (Int) -> Unit,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
+    onNavigateToFx: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier,
     onKeyboardNavigatorChanged: (((Int) -> Boolean)?) -> Unit = {},
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
-    var bottomPaneTab by remember { mutableStateOf(BOTTOM_TAB_TILESET) }
+    val bottomPaneTab = sidebarState.selectedTab.ordinal
 
     SidebarVerticalSplit(
         bottomPaneHeightDp = tilesetHeightDp,
@@ -74,7 +74,7 @@ internal fun RoomsTabSidebar(
                 TabRow(selectedTabIndex = bottomPaneTab, modifier = Modifier.fillMaxWidth().height(26.dp)) {
                     Tab(
                         selected = bottomPaneTab == BOTTOM_TAB_TILESET,
-                        onClick = { bottomPaneTab = BOTTOM_TAB_TILESET },
+                        onClick = { sidebarState.select(RoomSidebarTab.TILESET) },
                         modifier = Modifier.height(26.dp),
                     ) {
                         Text("Tileset", fontSize = fs.tabLabel)
@@ -83,7 +83,7 @@ internal fun RoomsTabSidebar(
                         selected = bottomPaneTab == BOTTOM_TAB_PATTERNS,
                         onClick = {
                             onSeedPatterns()
-                            bottomPaneTab = BOTTOM_TAB_PATTERNS
+                            sidebarState.select(RoomSidebarTab.PATTERNS)
                         },
                         modifier = Modifier.height(26.dp),
                     ) {
@@ -91,14 +91,14 @@ internal fun RoomsTabSidebar(
                     }
                     Tab(
                         selected = bottomPaneTab == BOTTOM_TAB_ROOM_INFO,
-                        onClick = { bottomPaneTab = BOTTOM_TAB_ROOM_INFO },
+                        onClick = { sidebarState.select(RoomSidebarTab.ROOM_INFO) },
                         modifier = Modifier.height(26.dp),
                     ) {
                         Text("Room Info", fontSize = fs.tabLabel)
                     }
                     Tab(
                         selected = bottomPaneTab == BOTTOM_TAB_GENERATE,
-                        onClick = { bottomPaneTab = BOTTOM_TAB_GENERATE },
+                        onClick = { sidebarState.select(RoomSidebarTab.GENERATE) },
                         modifier = Modifier.height(26.dp),
                     ) {
                         Text("Generate", fontSize = fs.tabLabel)
@@ -111,17 +111,20 @@ internal fun RoomsTabSidebar(
                                 room = selectedRoom,
                                 romParser = romParser,
                                 editorState = editorState,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                verticalScrollState = sidebarState.verticalScroll(RoomSidebarTab.TILESET),
+                                horizontalScrollState = sidebarState.tilesetHorizontalScroll,
                             )
                             BOTTOM_TAB_PATTERNS -> PatternThumbnailList(
                                 editorState = editorState,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                scrollState = sidebarState.verticalScroll(RoomSidebarTab.PATTERNS),
                             )
                             BOTTOM_TAB_ROOM_INFO -> {
                                 val rp = romParser
                                 val sr = selectedRoom
                                 if (rp != null && sr != null) {
-                                    val roomHeader = remember(sr) { rp.readRoomHeader(sr.getRoomIdAsInt()) }
+                                    val roomHeader = remember(sr, rp) { rp.readRoomHeader(sr.getRoomIdAsInt()) }
                                     if (roomHeader != null) {
                                         RoomPropertiesPanel(
                                             room = roomHeader,
@@ -131,7 +134,9 @@ internal fun RoomsTabSidebar(
                                             onNavigateToMap = onNavigateToMap,
                                             onNavigateToAsm = onNavigateToAsm,
                                             onNavigateToInitialScrolls = onNavigateToInitialScrolls,
+                                            onNavigateToFx = onNavigateToFx,
                                             onWorkspaceChanged = onWorkspaceChanged,
+                                            scrollState = sidebarState.verticalScroll(RoomSidebarTab.ROOM_INFO),
                                         )
                                     } else {
                                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -156,7 +161,8 @@ internal fun RoomsTabSidebar(
                                 editorState = editorState,
                                 romParser = romParser,
                                 rooms = rooms,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                scrollState = sidebarState.verticalScroll(RoomSidebarTab.GENERATE),
                             )
                         }
                     }

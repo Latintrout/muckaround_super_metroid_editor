@@ -212,12 +212,18 @@ internal class RomExporter(
     private val compiledAsmBase: AsmCompiledBuildBase? = null,
     private val sourcePlmSets: Map<Int, Map<String, com.supermetroid.editor.rom.SourcePlmResource>> = emptyMap(),
     private val sourceInitialScrolls: Map<Int, Map<String, com.supermetroid.editor.rom.SourceInitialScrollResource>> = emptyMap(),
+    private val sourceFx: Map<Int, Map<String, com.supermetroid.editor.rom.SourceFxResource>> = emptyMap(),
     private val projectFilePath: String = "",
 ) {
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        if (project.rooms.values.any { it.asmFxSourceVersion != 0 && it.roomId !in sourceFx && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
+            onLog("ERROR: Authored room effects require their validated ASM build inputs.")
+            onStatus("Authored room effects require their validated ASM build inputs.")
+            return null
+        }
         if (project.rooms.values.any { it.asmInitialScrollSourceVersion != 0 && it.roomId !in sourceInitialScrolls &&
                 project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
             onLog("ERROR: Authored initial scrolls require their validated ASM build inputs.")
@@ -462,6 +468,7 @@ internal class RomExporter(
                                 onLog = onLog,
                                 sourcePlmSets = sourcePlmSets,
                                 sourceInitialScrolls = sourceInitialScrolls,
+                                sourceFx = sourceFx,
                             ).exportRooms()
                         }
                         roomsPatched.addAll(roomExportResult.roomsPatched)
