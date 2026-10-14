@@ -493,9 +493,11 @@ data class RoomEdits(
     val saveStationSpawns: MutableList<SaveStationSpawnChange> = mutableListOf(),
     /** PLMs are authored in project bank_8F.asm. Identity/format only; no duplicate object values. */
     var asmPlmSourceVersion: Int = 0,
+    /** Initial per-screen scroll values live in bank_8F.asm; JSON stores ownership only. */
+    var asmInitialScrollSourceVersion: Int = 0,
 ) {
     val hasEdits: Boolean get() =
-        asmPlmSourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
+        asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
             states.any { it.hasEdits } || operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||

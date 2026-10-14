@@ -335,14 +335,14 @@ class RomParser(
     /**
      * Parse per-screen scroll data for a room.
      * Each byte = scroll color: 0x00=Red, 0x01=Blue, 0x02=Green.
-     * Special pointers: 0x0000 = all blue, 0x0001 = all green.
+     * $82:EB3D presets: 0x0000 = green upper rows / blue bottom row, 0x0001 = all green.
      */
     fun parseScrollData(scrollsPtr: Int, width: Int, height: Int): IntArray {
         val totalScreens = width * height
         if (totalScreens <= 0) return IntArray(0)
 
         when (scrollsPtr) {
-            0x0000 -> return IntArray(totalScreens) { 0x01 }
+            0x0000 -> return IntArray(totalScreens) { if (it / width == height - 1) 1 else 2 }
             0x0001 -> return IntArray(totalScreens) { 0x02 }
         }
 

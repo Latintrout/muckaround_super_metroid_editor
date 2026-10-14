@@ -15710,3 +15710,113 @@ macro SmeditObjects_ACB3_State_73746174652d31()
     %SmeditObjects_ACB3_List_1()
 endmacro
 
+; SMEDIT initial screen scrolls · Landing Site
+; Row-major db bytes: 00 Red, 01 Blue, 02 Green. No terminator.
+; State wrappers share tables; visual edits detach only the selected state.
+macro SmeditScrolls_91F8_Table_1()
+    db $00 ; Screen (1,1) · Red
+    db $00 ; Screen (2,1) · Red
+    db $00 ; Screen (3,1) · Red
+    db $02 ; Screen (4,1) · Green
+    db $02 ; Screen (5,1) · Green
+    db $02 ; Screen (6,1) · Green
+    db $02 ; Screen (7,1) · Green
+    db $02 ; Screen (8,1) · Green
+    db $02 ; Screen (9,1) · Green
+    db $00 ; Screen (1,2) · Red
+    db $00 ; Screen (2,2) · Red
+    db $02 ; Screen (3,2) · Green
+    db $02 ; Screen (4,2) · Green
+    db $02 ; Screen (5,2) · Green
+    db $02 ; Screen (6,2) · Green
+    db $02 ; Screen (7,2) · Green
+    db $02 ; Screen (8,2) · Green
+    db $02 ; Screen (9,2) · Green
+    db $01 ; Screen (1,3) · Blue
+    db $00 ; Screen (2,3) · Red
+    db $02 ; Screen (3,3) · Green
+    db $02 ; Screen (4,3) · Green
+    db $02 ; Screen (5,3) · Green
+    db $02 ; Screen (6,3) · Green
+    db $02 ; Screen (7,3) · Green
+    db $02 ; Screen (8,3) · Green
+    db $02 ; Screen (9,3) · Green
+    db $00 ; Screen (1,4) · Red
+    db $00 ; Screen (2,4) · Red
+    db $02 ; Screen (3,4) · Green
+    db $02 ; Screen (4,4) · Green
+    db $02 ; Screen (5,4) · Green
+    db $02 ; Screen (6,4) · Green
+    db $02 ; Screen (7,4) · Green
+    db $02 ; Screen (8,4) · Green
+    db $02 ; Screen (9,4) · Green
+    db $01 ; Screen (1,5) · Blue
+    db $01 ; Screen (2,5) · Blue
+    db $01 ; Screen (3,5) · Blue
+    db $01 ; Screen (4,5) · Blue
+    db $01 ; Screen (5,5) · Blue
+    db $01 ; Screen (6,5) · Blue
+    db $01 ; Screen (7,5) · Blue
+    db $01 ; Screen (8,5) · Blue
+    db $01 ; Screen (9,5) · Blue
+endmacro
+
+macro SmeditScrolls_91F8_State_73746174652d31()
+    %SmeditScrolls_91F8_Table_1()
+endmacro
+
+macro SmeditScrolls_91F8_State_73746174652d33()
+    %SmeditScrolls_91F8_Table_1()
+endmacro
+
+macro SmeditScrolls_91F8_State_73746174652d34()
+    %SmeditScrolls_91F8_Table_2()
+endmacro
+
+macro SmeditScrolls_91F8_Table_2()
+    db $00 ; Screen (1,1) · Red
+    db $00 ; Screen (2,1) · Red
+    db $02 ; Screen (3,1) · Green
+    db $02 ; Screen (4,1) · Green
+    db $02 ; Screen (5,1) · Green
+    db $02 ; Screen (6,1) · Green
+    db $02 ; Screen (7,1) · Green
+    db $02 ; Screen (8,1) · Green
+    db $02 ; Screen (9,1) · Green
+    db $00 ; Screen (1,2) · Red
+    db $00 ; Screen (2,2) · Red
+    db $02 ; Screen (3,2) · Green
+    db $02 ; Screen (4,2) · Green
+    db $02 ; Screen (5,2) · Green
+    db $02 ; Screen (6,2) · Green
+    db $02 ; Screen (7,2) · Green
+    db $02 ; Screen (8,2) · Green
+    db $02 ; Screen (9,2) · Green
+    db $01 ; Screen (1,3) · Blue
+    db $00 ; Screen (2,3) · Red
+    db $02 ; Screen (3,3) · Green
+    db $02 ; Screen (4,3) · Green
+    db $02 ; Screen (5,3) · Green
+    db $02 ; Screen (6,3) · Green
+    db $02 ; Screen (7,3) · Green
+    db $02 ; Screen (8,3) · Green
+    db $02 ; Screen (9,3) · Green
+    db $00 ; Screen (1,4) · Red
+    db $00 ; Screen (2,4) · Red
+    db $02 ; Screen (3,4) · Green
+    db $02 ; Screen (4,4) · Green
+    db $02 ; Screen (5,4) · Green
+    db $02 ; Screen (6,4) · Green
+    db $02 ; Screen (7,4) · Green
+    db $02 ; Screen (8,4) · Green
+    db $02 ; Screen (9,4) · Green
+    db $01 ; Screen (1,5) · Blue
+    db $01 ; Screen (2,5) · Blue
+    db $01 ; Screen (3,5) · Blue
+    db $01 ; Screen (4,5) · Blue
+    db $01 ; Screen (5,5) · Blue
+    db $01 ; Screen (6,5) · Blue
+    db $01 ; Screen (7,5) · Blue
+    db $01 ; Screen (8,5) · Blue
+    db $01 ; Screen (9,5) · Blue
+endmacro

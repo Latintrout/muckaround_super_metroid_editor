@@ -406,8 +406,9 @@ class EditorState(
     }
 
     fun setProjectRomBuildMode(mode: ProjectRomBuildMode) {
-        if (mode == ProjectRomBuildMode.PATCHED_ROM && project.asmWorkspace.plmSourceBindings.isNotEmpty()) {
-            postStatus("Source-linked objects require ASM mode.")
+        if (mode == ProjectRomBuildMode.PATCHED_ROM && (project.asmWorkspace.plmSourceBindings.isNotEmpty() ||
+                project.rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 })) {
+            postStatus("Source-authored room data requires ASM mode.")
             return
         }
         if (project.asmWorkspace.buildMode == mode) return
@@ -597,8 +598,40 @@ class EditorState(
     internal var objectPreviewLoading by mutableStateOf(false)
     internal var objectPreviewProblem by mutableStateOf<String?>(null)
         private set
+    internal var initialScrollPreviewProblem by mutableStateOf<String?>(null)
+        private set
+
+    internal fun ensureInitialScrollSource(roomName: String): Boolean = runCatching {
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
+        bridge.initialScrolls.migrate(currentRoomId, roomName)
+        currentStateId = currentPlmStateId()
+        refreshInitialScrolls()
+        true
+    }.getOrElse { postStatus("Initial scroll edit blocked: ${it.message}"); false }
+
+    private fun refreshInitialScrolls() {
+        if ((project.rooms[project.roomKey(currentRoomId)]?.asmInitialScrollSourceVersion ?: 0) == 0) {
+            initialScrollPreviewProblem = null
+            return
+        }
+        val bridge = asmPlmSourceBridge?.initialScrolls
+        val stateId = currentPlmStateId()
+        if (bridge == null || stateId == null) {
+            initialScrollPreviewProblem = "Initial scroll source is loading…"
+            return
+        }
+        val view = bridge.view(currentRoomId, stateId)
+        initialScrollPreviewProblem = view.problem
+        val values = view.resource?.values?.toIntArray() ?: return
+        if (!_workingScrolls.contentEquals(values)) {
+            _workingScrolls = values
+            scrollVersion++
+            _editVersionState.value++
+        }
+    }
 
     internal fun hasManagedPlms(): Boolean = (project.rooms[project.roomKey(currentRoomId)]?.asmPlmSourceVersion ?: 0) != 0
+    internal fun hasManagedInitialScrolls(): Boolean = (project.rooms[project.roomKey(currentRoomId)]?.asmInitialScrollSourceVersion ?: 0) != 0
     internal fun currentPlmStateId(): String? = selectedStateEdits(project.rooms[project.roomKey(currentRoomId)])?.id
 
     internal fun ensureCurrentPlmSource(roomName: String): Boolean {
@@ -670,6 +703,7 @@ class EditorState(
             ?: "Selected state"
 
     internal fun refreshLinkedPlms() {
+        refreshInitialScrolls()
         if (hasManagedPlms()) {
             val stateId = currentPlmStateId()
             val view = stateId?.let { asmPlmSourceBridge?.managedView(currentRoomId, it) }
@@ -3583,6 +3617,7 @@ class EditorState(
         asmPlmSourceBridge = null
         objectPreviewLoading = false
         objectPreviewProblem = null
+        initialScrollPreviewProblem = null
         dirty = false
         patchesSeeded = false
         if (seedPatches) {
@@ -3808,7 +3843,8 @@ class EditorState(
         } else {
             romScrolls
         }
-        _workingScrolls = _originalScrolls.copyOf()
+        // A pending/invalid source projection must not masquerade as the original ROM grid.
+        _workingScrolls = if (hasManagedInitialScrolls()) IntArray(0) else _originalScrolls.copyOf()
         scrollVersion++
 
         // Load the selected preview state's PLMs. Other states are available
@@ -4916,7 +4952,7 @@ class EditorState(
         } else {
             romScrolls
         }
-        _workingScrolls = _originalScrolls.copyOf()
+        _workingScrolls = if (hasManagedInitialScrolls()) IntArray(0) else _originalScrolls.copyOf()
         scrollVersion++
 
         if (savedRoom != null) replaySavedRoomEdits(savedRoom, effectiveWidth, roomKey)
@@ -6473,10 +6509,32 @@ class EditorState(
     // ─── Scroll editing ─────────────────────────────────────────
 
     fun setScroll(screenX: Int, screenY: Int, newValue: Int, roomWidth: Int) {
+        if (newValue !in 0..2 || roomWidth != workingBlocksWide / 16 || screenX !in 0 until roomWidth ||
+            screenY !in 0 until workingBlocksTall / 16) return
         val idx = screenY * roomWidth + screenX
         if (idx !in _workingScrolls.indices) return
         val oldValue = _workingScrolls[idx]
         if (oldValue == newValue) return
+        if (project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
+            if (!ensureInitialScrollSource(currentRomParser?.readRoomHeader(currentRoomId)?.name ?: "Room ${currentRoomId.toString(16).uppercase()}")) return
+            val bridge = requireNotNull(asmPlmSourceBridge)
+            val stateId = currentPlmStateId() ?: return
+            runCatching {
+                val before = bridge.sourceText()
+                bridge.initialScrolls.edit(currentRoomId, stateId, idx, newValue)
+                val after = bridge.sourceText()
+                if (before != after) {
+                    val op = EditOperation("Initial Screen Scroll ${oneBasedRoomCoordinate(screenX, screenY)} → ${listOf("Red", "Blue", "Green")[newValue]}")
+                    managedPlmUndo[op] = before to after
+                    undoStack.add(op)
+                    redoStack.clear()
+                    undoVersion++
+                    refreshInitialScrolls()
+                    editVersion++
+                }
+            }.onFailure { postStatus("Initial scroll edit blocked: ${it.message}") }
+            return
+        }
         _workingScrolls[idx] = newValue
         val scrollChanges = currentScrollChanges()
         scrollChanges.removeAll { it.screenX == screenX && it.screenY == screenY }
@@ -6511,6 +6569,10 @@ class EditorState(
         val data = workingLevelData ?: return
         if (newWidth == oldWidth && newHeight == oldHeight) return
         if (newWidth !in 1..15 || newHeight !in 1..15) return
+        if ((project.rooms[project.roomKey(currentRoomId)]?.asmInitialScrollSourceVersion ?: 0) != 0) {
+            postStatus("Resize blocked: this room's initial scroll table is authored in ASM. Source-aware grid resizing is not available yet.")
+            return
+        }
 
         val newData = resizeLevelData(data, oldWidth, oldHeight, newWidth, newHeight)
 
@@ -7159,12 +7221,18 @@ class EditorState(
             ?: error("Template state '$templateStateId' is not available")
         val templateSource = template.baseSourceStateIndex()
             ?: error("Template state '$templateStateId' has no ROM source state")
+        if (hasManagedInitialScrolls()) {
+            val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the initial scroll source before cloning this state." }
+            val view = bridge.initialScrolls.view(currentRoomId, template.id)
+            require(view.problem == null) { view.problem ?: "Resolve the initial scroll draft before cloning its state." }
+        }
         var ordinal = 1
         var id: String
         do {
             id = "state-new-$ordinal"
             ordinal++
-        } while (roomEdits.states.any { it.id == id } || asmPlmSourceBridge?.hasStateSource(currentRoomId, id) == true)
+        } while (roomEdits.states.any { it.id == id } || asmPlmSourceBridge?.hasStateSource(currentRoomId, id) == true ||
+            asmPlmSourceBridge?.initialScrolls?.hasState(currentRoomId, id) == true)
 
         val newState = RoomStateEdits(
             id = id,
@@ -7189,6 +7257,7 @@ class EditorState(
             val bridge = requireNotNull(asmPlmSourceBridge) { "ASM workspace is not ready." }
             bridge.cloneManagedState(currentRoomId, template.id, newState.id)
         }
+        asmPlmSourceBridge?.initialScrolls?.cloneState(currentRoomId, template.id, newState.id)
         roomEdits.states.add(insertionIndex, newState)
         roomEdits.stateGraphChanged = true
         project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
@@ -7581,6 +7650,11 @@ class EditorState(
             }
             val roomKey = project.roomKey(roomId)
             val romRoom = headersById[roomId]
+            if ((project.rooms[roomKey]?.asmInitialScrollSourceVersion ?: 0) != 0) {
+                skipped++
+                manualSkipped++
+                continue
+            }
             if (romRoom == null) {
                 skipped++
                 continue
@@ -8031,6 +8105,10 @@ class EditorState(
         scrollPlmRemoves: List<PlmChange>,
     ) {
         if (edits.isEmpty() && scrollEdits.isEmpty() && scrollPlmRemoves.isEmpty()) return
+        if (scrollEdits.isNotEmpty() && (project.rooms[project.roomKey(currentRoomId)]?.asmInitialScrollSourceVersion ?: 0) != 0) {
+            postStatus("Generation blocked: combined tile/initial-scroll edits are not source-aware yet. No room changes were applied.")
+            return
+        }
         if (!allowOrQueueLayoutEdit {
                 applyGeneratedRoomOperation(description, edits, scrollEdits, scrollPlmRemoves)
             }
@@ -8073,8 +8151,8 @@ class EditorState(
     }
 
     fun resetCurrentRoomToOriginal(romParser: RomParser): Boolean {
-        if (hasManagedPlms()) {
-            postStatus("This room owns authored object source. Whole-room reset is not source-aware yet; edit its objects in ASM or undo the migration first.")
+        if (hasManagedPlms() || (project.rooms[project.roomKey(currentRoomId)]?.asmInitialScrollSourceVersion ?: 0) != 0) {
+            postStatus("This room owns authored source. Whole-room reset is not source-aware yet; use ASM Undo before resetting the room.")
             return false
         }
         val roomId = currentRoomId
@@ -8221,7 +8299,7 @@ class EditorState(
                 undoVersion++
                 refreshLinkedPlms()
                 true
-            }.getOrElse { postStatus("Object source changed; use Undo in ASM to follow its current history."); false }
+            }.getOrElse { postStatus("ASM source changed; use Undo in ASM to follow its current history."); false }
         }
         if ((pending.plmAdds.isNotEmpty() || pending.plmRemoves.isNotEmpty()) &&
             blockLinkedPlmMutation(pending.itemScope == ItemStateScope.ALL_STATES)) return false
@@ -8310,7 +8388,7 @@ class EditorState(
                 undoVersion++
                 refreshLinkedPlms()
                 true
-            }.getOrElse { postStatus("Object source changed; use Redo in ASM to follow its current history."); false }
+            }.getOrElse { postStatus("ASM source changed; use Redo in ASM to follow its current history."); false }
         }
         if ((pending.plmAdds.isNotEmpty() || pending.plmRemoves.isNotEmpty()) &&
             blockLinkedPlmMutation(pending.itemScope == ItemStateScope.ALL_STATES)) return false

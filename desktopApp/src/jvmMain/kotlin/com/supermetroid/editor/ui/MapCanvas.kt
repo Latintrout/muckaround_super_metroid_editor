@@ -974,7 +974,7 @@ fun MapCanvas(
                             val scrollVer = editorState?.scrollVersion ?: 0
                             val scrollDataForOverlay = remember(scrollVer, roomHeader) {
                                 val ws = editorState?.workingScrolls
-                                if (ws != null && ws.isNotEmpty()) ws.copyOf()
+                                if (ws != null && (ws.isNotEmpty() || editorState?.hasManagedInitialScrolls() == true)) ws.copyOf()
                                 else roomHeader?.let { rh -> romParser.parseScrollData(rh.roomScrollsPtr, rh.width, rh.height) }
                             }
                             val rWidthScreens = roomHeader?.width ?: 0

@@ -26,6 +26,7 @@ internal class AsmPlmSourceBridge(
     private val project: () -> SmEditProject,
 ) : AsmSourceSaveParticipant {
     var onMetadataChanged: () -> Unit = {}
+    val initialScrolls = AsmInitialScrollBridge(catalog, workspace, project) { onMetadataChanged() }
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
     private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
@@ -69,21 +70,34 @@ internal class AsmPlmSourceBridge(
 
     init { if (registerSaveParticipant) workspace.sourceSaveParticipant = this }
 
-    override val sourceFileIds: Set<String> get() = if (project().rooms.values.any { it.asmPlmSourceVersion != 0 }) {
+    override val sourceFileIds: Set<String> get() = if (project().rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 }) {
         setOf(PLM_SOURCE_FILE)
     } else emptySet()
 
     override fun prepare(fileId: String, text: String): () -> String {
         if (fileId != PLM_SOURCE_FILE || fileId !in sourceFileIds) return { text }
         val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
+        val initialRooms = project().rooms.values.filter { it.asmInitialScrollSourceVersion != 0 }.map { room ->
+            room.copy(scrollChanges = room.scrollChanges.toMutableList(), states = room.states.map { it.copy(scrollChanges = it.scrollChanges.toMutableList()) }.toMutableList())
+        }
         val macrosText = workspace.projectSourceText("macros.asm")
         val readers = workspace.projectSourceReadersExcept(PLM_SOURCE_FILE)
         val describe = describePlm
         return transform@{
             // Save must still persist an invalid draft; Build remains the full validation boundary.
-            if (runCatching { catalog.requireStandardMacro(macrosText) }.isFailure) return@transform text
-            val references = readers.flatMap { AsmRoomObjectSource.referencedHelpers(it()) }.toSet()
+            val otherTexts = readers.map { it() }
+            val initialReferences = otherTexts.flatMap { AsmInitialScrollSource.references(it) }.toSet()
             var result = text
+            for (room in initialRooms) result = runCatching {
+                val header = requireNotNull(catalog.parser.readRoomHeader(room.roomId))
+                val width = room.roomHeaderChange?.width ?: header.width
+                val height = room.roomHeaderChange?.height ?: header.height
+                val source = AsmInitialScrollSource(result, catalog.symbols)
+                source.resources(room, width, height)
+                AsmInitialScrollSource(source.tidy(room, initialReferences), catalog.symbols).withComments(room, width, height)
+            }.getOrDefault(result)
+            if (runCatching { catalog.requireStandardMacro(macrosText) }.isFailure) return@transform result
+            val references = otherTexts.flatMap { AsmRoomObjectSource.referencedHelpers(it) }.toSet()
             for (room in rooms) {
                 result = runCatching {
                     val tidy = AsmRoomObjectSource(result, catalog.symbols).tidy(room, references)

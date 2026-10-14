@@ -35,10 +35,80 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import kotlin.test.assertContains
 
 /** Explicit clean ROM/source fixtures; every project and compiler artifact lives in @TempDir. */
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
+
+    @Test fun `initial screen scrolls assemble with state isolation sentinels new states and ordinary patches`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        bridge.migrateRoom(0x91F8, "Landing Site") // Existing object integration must compose with initial scrolls.
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(fixture.projectFile, project)
+        editor.asmPlmSourceBridge = bridge
+        editor.loadRoom(0x91F8, parser, assertNotNull(parser.readRoomHeader(0x91F8)))
+        val original = editor.workingScrolls.toList()
+        val width = editor.workingBlocksWide / 16
+        editor.setScroll(0, 0, if (original[0] == 0) 1 else 0, width)
+        val landing = project.rooms.getValue("91F8")
+        assertEquals(1, landing.asmInitialScrollSourceVersion)
+        val current = editor.currentPlmStateId()!!
+        val sentinel = parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }
+            .first { it.roomScrollsPtr == 0 && it.height > 1 && it.width * it.height <= 50 }
+        bridge.initialScrolls.migrate(sentinel.roomId, sentinel.name)
+        val sentinelRoom = project.rooms.getValue(project.roomKey(sentinel.roomId))
+        assertEquals(0, sentinelRoom.asmPlmSourceVersion)
+        sentinelRoom.states.forEach { state ->
+            val source = assertNotNull(bridge.initialScrolls.view(sentinel.roomId, state.id).resource)
+            assertEquals(parser.parseScrollData(parser.parseRoomStatesWithData(sentinel.roomId)[state.sourceStateIndex!!].scrollPtr,
+                sentinel.width, sentinel.height).toList(), source.values)
+        }
+        project.patches += SmPatch("initial-scroll-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        suspend fun buildAndVerify() {
+            assertTrue(workspace.saveAllSources())
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            for (room in listOf(landing, sentinelRoom)) {
+                val header = assertNotNull(built.readRoomHeader(room.roomId))
+                val states = built.parseRoomStatesWithData(room.roomId)
+                room.states.forEachIndexed { index, state ->
+                    val expected = assertNotNull(bridge.initialScrolls.view(room.roomId, state.id).resource)
+                    assertTrue(states[index].scrollPtr >= 0x8000, "Presets become concrete private source allocations")
+                    assertEquals(expected.values, built.parseScrollData(states[index].scrollPtr, header.width, header.height).toList())
+                }
+                val pointersByIdentity = room.states.mapIndexed { index, state ->
+                    bridge.initialScrolls.view(room.roomId, state.id).resource!!.identity to states[index].scrollPtr
+                }.groupBy({ it.first }, { it.second })
+                assertTrue(pointersByIdentity.values.all { it.distinct().size == 1 })
+                assertEquals(pointersByIdentity.size, pointersByIdentity.values.map { it.first() }.distinct().size)
+            }
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertTrue(result.writeReport.writes.any { it.owner == "patch:initial-scroll-test-patch" })
+            assertContains(AsmBuildArtifactRepository().loadGeneratedRooms(fixture.projectFile.path)!!.lines.joinToString("\n"),
+                "; Initial screen scroll placement; values live in bank_8F.asm.")
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify()
+        val selected = assertNotNull(bridge.initialScrolls.view(landing.roomId, current).resource)
+        val before = bridge.sourceText()
+        val prefix = "macro ${selected.identity}()\n    db \$${selected.values[0].toString(16).uppercase().padStart(2, '0')}"
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, before, before.replace(prefix, "macro ${selected.identity}()\n    db \$02"))
+        editor.refreshLinkedPlms()
+        assertEquals(2, editor.workingScrolls[0])
+        val added = editor.addRoomState(current, projectRoomStateCondition(ProjectRoomStateConditionKind.EVENT_SET, 0x0B), parser)
+        assertEquals(selected.identity, bridge.initialScrolls.view(landing.roomId, added).resource!!.identity)
+        bridge.initialScrolls.edit(landing.roomId, added, 0, 1)
+        buildAndVerify()
+    }
 
     @Test fun `paired save PLM and spawn assemble atomically preserve patches and release only the final state`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()

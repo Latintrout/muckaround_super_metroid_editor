@@ -45,7 +45,7 @@ unexpected base ROM.
     the source pointer. Old compressed allocations are preserved unless a
     complete reference graph proves they are unreferenced.
 12. Engine sentinel values are not treated as ROM pointers. Editing a room whose
-    scroll field is `$0000` (uniform blue) or `$0001` (uniform green) allocates
+    scroll field is `$0000` (Green above, Blue bottom row) or `$0001` (uniform Green) allocates
     a concrete table and repoints its states instead of writing through the
     sentinel or dropping the edit.
 13. Compressed payloads must fit both their ROM allocation and their decompressed

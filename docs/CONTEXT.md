@@ -176,6 +176,7 @@ Screenshots and reference images for SMILE editors (BTS, enemy, FX, PLM).
 Five layers that interact at runtime:
 
 1. **Static scroll data** — 1 byte per screen at `roomScrollsPtr` (state data +14). Values: $00=Red (camera blocked), $01=Blue (normal), $02=Green (open with a 31-pixel lower vertical clamp offset).
+   Preset `$0000` means Green upper rows / Blue bottom row (all Blue only in a one-row room); `$0001` means all Green, as verified at `$82:EB3D-$EB67`. ASM Screen Scrolls now use reciprocal authored `db` tables, independently from PLM trigger streams.
 2. **PLM setup** — Room PLMs are created after the static table; special scripted PLMs may write scroll state during setup.
 3. **Incoming Door ASM** — Belongs to the door used to enter this room and runs after PLM creation, so it can override destination-room screens.
 4. **Room Setup ASM** — Runs after incoming Door ASM and may apply a final load-time override.

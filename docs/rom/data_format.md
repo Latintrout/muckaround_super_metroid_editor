@@ -207,6 +207,27 @@ Offset  Size  Field                        Bank    Notes
 
 ### Implementation: `RomParser.readStateData()`
 
+### Initial screen scroll data
+
+State offset `+$0E` selects a bank-`$8F` table with one byte per screen, row-major:
+`$00` Red, `$01` Blue, `$02` Green. There is **no terminator**. The native loader
+at `$82:EB20-$EB39` copies 50 bytes into WRAM, although only `width × height`
+screen entries belong to the room; original declarations may therefore be shorter
+than that copy. The camera treats bytes other than `$00/$01` as Green, which is
+why SMEDIT normalizes adjacent-header bytes read by vanilla Double Chamber.
+New authored tables explicitly use only `$00/$01/$02`.
+
+Nonnegative scroll fields enter the preset generator at `$82:EB3D`. For the two
+supported normal presets, `$0000` produces Green upper rows and a Blue bottom
+row, while `$0001` produces all Green. `$0000` is only all Blue in a one-row room.
+Do not write through either value as a ROM pointer. ASM/ROM visual edits allocate
+a concrete table and repoint the selected states when required.
+
+This is the **initial** camera grid, not the `$B703` PLM's `(screen, value)` stream
+with an `$80` terminator. Door ASM, room setup and later triggers can overwrite
+the initial values. See [`../asm/reference_workspace.md`](../asm/reference_workspace.md#reciprocal-initial-screen-scrolls)
+for authored source/GUI ownership.
+
 ---
 
 ## PLM Set Format (bank $8F)

@@ -8,6 +8,7 @@ import com.supermetroid.editor.data.RoomEdits
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.io.File
+import kotlin.test.assertContentEquals
 
 /**
  * Round-trip tests for room property editing: scroll data, FX data, and state data fields.
@@ -37,10 +38,10 @@ class RoomPropertyEditTest {
 
     @Test
     fun `special scroll pointers return correct defaults`() {
-        val parser = loadTestRom() ?: return
-        val allBlue = parser.parseScrollData(0x0000, 3, 2)
-        assertEquals(6, allBlue.size)
-        assertTrue(allBlue.all { it == 0x01 }, "scrollsPtr=0x0000 should give all Blue")
+        val parser = RomParser(ByteArray(0x300000))
+        val preset = parser.parseScrollData(0x0000, 3, 2)
+        assertContentEquals(intArrayOf(2, 2, 2, 1, 1, 1), preset, "\$82:EB3D keeps upper rows Green and bottom row Blue")
+        assertContentEquals(intArrayOf(1, 1, 1), parser.parseScrollData(0, 3, 1))
 
         val allGreen = parser.parseScrollData(0x0001, 4, 3)
         assertEquals(12, allGreen.size)

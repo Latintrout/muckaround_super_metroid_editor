@@ -49,6 +49,7 @@ class ProjectRoomExporter(
     freeSpaceAllocator: RomFreeSpaceAllocator? = null,
     private val onLog: (String) -> Unit = {},
     private val sourcePlmSets: Map<Int, Map<String, SourcePlmResource>> = emptyMap(),
+    private val sourceInitialScrolls: Map<Int, Map<String, SourceInitialScrollResource>> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -155,6 +156,14 @@ class ProjectRoomExporter(
 
         for ((roomKey, roomEdits) in effectiveEdits) {
             if (!roomEdits.hasEdits) continue
+            if (roomEdits.asmInitialScrollSourceVersion != 0) {
+                require(roomEdits.asmInitialScrollSourceVersion == 1 && roomEdits.roomId in sourceInitialScrolls) {
+                    "Room $roomKey requires its decoded initial scroll source."
+                }
+                require(roomEdits.scrollChanges.isEmpty() && roomEdits.states.all { it.scrollChanges.isEmpty() }) {
+                    "Room $roomKey has both authored initial scrolls and GUI scroll changes."
+                }
+            }
             if (roomEdits.asmPlmSourceVersion != 0) {
                 require(roomEdits.asmPlmSourceVersion == 1 && roomEdits.roomId in sourcePlmSets) {
                     "Room $roomKey requires its decoded project ASM object source; ROM-only export cannot ignore it."
@@ -224,7 +233,7 @@ class ProjectRoomExporter(
                 applyEnemyGfxChanges(roomKey, roomId, room, roomEdits)
             }
 
-            if (roomEdits.scrollChanges.isNotEmpty() || isResized) {
+            if (roomEdits.asmInitialScrollSourceVersion == 0 && (roomEdits.scrollChanges.isNotEmpty() || isResized)) {
                 if (applyScrollChanges(roomKey, roomId, room, roomEdits, effectiveWidth, effectiveHeight, isResized)) {
                     roomsPatched.add(roomKey)
                 }
@@ -282,6 +291,10 @@ class ProjectRoomExporter(
 
             if (roomEdits.states.any { it.hasEdits }) {
                 applyExistingStateEdits(roomKey, roomId, roomEdits, rewrittenStateOffsets)
+                roomsPatched.add(roomKey)
+            }
+            if (roomEdits.asmInitialScrollSourceVersion != 0) {
+                applySourceInitialScrolls(roomKey, roomId, roomEdits, rewrittenStateOffsets, effectiveWidth, effectiveHeight)
                 roomsPatched.add(roomKey)
             }
             if (roomEdits.stateGraphChanged) roomsPatched.add(roomKey)
@@ -372,6 +385,33 @@ class ProjectRoomExporter(
             val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
                 ?: failExport("Room $roomKey source state ${state.id} has no state record")
             writeU16(romData, offset + 20, pointer)
+        }
+    }
+
+    private fun applySourceInitialScrolls(roomKey: String, roomId: Int, edits: RoomEdits, rewritten: Map<String, Int>, width: Int, height: Int) {
+        val inputs = sourceInitialScrolls.getValue(roomId)
+        require(inputs.keys == edits.states.map { it.id }.toSet()) { "Initial scroll state membership changed." }
+        val states = romParser.inspectRoomStates(roomId).states
+        if (rewritten.isEmpty()) require(edits.states.size == states.size &&
+            edits.states.mapNotNull { it.sourceStateIndex }.toSet() == states.indices.toSet()) {
+            "Initial scrolls require a complete existing-state manifest or a rebuilt state graph."
+        }
+        val pointers = mutableMapOf<String, Pair<Int, SourceInitialScrollResource>>()
+        for (state in edits.states) {
+            val resource = inputs.getValue(state.id)
+            require(resource.width == width && resource.height == height) { "Initial scroll table does not match room dimensions." }
+            val previous = pointers[resource.identity]
+            val ptr = if (previous != null) {
+                require(previous.second == resource) { "Shared initial scroll table has inconsistent values." }
+                previous.first
+            } else {
+                val allocation = roomDataAllocator.allocate(resource.bytes(), listOf(0x8F), "Room $roomKey source initial scrolls ${resource.identity}")
+                    ?: failExport("Initial scroll source for room $roomKey does not fit bank \$8F")
+                (allocation.snesAddress and 0xFFFF).also { pointers[resource.identity] = it to resource }
+            }
+            val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
+                ?: failExport("Initial scroll source state ${state.id} has no writable state record")
+            writeU16(romData, offset + 14, ptr)
         }
     }
 
@@ -1344,7 +1384,7 @@ class ProjectRoomExporter(
         }
         if (!isResized && modifiedScrolls.contentEquals(originalScrolls)) return false
 
-        // $0000/$0001 are engine sentinels for uniform blue/green screens, not ROM
+        // $0000/$0001 are engine-generated scroll presets, not ROM
         // addresses. Materialize a real table when either sentinel is edited.
         val usesSpecialScrollValue = scrollPtr <= 1
         val sharedOutsideRoom = !usesSpecialScrollValue && hasExternalRoomStateReference(

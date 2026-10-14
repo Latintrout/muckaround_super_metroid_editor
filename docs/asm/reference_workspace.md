@@ -1242,6 +1242,72 @@ the copier-header offset, just like its target-record reads.
    a gate/door cap, and verify the sibling is unchanged. Undo restores the complete
    operation. Distinct sibling variants should block **Apply to all states**.
 
+## Reciprocal initial screen scrolls
+
+**Room Info → Screen Scrolls → Initial grid → ASM** opens the selected state's
+actual authored table. Changing a grid cell automatically adopts the room in ASM
+mode; there is no Link step and no dependency on adopting PLMs. ROM-patching mode
+continues to use its existing state-scoped scroll edits.
+
+Initial values live only in `bank_8F.asm`:
+
+```asm
+macro SmeditScrolls_91F8_Table_1()
+    db $02 ; Screen (1,1) · Green
+    db $01 ; Screen (2,1) · Blue
+    ; ... exactly width × height bytes; no terminator
+endmacro
+macro SmeditScrolls_91F8_State_73746174652d31()
+    %SmeditScrolls_91F8_Table_1()
+endmacro
+```
+
+`asmInitialScrollSourceVersion = 1` is an ownership marker, not a stored second
+grid. Adoption imports current GUI common/state overrides and retires those deltas
+with metadata-aware Undo/Redo. Sharing follows original pointer identity **and**
+effective values; independent equal-valued tables never become aliases. GUI edits
+fork a shared table for the selected state. Raw edits of a shared table affect all
+its wrappers. Added states clone their template; reordering uses stable IDs.
+Private scalar edits preserve whitespace, CRLF and handwritten notes. Generated
+coordinate/color comments refresh on GUI edits/Save; unreferenced owned tables and
+deleted state wrappers are pruned, except those referenced elsewhere in project ASM.
+
+The small typed lens is independent of the full IDE index and caches the macro
+envelopes for the exact buffer revision. It accepts `db` color literals and verified
+baseline symbols, validates every active wrapper and exact dimensions (at most
+50 screens), and never guesses arbitrary expressions. Invalid drafts stay saveable;
+the last-good grid is shown with an error and cannot overwrite that draft via GUI.
+Build decodes current saved source, never a preview/cache, then allocates each named
+table once in bank `$8F`. Asar invokes the authored macro and writes symbolic state
+pointers at `+$0E`; full allocation/pointer claims and exact compiled-byte parity
+protect the result. Original ASM pointer/table/header changes which conflict with
+this adopted resource fail before replacement. The source-built native scroll loader
+at `$82:EB20-$EB6B` must also match the loaded baseline; a custom byte layout/preset
+needs a matching codec rather than silently reusing this lens. Ordinary ROM patches retain their
+normal post-compile ownership checks. `$0000/$0001` presets are never treated as
+addresses; adopted grids always receive concrete tables.
+
+Engine correction: `$82:EB3D-$EB67` generates Green on upper rows and Blue on the
+bottom row for `$0000`; only a one-row room is uniformly Blue. `$0001` remains all
+Green. This preview correction applies to both build modes. Initial tables still
+precede PLM setup, incoming Door ASM, room setup ASM and gameplay writers, so changing
+one does not remove a trigger/door override. Trigger command macros are a distinct
+format with an `$80` terminator.
+
+Acceptance: use Landing Site, change a cell, open **Initial grid → ASM**, change
+its `db` byte and return to the room. Switch states to check isolation, Undo/Redo,
+save/reopen, then Build/Run with an unrelated patch enabled. Native multi-row preset
+rooms should preview Green above/Blue bottom before editing. Synthetic tests cover
+round trips, aliasing, migration, malformed drafts, notes, headered allocations and
+ownership guards; `asmBuildIntegrationTest --tests '*initial screen scrolls*'`
+checks real Asar output, coexistence with PLM authoring, sentinel materialization,
+new-state graph relocation, ordinary patches and base-ROM immutability.
+
+Current boundaries: project-created rooms, whole-room reset/resize and compound
+generation changing an adopted initial grid are guarded rather than partially
+translated. A joint source-aware resize/generation transaction and explicit
+re-sharing controls are future work.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -1260,10 +1326,11 @@ Follow-up work can now be incremental:
    typed labels/tables. The generated PLM-list/state-pointer pilot and read-only
    result navigation are implemented. The separate reciprocal authoring pilot now
    shares fixed-layout declarations and relocatable authored object macros with the
-   GUI, including state exceptions and copy-on-write. Prioritize compound edits,
-   custom scroll resources and one asset-owned graphics example before scaling
-   that authority contract. Then extend authoring to rewritten state graphs,
-   then level data, enemies/GFX, FX, scrolls, doors, headers, and state selectors;
+   GUI, including state exceptions and copy-on-write. Initial screen grids,
+   scroll-trigger commands and paired save-spawn records now use the same authority
+   contract. Next prioritize FX tables, then enemy population/GFX pairing and one
+   asset-owned graphics example, alongside compound operations. Then extend full
+   authoring to rewritten state graphs, level data, doors, headers, and state selectors;
    then give project-created rooms stable source
    identities. Graphics, map, text, and sound encoders should follow the same
    project-owned `data/`/source boundary before Asar.

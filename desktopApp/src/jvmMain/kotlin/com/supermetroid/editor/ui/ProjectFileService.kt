@@ -10,6 +10,8 @@ import com.supermetroid.editor.asm.AsmProjectWorkspaceRepository
 import com.supermetroid.editor.asm.AsmPlmSourceCatalog
 import com.supermetroid.editor.asm.AsmRoomObjectSource
 import com.supermetroid.editor.asm.AsmScrollCommandSource
+import com.supermetroid.editor.asm.AsmInitialScrollSource
+import com.supermetroid.editor.asm.protectInitialScrollBaseline
 import com.supermetroid.editor.asm.AsmWlaSymbolParser
 import com.supermetroid.editor.asm.PLM_SOURCE_FILE
 import com.supermetroid.editor.asm.AsmSourceAssetMaterializer
@@ -31,7 +33,7 @@ import java.security.MessageDigest
 
 internal object ProjectFileService {
     private val asmProjectCompiler = AsmProjectCompiler()
-    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v6-save-resources"
+    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v7-initial-scrolls"
     private const val MAX_PREPARED_ASM_BASES = 2
     private val preparedAsmBases = object : LinkedHashMap<String, AsmCompiledBuildBase>(
         MAX_PREPARED_ASM_BASES,
@@ -238,7 +240,7 @@ internal object ProjectFileService {
         onStatus: (String) -> Unit,
     ): AsmCompiledBuildBase? {
         if (project.asmWorkspace.buildMode == ProjectRomBuildMode.PATCHED_ROM) {
-            require(project.rooms.values.none { it.asmPlmSourceVersion != 0 }) { "Authored room objects require ASM source mode." }
+            require(project.rooms.values.none { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 }) { "Authored room data requires ASM source mode." }
             require(project.asmWorkspace.plmSourceBindings.isEmpty()) { "Linked room objects require ASM source mode." }
             val sourceEdits = if (project.asmWorkspace.enabled && projectFilePath.isNotBlank()) {
                 AsmProjectWorkspaceRepository().sourceOverrideFileIds(projectFilePath)
@@ -292,6 +294,11 @@ internal object ProjectFileService {
         val managedRooms = project.rooms.values.filter { it.asmPlmSourceVersion != 0 }
         if (managedRooms.isNotEmpty()) linkedCatalog.requireStandardMacro(linkedMacros)
         val managedSource = AsmRoomObjectSource(linkedSource, linkedCatalog.symbols)
+        val initialScrollSource = AsmInitialScrollSource(linkedSource, linkedCatalog.symbols)
+        val sourceInitialScrolls = project.rooms.values.filter { it.asmInitialScrollSourceVersion != 0 }.associate { room ->
+            val header = requireNotNull(romParser.readRoomHeader(room.roomId))
+            room.roomId to initialScrollSource.resources(room, room.roomHeaderChange?.width ?: header.width, room.roomHeaderChange?.height ?: header.height)
+        }
         val sourcePlmSets = managedRooms.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
             room.roomId to managedSource.resources(room, (room.roomHeaderChange?.width ?: header.width) * (room.roomHeaderChange?.height ?: header.height))
@@ -337,6 +344,7 @@ internal object ProjectFileService {
             onStatus(progress)
         })
         val compiledSaveParser = RomParser(initial.romBytes)
+        protectInitialScrollBaseline(project, romParser, compiledSaveParser)
         for (save in sourceSaves.values) {
             val baseline = requireNotNull(romParser.readSaveEntry(save.area, save.slot))
             val compiled = requireNotNull(compiledSaveParser.readSaveEntry(save.area, save.slot))
@@ -368,14 +376,20 @@ internal object ProjectFileService {
             logWritePlanDetails = false,
             compiledAsmBase = initial,
             sourcePlmSets = sourcePlmSets,
+            sourceInitialScrolls = sourceInitialScrolls,
         ).build() ?: throw AsmCompilationException(
             planningLog.lastOrNull { it.startsWith("ERROR:") }
                 ?.removePrefix("ERROR: ")
                 ?: "Could not validate editor data against the compiled ASM source"
         )
         val roomMaterialization = AsmSourceRoomMaterializer().materialize(
-            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves,
+            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves, sourceInitialScrolls,
         )
+        require(roomMaterialization.initialScrollTables.map { it.resource.identity }.toSet() ==
+            sourceInitialScrolls.values.flatMap { it.values }.map { it.identity }.toSet() &&
+            roomMaterialization.initialScrollTables.sumOf { it.pointerOffsets.size } == sourceInitialScrolls.values.sumOf { it.size }) {
+            "Authored initial scrolls could not be included atomically; no ROM was produced."
+        }
         val authoredResources = managedRooms.flatMap { room -> room.states.map { state ->
             AsmRoomObjectSource.stateMacro(room.roomId, state.id) to managedSource.table(room.roomId, state.id).resource.name
         } }.toMap()

@@ -24,10 +24,12 @@ logic (`EditorState.exportToRom()`).
 | Value | Color | Meaning |
 |-------|-------|---------|
 | `0x00` | Red | Hidden — screen does not scroll into view |
-| `0x01` | Blue | Explorable — normal scrolling, revealed on map |
-| `0x02` | Green | Show floor — shows the bottom of the screen when entering from above |
+| `0x01` | Blue | Normal camera scrolling (not a pause-map reveal flag) |
+| `0x02` | Green | Open camera scrolling with a 31-pixel lower vertical clamp offset |
 
-Special scroll pointers: `0x0000` = all Blue, `0x0001` = all Green.
+Special scroll pointers, verified at `$82:EB3D-$EB67`: `0x0000` = Green on upper
+rows and Blue on the bottom row; `0x0001` = all Green. In a single-row room,
+`0x0000` therefore appears all Blue. These are generated presets, not ROM addresses.
 
 ## Bank Free Space
 

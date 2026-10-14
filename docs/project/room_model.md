@@ -62,6 +62,19 @@ is conventionally used as an always-false selector that skips its state pointer.
 
 ## Current Boundary
 
+Initial Screen Scrolls are also reciprocal in ASM projects. A grid change or its
+**ASM** link adopts that room's effective starting scrolls, including legacy common
+and state overrides, into `bank_8F.asm`. `asmInitialScrollSourceVersion = 1` stores
+ownership only; JSON scroll deltas are retired atomically. Adoption does not require
+PLM adoption. Each state wrapper references a named `db` table; visual edits detach
+the selected state, while raw edits update every alias of that table. New conditions
+clone their template's table, and reorderings retain stable state identities.
+Invalid drafts remain saveable but block GUI writes; last-good previews are marked
+with the problem. Checked allocations, symbolic state pointers and compiled-byte
+parity compose with the existing PLM/save/trigger and ordinary ROM-patch paths.
+Whole-room reset, resize and combined generation involving an adopted initial grid
+remain explicitly guarded until they have a joint source transaction.
+
 ASM projects automatically recognize supported source-only PLM edits against the
 immutable baseline; no per-room linking is required. For that bounded pilot the
 Bank `$8F` declaration is the sole authority: GUI scalar fields and source edits

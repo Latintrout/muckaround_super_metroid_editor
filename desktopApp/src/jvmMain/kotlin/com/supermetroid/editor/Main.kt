@@ -592,6 +592,18 @@ fun main() = application {
                 }
             }
 
+            fun openInitialScrolls() {
+                val name = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
+                if (!editorState.ensureInitialScrollSource(name)) return
+                val stateId = editorState.currentPlmStateId() ?: return
+                runCatching { requireNotNull(editorState.asmPlmSourceBridge).initialScrolls.line(editorState.currentRoomId, stateId) }
+                    .onSuccess { line -> navigate {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource("bank_8F.asm", line)
+                        leftTab = TAB_ASM
+                    } }.onFailure { editorState.postStatus(it.message ?: "Initial scroll source is unavailable.") }
+            }
+
             fun openSaveSpawn(entry: RomParser.PlmEntry) {
                 if (!editorState.ensureSaveSpawnSource(entry)) return
                 val target = editorState.asmPlmSourceBridge?.saveTarget(editorState.currentRoomId,
@@ -1294,6 +1306,7 @@ fun main() = application {
                                                 }
                                             },
                                             onNavigateToAsm = ::openAsmAddress,
+                                            onNavigateToInitialScrolls = ::openInitialScrolls,
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },
                                             modifier = Modifier.fillMaxSize(),
                                         )

@@ -45,6 +45,7 @@ internal fun RoomsTabSidebar(
     onSeedPatterns: () -> Unit,
     onNavigateToMap: () -> Unit,
     onNavigateToAsm: (Int) -> Unit,
+    onNavigateToInitialScrolls: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     onKeyboardNavigatorChanged: (((Int) -> Boolean)?) -> Unit = {},
 ) {
@@ -129,6 +130,7 @@ internal fun RoomsTabSidebar(
                                             modifier = Modifier.fillMaxSize(),
                                             onNavigateToMap = onNavigateToMap,
                                             onNavigateToAsm = onNavigateToAsm,
+                                            onNavigateToInitialScrolls = onNavigateToInitialScrolls,
                                             onWorkspaceChanged = onWorkspaceChanged,
                                         )
                                     } else {

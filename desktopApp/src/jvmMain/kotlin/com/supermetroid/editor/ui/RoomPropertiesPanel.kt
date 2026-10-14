@@ -119,6 +119,7 @@ fun RoomPropertiesPanel(
     modifier: Modifier = Modifier,
     onNavigateToMap: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
+    onNavigateToInitialScrolls: (() -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
 ) {
     val stateInspection = remember(room.roomId, romParser) { romParser.inspectRoomStates(room.roomId) }
@@ -1078,16 +1079,26 @@ fun RoomPropertiesPanel(
             )
         }
         val scrollsPtr = stateData["roomScrollsPtr"] ?: room.roomScrollsPtr
-        PropertyRow("Room states", sharingDescription("roomScrollsPtr", scrollsPtr))
+        val initialScrollBridge = editorState.asmPlmSourceBridge?.initialScrolls
+        val initialScrollView = selectedStateId?.let { initialScrollBridge?.takeIf { it.isManaged(room.roomId) }?.view(room.roomId, it) }
+        val scrollSharing = initialScrollView?.resource?.let { selected ->
+            val count = roomEdits?.states.orEmpty().count { initialScrollBridge?.view(room.roomId, it.id)?.resource?.identity == selected.identity }
+            if (count == 1) "This state" else "$count states share this table"
+        } ?: sharingDescription("roomScrollsPtr", scrollsPtr)
+        PropertyRow("Initial grid", scrollSharing,
+            onNavigateToInitialScrolls?.takeIf { editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE })
+        editorState.initialScrollPreviewProblem?.let { problem ->
+            Text(problem, fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error)
+        }
         if (showRomAddresses) {
             PropertyRow(
                 "ROM scroll data",
                 when (scrollsPtr) {
-                    0x0000 -> "All Blue preset (\$0000)"
+                    0x0000 -> "Green above / Blue bottom (\$0000)"
                     0x0001 -> "All Green preset (\$0001)"
                     else -> "\$8F:${scrollsPtr.toString(16).uppercase().padStart(4, '0')}"
                 },
-                asmLink(scrollsPtr.takeIf { it > 1 }?.let { RomConstants.BANK_ROOM_DATA or it }),
+                if (initialScrollView != null) onNavigateToInitialScrolls else asmLink(scrollsPtr.takeIf { it > 1 }?.let { RomConstants.BANK_ROOM_DATA or it }),
             )
         }
 

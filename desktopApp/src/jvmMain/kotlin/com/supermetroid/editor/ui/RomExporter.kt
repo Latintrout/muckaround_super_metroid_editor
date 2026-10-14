@@ -211,12 +211,19 @@ internal class RomExporter(
     private val logWritePlanDetails: Boolean = true,
     private val compiledAsmBase: AsmCompiledBuildBase? = null,
     private val sourcePlmSets: Map<Int, Map<String, com.supermetroid.editor.rom.SourcePlmResource>> = emptyMap(),
+    private val sourceInitialScrolls: Map<Int, Map<String, com.supermetroid.editor.rom.SourceInitialScrollResource>> = emptyMap(),
     private val projectFilePath: String = "",
 ) {
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        if (project.rooms.values.any { it.asmInitialScrollSourceVersion != 0 && it.roomId !in sourceInitialScrolls &&
+                project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
+            onLog("ERROR: Authored initial scrolls require their validated ASM build inputs.")
+            onStatus("Authored initial scrolls require their validated ASM build inputs.")
+            return null
+        }
         val missingObjects = project.rooms.values.filter { it.asmPlmSourceVersion != 0 && it.roomId !in sourcePlmSets &&
             project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }
         if (missingObjects.isNotEmpty()) {
@@ -454,6 +461,7 @@ internal class RomExporter(
                                 freeSpaceAllocator = freeSpaceAllocator,
                                 onLog = onLog,
                                 sourcePlmSets = sourcePlmSets,
+                                sourceInitialScrolls = sourceInitialScrolls,
                             ).exportRooms()
                         }
                         roomsPatched.addAll(roomExportResult.roomsPatched)
