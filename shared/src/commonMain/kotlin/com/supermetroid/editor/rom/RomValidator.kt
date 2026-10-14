@@ -105,6 +105,7 @@ object RomValidator {
             issues.addAll(checkProjectGraphicsExportFit(parser, project))
             issues.addAll(checkProjectEnemyTileEdits(parser, project))
             issues.addAll(checkProjectSpritePalettes(parser, project))
+            issues.addAll(checkProjectNativeSpriteEdits(parser, project))
         }
 
         return issues.sortedWith(compareBy({ it.severity }, { it.category }, { it.roomName }))
@@ -1015,6 +1016,15 @@ object RomValidator {
         }
         return issues
     }
+
+    fun checkProjectNativeSpriteEdits(parser: RomParser, project: SmEditProject): List<Issue> =
+        try {
+            val plan = RomWritePlan(parser.getRomData())
+            NativeSpriteAssets.planEdits(parser, project.customGfx).forEach(plan::add)
+            emptyList()
+        } catch (error: Exception) {
+            listOf(Issue(Severity.ERROR, "Sprite Export", null, "Native sprites", error.message ?: "Invalid native sprite edit"))
+        }
 
     private fun validateEnemyPalette(
         parser: RomParser,

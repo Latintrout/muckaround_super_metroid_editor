@@ -28,6 +28,23 @@ class RoomResizeTest {
     inner class ResizeLevelData {
 
         @Test
+        fun `Double Chamber resize preserves background beyond its overallocated BTS`() {
+            val parser = TestRomHelper.requireRomParser()
+            val room = requireNotNull(parser.readRoomHeader(0xADAD))
+            val original = parser.decompressLZ2(room.levelDataPtr)
+            val resized = resizeLevelData(original, 4, 2, 5, 2)
+            val layer2Start = 2 + 5 * 2 * 256 * 3
+            assertEquals(layer2Start + 5 * 2 * 256 * 2, resized.size)
+            for (y in 0 until 32) for (x in 0 until 64) {
+                assertEquals(
+                    readWord(original, 0x2402 + (y * 64 + x) * 2),
+                    readWord(resized, layer2Start + (y * 80 + x) * 2),
+                    "Layer 2 at ($x,$y) should survive resize",
+                )
+            }
+        }
+
+        @Test
         fun `identity resize returns equivalent data`() {
             val parser = loadTestRom() ?: return
             // Parlor: 5x5 screens

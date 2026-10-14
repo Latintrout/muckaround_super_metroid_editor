@@ -300,6 +300,9 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             0xE5BF, 0xD07F, 0xD0BF, 0xD13F, 0xD17F, 0xD1BF, 0xED7F,
             // Mechanisms
             0xD4FF, 0xD53F, 0xD57F, 0xD5BF, 0xD5FF, 0xF0BF,
+            // Additional independently renderable species, previously absent from the picker.
+            0xD73F, 0xD8FF, 0xE1FF, 0xE23F, 0xF0FF, 0xF2D3, 0xF313,
+            0xEDFF, 0xEE3F, 0xEE7F, 0xEFFF,
         )
 
         val EDITOR_ENEMIES: List<EnemySpriteEntry> = EDITOR_ENEMY_IDS.map { id ->
@@ -528,6 +531,28 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
         ): EnemyPreviewTileSource? {
             val id = speciesId and 0xFFFF
             val header = readSpeciesHeader(romParser, id) ?: return null
+            if (id == ShipSpritemap.BOTTOM_SPECIES) {
+                val top = readSpeciesHeader(romParser, ShipSpritemap.TOP_SPECIES) ?: return null
+                return rawPreviewSource(
+                    romParser, top.tileDataAddress, top.tileDataSize,
+                    "Shared gunship tiles", EnemyPreviewAssetOwnership.SHARED_SPECIES,
+                    ShipSpritemap.TOP_SPECIES,
+                )
+            }
+            val wingBody = when (id) {
+                0xEAFF -> 0xEABF
+                0xEB7F -> 0xEB3F
+                0xEBFF -> 0xEBBF
+                else -> null
+            }
+            if (wingBody != null) {
+                val body = readSpeciesHeader(romParser, wingBody) ?: return null
+                return rawPreviewSource(
+                    romParser, body.tileDataAddress, body.tileDataSize,
+                    "Shared Kihunter body and wing tiles", EnemyPreviewAssetOwnership.SHARED_SPECIES,
+                    wingBody,
+                )
+            }
             // Ignore stale/custom project blocks for zero-transfer headers. They
             // are not species-owned merely because a project contains that key.
             val owned = if (header.tileDataSize > 0) {
@@ -717,6 +742,11 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             enemyTileData: ByteArray? = null
         ): ByteArray? {
             val id = speciesId and 0xFFFF
+            if (id == 0xE23F) {
+                val raw = enemyTileData ?: loadEnemyTileData(romParser, id) ?: return null
+                // Alternate layout $8600 + enemy-set placement $D002 loads tiles $D0..$FF.
+                return ByteArray(0x2000).also { raw.copyInto(it, 0xD0 * BYTES_PER_TILE) }
+            }
             if (id == CORPSE_SIDEHOPPER_SPECIES_ID || id == CORPSE_SIDEHOPPER_LARGE_SPECIES_ID) {
                 // Tourian loads the common corpse block at OBJ tile $100 and the
                 // large Sidehopper block immediately after it at tile $170.

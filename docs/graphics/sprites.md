@@ -54,6 +54,62 @@ correct source-backed edit model is tracked as parity milestone P0.6.
 
 ## Overview
 
+### Source-backed ship, weapon and cinematic previews
+
+The Sprites tab's **Misc** category includes these additional workspaces, using the
+same selection rows and palette controls as the existing sprite editors:
+
+- **Samus' Ship** combines the top, bottom and entrance pad from bank `$A2`,
+  including the pad's opening and closing instruction lists. The room overlay
+  keeps each part's runtime anchor but displays only one ship label.
+- **Beams and projectiles** reads bank `$93`'s eight-byte frame format, with all
+  12 legal beam combinations, charged versions, ten source direction tracks,
+  missiles, bombs and impacts. Beam graphics/palettes follow the runtime transfers.
+- **Title, intro and ending** previews composed title graphics, cinematic OBJ
+  tracks, BG tilemaps and Ceres Mode 7 graphics from their original sources.
+- **Samus death sequence** uses the separate death graphics and both suit and
+  suitless palette tracks for all three suits and both facing directions.
+- **Shared sprites and effects** exposes common effects, grapple tiles, gunship
+  dust and beam source sheets. These source sheets are not full effect simulations.
+
+These workspaces support source-sheet pixel editing, palette-row editing, reset,
+project save/reopen and ROM export. Assembled references preview raw-source edits
+live. Shared sources intentionally affect every preview using those bytes. The ship
+reuses its existing enemy-owned tiles/palette; named shared palettes retain their
+existing owners. Other sources use `visualTileBlocks` and `visualPalettes` in project
+format 12. Normal ROM write-plan overlap checks reject conflicting owners.
+
+Compressed sources are recompressed and verified on Apply. Edits must fit the
+original compressed byte budget; otherwise Apply reports an error without changing
+the project. Automatic asset relocation is not supported. Compressed references
+refresh on Apply, rather than recompressing on every brush stroke.
+
+Cinematic object frames do not simulate camera movement, Mode 7 transforms, HDMA,
+companion particles or gameplay physics. Shared Kihunter-wing preview graphics do
+not change the species header's pixel-editing/export ownership. Ceres door rendering
+places its alternate-layout graphics at the runtime OBJ tile offset rather than tile zero.
+
+### Static boss room previews
+
+Room overlays reuse complete native compositions: Kraid and Crocomire roaring,
+Bomb/Golden Torizo walking poses, Ridley's body/wing/tail, Phantoon's full BG body,
+Draygon's assembled parts and Botwoon's curved body. Companion population slots are
+hidden when their main composed actor is present; Mother Brain phase 1 similarly
+suppresses the extra phase-2 slot. Spore Spawn's existing rendering is unchanged.
+
+Bosses with off-room spawn coordinates are visually centered in the room, without
+modifying population coordinates or exported gameplay data. No encounter movement
+or boss AI is simulated. A state with no boss population remains empty.
+
+Sova, Zeela and Zoomer use their source initialization table's `(orientation & 3) * 2`
+index, including orientation zero, rather than treating the population value as a
+byte offset. This prevents an unaligned/wrong spritemap from splitting the preview.
+
+Run `:shared:spriteCoverageTest` with the configured vanilla ROM for the complete
+species coverage ledger. Fully transparent results no longer count as previews.
+
+### Rendering systems
+
 Super Metroid uses three distinct sprite rendering systems:
 
 1. **OAM Spritemaps** — Standard enemies use hardware OAM (Object Attribute Memory) sprites

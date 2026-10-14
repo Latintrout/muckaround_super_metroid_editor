@@ -360,6 +360,44 @@ class EnemySpritemap(private val romParser: RomParser) {
     }
 
     /**
+     * Find a spritemap for a specific [initParam] value from the enemy population data.
+     *
+     * If the species has a direction table, [initParam] is used as a byte index into it
+     * (the SM engine does `LDA dirTable,Y` where Y = initParam). Each table entry is a
+     * 2-byte instruction list pointer, so direction index = initParam / 2.
+     *
+     * Returns null if the species has no direction table or the index is out of range,
+     * in which case the caller should fall back to [findDefaultSpritemap].
+     */
+    fun findSpritemapForInitParam(speciesId: Int, initParam: Int): Spritemap? {
+        if (initParam == 0) return null // direction 0 = default, no need for special lookup
+        val rom = romParser.getRomData()
+        val headerPc = romParser.snesToPc(RomConstants.BANK_ENEMY_AI or speciesId)
+        if (headerPc < 0 || headerPc + 0x3A > rom.size) return null
+
+        val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
+        val initAiPtr = readU16(rom, headerPc + 0x12)
+        val initPc = romParser.snesToPc((aiBank shl 16) or initAiPtr)
+        if (initPc < 0 || initPc + 20 > rom.size) return null
+
+        val rawTileSize = readU16(rom, headerPc)
+        val tileCount = (rawTileSize and 0x7FFF) / RomConstants.BYTES_PER_4BPP_TILE
+
+        val dirTableAddr = findDirectionTableAddress(rom, initPc) ?: return null
+        val tablePc = romParser.snesToPc((aiBank shl 16) or dirTableAddr)
+        if (tablePc < 0) return null
+
+        // initParam is a byte index; each entry is 2 bytes
+        val entryPc = tablePc + initParam
+        if (entryPc + 1 >= rom.size) return null
+        val instrListPtr = readU16(rom, entryPc)
+        if (instrListPtr == 0) return null
+
+        val smap = findFirstSpritemap(rom, instrListPtr, aiBank, tileCount) ?: return null
+        return if (spritemapFitsTileData(smap, tileCount)) smap else null
+    }
+
+    /**
      * Get all animation frames for a species (first direction/mode).
      */
     fun findAnimationFrames(speciesId: Int, maxFrames: Int = 32): List<AnimationFrame> {

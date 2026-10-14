@@ -13,6 +13,7 @@ import com.supermetroid.editor.procgen.LearnedRoomProposal
 import com.supermetroid.editor.procgen.LearnedRoomProposalGenerator
 import com.supermetroid.editor.procgen.LearnedRoomProposalSource
 import com.supermetroid.editor.rom.EnemySpriteGraphics
+import com.supermetroid.editor.rom.ProjectRoomExporter
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TestRomHelper
 import com.supermetroid.editor.rom.ensureStateManifest
@@ -364,6 +365,40 @@ class EditorStateTest {
 
     @Nested
     inner class Layer2Editing {
+        @Test
+        fun `Double Chamber layer 2 paint undo replay and export leave BTS intact`() {
+            val parser = TestRomHelper.requireRomParser()
+            val room = requireNotNull(parser.readRoomHeader(0xADAD))
+            state.loadRoom(room.roomId, parser, room)
+            state.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+            val original = requireNotNull(state.workingLevelData).copyOf()
+            assertEquals(0x03C1, state.readLayer2BlockWord(0, 0))
+
+            state.activeRoomLayer = RoomEditLayer.LAYER2
+            state.setBrushForTest(TileBrush.single(0x123).copy(hFlip = true))
+            state.beginStroke()
+            assertTrue(state.paintAt(0, 0))
+            state.endStroke()
+
+            val expected = original.copyOf().also {
+                it[0x2402] = 0x23
+                it[0x2403] = 0x05
+            }
+            assertArrayEquals(expected, state.workingLevelData)
+            assertTrue(state.undo())
+            assertArrayEquals(original, state.workingLevelData)
+            assertTrue(state.redo())
+            assertArrayEquals(expected, state.workingLevelData)
+
+            state.loadRoom(room.roomId, parser, room)
+            assertArrayEquals(expected, state.workingLevelData)
+            val rom = parser.copyRomData()
+            ProjectRoomExporter(state.project, parser, rom).exportRooms()
+            val exported = RomParser(rom)
+            val exportedRoom = requireNotNull(exported.readRoomHeader(room.roomId))
+            assertArrayEquals(expected, exported.decompressLZ2(exportedRoom.levelDataPtr))
+        }
+
         @Test
         fun `nonzero parallax motion does not hide embedded layer 2`() {
             state.initTestLevel(blocksWide = 4, blocksTall = 4, includeLayer2 = true)

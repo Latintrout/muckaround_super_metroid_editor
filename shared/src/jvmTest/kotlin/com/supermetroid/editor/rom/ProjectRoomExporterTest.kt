@@ -6,6 +6,9 @@ import com.supermetroid.editor.data.SaveStationSpawnChange
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.ScrollChange
 import com.supermetroid.editor.data.ScrollCommand
+import com.supermetroid.editor.data.EditOperation
+import com.supermetroid.editor.data.TILE_EDIT_LAYER_2
+import com.supermetroid.editor.data.TileEdit
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -14,6 +17,53 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ProjectRoomExporterTest {
+    @Test
+    fun `Double Chamber layer 2 export preserves layer 1 and all allocated BTS bytes`() {
+        val rom = TestRomHelper.requireRomBytes().copyOf()
+        val parser = RomParser(rom)
+        val room = requireNotNull(parser.readRoomHeader(0xADAD))
+        val original = parser.decompressLZ2(room.levelDataPtr)
+        val project = SmEditProject(romPath = "base.smc")
+        project.getOrCreateRoom(room.roomId).operations += EditOperation(
+            "Edit Double Chamber background",
+            listOf(TileEdit(0, 0, 0x03C1, 0x0523, layer = TILE_EDIT_LAYER_2)),
+        )
+
+        ProjectRoomExporter(project, parser, rom).exportRooms()
+
+        val exported = RomParser(rom)
+        val exportedRoom = requireNotNull(exported.readRoomHeader(room.roomId))
+        val expected = original.copyOf().also {
+            it[0x2402] = 0x23
+            it[0x2403] = 0x05
+        }
+        assertContentEquals(expected, exported.decompressLZ2(exportedRoom.levelDataPtr))
+    }
+
+    @Test
+    fun `resizing Double Chamber on export preserves the actual layer 2`() {
+        val rom = TestRomHelper.requireRomBytes().copyOf()
+        val parser = RomParser(rom)
+        val room = requireNotNull(parser.readRoomHeader(0xADAD))
+        val original = parser.decompressLZ2(room.levelDataPtr)
+        val project = SmEditProject(romPath = "base.smc")
+        project.getOrCreateRoom(room.roomId).roomHeaderChange = RoomHeaderChange(width = 5)
+
+        ProjectRoomExporter(project, parser, rom).exportRooms()
+
+        val exported = RomParser(rom)
+        val exportedRoom = requireNotNull(exported.readRoomHeader(room.roomId))
+        val resized = exported.decompressLZ2(exportedRoom.levelDataPtr)
+        val layer2Start = 2 + 5 * 2 * 256 * 3
+        assertEquals(layer2Start + 5 * 2 * 256 * 2, resized.size)
+        for (y in 0 until 32) for (x in 0 until 64) {
+            val originalOffset = 0x2402 + (y * 64 + x) * 2
+            val resizedOffset = layer2Start + (y * 80 + x) * 2
+            assertEquals(original[originalOffset], resized[resizedOffset], "Layer 2 low byte at ($x,$y)")
+            assertEquals(original[originalOffset + 1], resized[resizedOffset + 1], "Layer 2 high byte at ($x,$y)")
+        }
+    }
+
     @Test
     fun `custom scroll behavior rejects a target outside the room`() {
         val rom = TestRomHelper.loadRomBytes()?.copyOf() ?: return

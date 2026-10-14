@@ -10,6 +10,50 @@ import org.junit.jupiter.api.Test
 import java.awt.image.BufferedImage
 
 class RoomCompositeRendererTest {
+    @Test
+    fun `room ship components use source anchors and select entrance pad separately`() {
+        val parser = com.supermetroid.editor.rom.TestRomHelper.requireRomParser()
+        EnemySpriteCache.setRomParser(parser)
+        try {
+            val ship = com.supermetroid.editor.rom.ShipSpritemap(parser)
+            for ((id, pad) in listOf(0xD07F to false, 0xD0BF to false, 0xD0BF to true)) {
+                val enemy = RomParser.EnemyEntry(id, 128, 128, 0, 0, extra3 = if (pad) 1 else 0)
+                val expected = requireNotNull(ship.renderPart(id, entrancePad = pad))
+                val actual = requireNotNull(EnemySpriteCache.getPreview(enemy))
+                assertEquals(expected.originX, actual.originX)
+                assertEquals(expected.originY, actual.originY)
+                assertTrue(expected.pixels.contentEquals(actual.image.pixels()))
+            }
+        } finally {
+            EnemySpriteCache.setRomParser(null)
+        }
+    }
+
+
+    @Test
+    fun `ship has one name label without bottom or entrance pad labels`() {
+        fun render(entries: List<RomParser.EnemyEntry>, names: Boolean) = buildCompositeImage(
+            data = roomRenderData(enemyEntries = entries),
+            activeOverlays = setOf(TileOverlay.ENEMIES),
+            showGrid = false,
+            showEnemyNames = names,
+        ).pixels()
+
+        val components = listOf(
+            RomParser.EnemyEntry(0xD0BF, 128, 128, 0, 0),
+            RomParser.EnemyEntry(0xD0BF, 128, 128, 0, 0, extra3 = 1),
+        )
+        assertTrue(
+            render(components, true).contentEquals(render(components, false)),
+            "Bottom and entrance pad must still render without adding their own labels",
+        )
+        val ship = listOf(RomParser.EnemyEntry(0xD07F, 128, 128, 0, 0)) + components
+        assertEquals("Samus' Ship", RomParser.enemyName(0xD07F))
+        assertFalse(
+            render(ship, true).contentEquals(render(ship, false)),
+            "The complete ship must retain its Samus' Ship label",
+        )
+    }
 
     @Test
     fun `door cap badges use their actual PLM color`() {

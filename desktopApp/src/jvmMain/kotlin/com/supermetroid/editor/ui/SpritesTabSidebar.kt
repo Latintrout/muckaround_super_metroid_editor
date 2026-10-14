@@ -1,25 +1,21 @@
 package com.supermetroid.editor.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -95,6 +90,9 @@ internal fun SpritesTabSidebar(
     }
     val categories = remember(entries) { entries.map { it.category }.distinct() }
     val showSamus = samusMatchesSpriteQuery(spriteSearchQuery)
+    val visualWorkspaces = VISUAL_SPRITE_WORKSPACES.filter {
+        spriteSearchQuery.isBlank() || (listOf(it.name, it.group) + visualSpriteNames(it)).any { name -> name.contains(spriteSearchQuery.trim(), ignoreCase = true) }
+    }
     val visibleGroups = remember(categories, spriteSearchQuery, spriteSortMode) {
         val filtered = entries.filter { spriteMatchesQuery(it, spriteSearchQuery) }
         categories.mapNotNull { category ->
@@ -102,9 +100,10 @@ internal fun SpritesTabSidebar(
             if (items.isEmpty()) null else category to items
         }
     }
-    val visibleSelectionKeys = remember(showSamus, visibleGroups, indexBySpecies) {
+    val visibleSelectionKeys = remember(showSamus, visibleGroups, indexBySpecies, visualWorkspaces) {
         buildList {
             if (showSamus) add(-1)
+            addAll(visualWorkspaces.map { it.index })
             visibleGroups.forEach { (_, items) ->
                 items.forEach { entry -> indexBySpecies[entry.speciesId]?.let(::add) }
             }
@@ -170,35 +169,28 @@ internal fun SpritesTabSidebar(
             }
         }
         Text(
-            "${visibleSelectionKeys.size}/${entries.size + 1} sprites",
+            "${visibleSelectionKeys.size}/${entries.size + 1 + VISUAL_SPRITE_WORKSPACES.size} entries",
             fontSize = fs.detail,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
 
-        if (showSamus) {
-            Text("Player", fontSize = fs.body, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        if (showSamus || visualWorkspaces.isNotEmpty()) {
+            Text("Misc", fontSize = fs.body, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(2.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable {
+            if (showSamus) SpriteMenuItem("Samus", selectedSpriteIdx == -1, {
                     requestVerticalSelectionFocus(focusRequester)
                     onSelectSprite(-1)
-                },
-                color = if (selectedSpriteIdx == -1) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(6.dp),
-            ) {
-                Text(
-                    "Samus", fontSize = fs.body,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    color = if (selectedSpriteIdx == -1) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurface,
-                )
+            })
+            for (workspace in visualWorkspaces) {
+                SpriteMenuItem(workspace.name, selectedSpriteIdx == workspace.index, {
+                    requestVerticalSelectionFocus(focusRequester)
+                    onSelectSprite(workspace.index)
+                })
             }
             Spacer(Modifier.height(8.dp))
         }
-
-        if (!showSamus && visibleGroups.isEmpty()) {
+        if (!showSamus && visibleGroups.isEmpty() && visualWorkspaces.isEmpty()) {
             Text("No sprites match this search.", fontSize = fs.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
@@ -207,31 +199,14 @@ internal fun SpritesTabSidebar(
             Spacer(Modifier.height(2.dp))
             for (entry in items) {
                 val idx = indexBySpecies[entry.speciesId] ?: continue
-                Surface(
-                    modifier = Modifier.fillMaxWidth().clickable {
+                SpriteMenuItem(entry.name, selectedSpriteIdx == idx, {
                         requestVerticalSelectionFocus(focusRequester)
                         onSelectSprite(idx)
-                    },
-                    color = if (selectedSpriteIdx == idx) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(6.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            entry.name,
-                            fontSize = fs.body,
-                            modifier = Modifier.weight(1f),
-                            color = if (selectedSpriteIdx == idx) MaterialTheme.colorScheme.onPrimaryContainer
-                                    else MaterialTheme.colorScheme.onSurface,
-                        )
+                }) {
                         val headerAddress = semanticAsmAddress(RomConstants.BANK_ENEMY_AI, entry.speciesId)
                         if (selectedSpriteIdx == idx && headerAddress != null && onNavigateToAsm != null) {
                             AsmNavigationLink(headerAddress, onNavigateToAsm)
                         }
-                    }
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -247,12 +222,17 @@ internal fun SpritesTabCanvas(
     editorState: EditorState,
     modifier: Modifier = Modifier,
 ) {
+    VISUAL_SPRITE_WORKSPACES.firstOrNull { it.index == selectedSpriteIdx }?.let {
+        VisualSpriteViewer(it, romParser, editorState, modifier)
+        return
+    }
     if (selectedSpriteIdx == -1) {
         SamusSpriteViewer(romParser = romParser, editorState = editorState, modifier = modifier)
     } else {
         val entries = EnemySpriteGraphics.EDITOR_ENEMIES
         val selected = entries.getOrNull(selectedSpriteIdx) ?: entries.first()
         when (selected.speciesId) {
+            0xD07F, 0xD0BF -> ShipSpriteViewer(romParser, editorState, modifier)
             0xE4BF -> PhantoonSpriteEditor(editorState = editorState, romParser = romParser, modifier = modifier)
             0xE2BF -> KraidSpriteEditor(editorState = editorState, romParser = romParser, modifier = modifier)
             0xDE3F -> DraygonSpriteEditor(editorState = editorState, romParser = romParser, modifier = modifier)

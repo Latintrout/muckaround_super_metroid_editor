@@ -157,6 +157,10 @@ class EnemySpeciesStatusSourceParityTest {
         palette: IntArray?,
     ): PreviewProbe {
         return try {
+            if (speciesId == ShipSpritemap.TOP_SPECIES || speciesId == ShipSpritemap.BOTTOM_SPECIES) {
+                val count = ShipSpritemap(parser).animations().sumOf { it.frames.size }
+                return PreviewProbe("gunship shared OBJ composition", count)
+            }
             if (speciesId == KRAID_SPECIES_ID) {
                 val kraid = KraidSpritemap(parser)
                 if (kraid.load() && kraid.renderFullBody() != null) {
@@ -198,9 +202,10 @@ class EnemySpeciesStatusSourceParityTest {
                 RomParser.enemyName(speciesId),
             )
                 ?.frames
-                ?.takeIf { it.isNotEmpty() }
+                ?.takeIf { frames -> frames.any { frame -> frame.pixels.any { it ushr 24 != 0 } } }
                 ?.let { return PreviewProbe("special OAM animation", it.size) }
             spritemap.renderSpecialEnemyPreview(speciesId, standardRenderTiles, palette)
+                ?.takeIf { it.pixels.any { pixel -> pixel ushr 24 != 0 } }
                 ?.let { return PreviewProbe("special OAM renderer", 1) }
 
             if (BossPoseScanner.hasKnownPoses(speciesId)) {
@@ -223,10 +228,10 @@ class EnemySpeciesStatusSourceParityTest {
                 RomParser.enemyName(speciesId),
             )
                 ?.frames
-                ?.takeIf { it.isNotEmpty() }
+                ?.takeIf { frames -> frames.any { frame -> frame.pixels.any { it ushr 24 != 0 } } }
                 ?.let { return PreviewProbe("instruction-list OAM renderer", it.size) }
             val default = spritemap.findDefaultSpritemap(speciesId)
-            if (default != null && spritemap.renderSpritemap(default, standardRenderTiles, palette) != null) {
+            if (default != null && spritemap.renderSpritemap(default, standardRenderTiles, palette)?.pixels?.any { it ushr 24 != 0 } == true) {
                 return PreviewProbe("default OAM renderer", 1)
             }
             PreviewProbe("none", 0)
@@ -380,6 +385,8 @@ class EnemySpeciesStatusSourceParityTest {
 
         /** Explicit source/runtime composition cases; do not infer these from tile count. */
         private val COMPOSITE_SPECIES = mapOf(
+            0xD07F to "The gunship combines shared top, bottom, and entrance-pad OBJ graphics at initialization-adjusted positions.",
+            0xD0BF to "The bottom and entrance pad borrow the top slot's graphics and use distinct instruction lists and positions.",
             0xDD7F to "The visible Metroid combines independently animated inside, shell, and electricity OAM owners.",
             0xDDBF to "Crocomire mixes extended OAM, room BG tiles, and a separate skeleton tile transfer.",
             0xDE3F to "Draygon's body is composed from multiple extended-OAM parts and room BG tile data.",

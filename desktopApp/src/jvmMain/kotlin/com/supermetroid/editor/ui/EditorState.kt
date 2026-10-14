@@ -80,6 +80,7 @@ import com.supermetroid.editor.rom.RomValidator
 import com.supermetroid.editor.rom.ProjectNewRoomMaterializer
 import com.supermetroid.editor.rom.RoomNamePauseMapPatch
 import com.supermetroid.editor.rom.ensureStateManifest
+import com.supermetroid.editor.rom.embeddedLayer2StartOffset
 import com.supermetroid.editor.rom.displaySummary
 import com.supermetroid.editor.rom.encodedSizeBytes
 import com.supermetroid.editor.rom.baseSourceStateIndex
@@ -484,9 +485,17 @@ class EditorState(
 
     // ── Sprite editor state objects ───────────────────────────────────────
 
+    var spriteVersion by mutableStateOf(0)
+        private set
+
+    val nativeSprites = NativeSpriteEditorState(
+        customGfx = { project.customGfx },
+        onDirty = { dirty = true; spriteVersion++; editVersion++; paletteVersion++ },
+    )
+
     val enemySprite = EnemySpriteEditorState(
         customGfx = { project.customGfx },
-        onDirty = { dirty = true },
+        onDirty = { dirty = true; spriteVersion++; editVersion++; paletteVersion++ },
     )
 
     val phantoonSprite = PhantoonSpriteEditorState(
@@ -4142,13 +4151,12 @@ class EditorState(
             val totalBlocks = blocksWide * blocksTall
             if (data.size < 2) return
             val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
-            val layer2Start = 2 + layer1Size + totalBlocks
-            val hasLayer2 = layer2Start + totalBlocks * 2 <= data.size
+            val layer2Start = embeddedLayer2StartOffset(data, totalBlocks)
             for (operation in operations) for (edit in operation.edits) {
                 if (edit.blockX !in 0 until blocksWide || edit.blockY !in 0 until blocksTall) continue
                 val index = edit.blockY * blocksWide + edit.blockX
                 if (edit.layer == TILE_EDIT_LAYER_2) {
-                    if (!hasLayer2) continue
+                    if (layer2Start == null) continue
                     val offset = layer2Start + index * 2
                     data[offset] = (edit.newBlockWord and 0xFF).toByte()
                     data[offset + 1] = ((edit.newBlockWord ushr 8) and 0xFF).toByte()
@@ -4180,9 +4188,8 @@ class EditorState(
     ): Int? {
         if (blockX !in 0 until blocksWide || blockY !in 0 until blocksTall || data.size < 2) return null
         val index = blockY * blocksWide + blockX
-        val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
         val offset = if (layer == TILE_EDIT_LAYER_2) {
-            val start = 2 + layer1Size + blocksWide * blocksTall
+            val start = embeddedLayer2StartOffset(data, blocksWide * blocksTall) ?: return null
             start + index * 2
         } else {
             2 + index * 2
@@ -4215,13 +4222,9 @@ class EditorState(
                 edits += TileEdit(x, y, oldWord, newWord, oldBts, newBts)
             }
         }
-        fun hasEmbeddedLayer2(data: ByteArray): Boolean {
-            if (data.size < 2) return false
-            val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
-            val totalBlocks = blocksWide * blocksTall
-            return 2 + layer1Size + totalBlocks + totalBlocks * 2 <= data.size
-        }
-        if (hasEmbeddedLayer2(oldData) && hasEmbeddedLayer2(newData)) {
+        if (embeddedLayer2StartOffset(oldData, blocksWide * blocksTall) != null &&
+            embeddedLayer2StartOffset(newData, blocksWide * blocksTall) != null
+        ) {
             for (y in 0 until blocksTall) for (x in 0 until blocksWide) {
                 val oldWord = levelWordAt(oldData, x, y, TILE_EDIT_LAYER_2, blocksWide, blocksTall) ?: continue
                 val newWord = levelWordAt(newData, x, y, TILE_EDIT_LAYER_2, blocksWide, blocksTall) ?: continue
@@ -5093,12 +5096,8 @@ class EditorState(
     }
 
     private fun embeddedLayer2StartOffset(data: ByteArray): Int? {
-        if (workingBlocksWide <= 0 || workingBlocksTall <= 0 || data.size < 2) return null
-        val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
-        val totalBlocks = workingBlocksWide * workingBlocksTall
-        val start = 2 + layer1Size + totalBlocks
-        val end = start + totalBlocks * 2
-        return if (end <= data.size) start else null
+        if (workingBlocksWide <= 0 || workingBlocksTall <= 0) return null
+        return embeddedLayer2StartOffset(data, workingBlocksWide * workingBlocksTall)
     }
 
     fun canEditEmbeddedLayer2(): Boolean =
@@ -8851,7 +8850,7 @@ internal fun resizeLevelData(
 
     val oldL1Size = if (data.size >= 2) (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8) else 0
     val btsStart = 2 + oldL1Size
-    val hasL2 = data.size >= btsStart + oldTotal + oldTotal * 2
+    val oldL2Start = embeddedLayer2StartOffset(data, oldTotal)
 
     fun readWord(offset: Int): Int =
         if (offset + 1 < data.size) ((data[offset + 1].toInt() and 0xFF) shl 8) or (data[offset].toInt() and 0xFF) else 0
@@ -8859,7 +8858,7 @@ internal fun resizeLevelData(
         if (offset < data.size) data[offset].toInt() and 0xFF else 0
 
     val newL1Size = newTotal * 2
-    val newDataSize = 2 + newL1Size + newTotal + (if (hasL2) newTotal * 2 else 0)
+    val newDataSize = 2 + newL1Size + newTotal + (if (oldL2Start != null) newTotal * 2 else 0)
     val out = ByteArray(newDataSize)
     out[0] = (newL1Size and 0xFF).toByte()
     out[1] = ((newL1Size shr 8) and 0xFF).toByte()
@@ -8881,8 +8880,7 @@ internal fun resizeLevelData(
         out[newBtsStart + by * newBlocksW + bx] = bts.toByte()
     }
     // L2
-    if (hasL2) {
-        val oldL2Start = btsStart + oldTotal
+    if (oldL2Start != null) {
         val newL2Start = newBtsStart + newTotal
         for (by in 0 until newBlocksH) for (bx in 0 until newBlocksW) {
             val word = if (bx < copyW && by < copyH) readWord(oldL2Start + (by * oldBlocksW + bx) * 2) else 0

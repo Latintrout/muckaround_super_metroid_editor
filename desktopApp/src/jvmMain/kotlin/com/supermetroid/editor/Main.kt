@@ -106,6 +106,7 @@ import com.supermetroid.editor.ui.DraggableDividerVertical
 import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.EditorTheme
 import com.supermetroid.editor.ui.EditorThemeState
+import com.supermetroid.editor.ui.EnemySpriteCache
 import com.supermetroid.editor.ui.EmulatorWorkspaceState
 import com.supermetroid.editor.ui.HexEditorPanel
 import com.supermetroid.editor.ui.HexEditorState
@@ -763,6 +764,12 @@ fun main() = application {
             }
             LaunchedEffect(romParser) {
                 asmWorkspaceState.observeRom(romParser?.copyRomData())
+            }
+            // Install project-owned sprite bytes before room composition reads the cache.
+            remember(romParser, editorState.spriteVersion, editorState.paletteVersion, System.identityHashCode(editorState.project)) {
+                EnemySpriteCache.setRomParser(romParser?.let { parser ->
+                    runCatching { editorState.nativeSprites.previewParser(parser) }.getOrDefault(parser)
+                })
             }
             LaunchedEffect(romReadOnly, leftTab) {
                 if (!isTabAvailableForRom(leftTab, romReadOnly)) leftTab = TAB_ROOMS

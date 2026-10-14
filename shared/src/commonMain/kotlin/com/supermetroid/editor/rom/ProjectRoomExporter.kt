@@ -590,11 +590,7 @@ class ProjectRoomExporter(
 
             val layer1Size = readU16(editedData, 0)
             val totalBlocks = blocksWide * effectiveHeight * 16
-            val layer2Start = 2 + layer1Size + totalBlocks
-            val stateBgScrolling = statesForPtr.firstOrNull()?.let { readU16(romData, it + 12) }
-                ?: roomEdits.stateDataChange?.bgScrolling
-                ?: room.bgScrolling
-            val hasEmbeddedLayer2 = layer2Start + totalBlocks * 2 <= editedData.size && stateBgScrolling == 0
+            val layer2Start = embeddedLayer2StartOffset(editedData, totalBlocks)
 
             for (op in roomEdits.operations) {
                 for (edit in op.edits) {
@@ -608,7 +604,7 @@ class ProjectRoomExporter(
                         )
                     }
                     if (edit.layer == TILE_EDIT_LAYER_2) {
-                        if (!hasEmbeddedLayer2) {
+                        if (layer2Start == null) {
                             failExport(
                                 "Room 0x$roomKey has a layer-2 tile edit but its active state does not " +
                                     "contain an embedded editable layer 2"
@@ -2734,12 +2730,11 @@ class ProjectRoomExporter(
         val newBlocks = newBw * newBh
         val oldLayer1Size = readU16(data, 0)
         val oldBtsStart = 2 + oldLayer1Size
-        val oldLayer2Start = oldBtsStart + oldBlocks
-        val hasLayer2 = oldLayer2Start + oldBlocks * 2 <= data.size
+        val oldLayer2Start = embeddedLayer2StartOffset(data, oldBlocks)
         val newLayer1Size = newBlocks * 2
         val newBtsStart = 2 + newLayer1Size
         val newLayer2Start = newBtsStart + newBlocks
-        val newSize = if (hasLayer2) newLayer2Start + newBlocks * 2 else newBtsStart + newBlocks
+        val newSize = if (oldLayer2Start != null) newLayer2Start + newBlocks * 2 else newBtsStart + newBlocks
         val out = ByteArray(newSize) { 0 }
         writeU16(out, 0, newLayer1Size)
         for (y in 0 until min(oldBh, newBh)) {
@@ -2755,7 +2750,7 @@ class ProjectRoomExporter(
                 val oldBts = oldBtsStart + oldIndex
                 val newBts = newBtsStart + newIndex
                 if (oldBts < data.size && newBts < out.size) out[newBts] = data[oldBts]
-                if (hasLayer2) {
+                if (oldLayer2Start != null) {
                     val oldL2 = oldLayer2Start + oldIndex * 2
                     val newL2 = newLayer2Start + newIndex * 2
                     if (oldL2 + 1 < data.size && newL2 + 1 < out.size) {

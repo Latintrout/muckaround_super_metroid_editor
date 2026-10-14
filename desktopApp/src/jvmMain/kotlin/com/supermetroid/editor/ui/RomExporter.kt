@@ -1307,6 +1307,12 @@ internal class RomExporter(
         val romData = writePlan.romData
         var gfxPatched = 0
         val gfxData = project.customGfx
+        val nativeWrites = com.supermetroid.editor.rom.NativeSpriteAssets.planEdits(romParser, gfxData)
+        nativeWrites.forEach { write ->
+            writePlan.add(write)
+            gfxPatched++
+            onLog("[EXPORT] Patched native sprite source '${write.label}' (${write.bytes.size} bytes)")
+        }
         for (key in gfxData.spriteTileBlocks.keys) {
             val blockedReason = BossSpriteExportSafety.blockedReason(key) ?: continue
             throw RomWritePlanException("Sprite tile edit '$key' cannot export. $blockedReason")

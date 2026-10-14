@@ -41,16 +41,58 @@ damage without freezing. `$FF` is the special freeze-without-damage value.
 
 Each room state references an enemy population set. Each entry is 16 bytes:
 
-| Offset | Size | Field |
-|--------|------|-------|
-| +0 | 2 | Species ID (bank $A0 address) |
-| +2 | 2 | X position (pixels) |
-| +4 | 2 | Y position (pixels) |
-| +6 | 2 | Init parameter |
-| +8 | 2 | Properties (Speed, Tilemaps, etc.) |
-| +10 | 6 | Extra data |
+| Offset | Size | WRAM | Field | Description |
+|--------|------|------|-------|-------------|
+| +0 | 2 | $0F78,x | Species ID | Bank $A0 address of species header |
+| +2 | 2 | $0F7A,x | X position | Pixel X coordinate in room |
+| +4 | 2 | $0F7E,x | Y position | Pixel Y coordinate in room |
+| +6 | 2 | $0F92,x | Init parameter | Stored to instruction list pointer; meaning varies by species |
+| +8 | 2 | $0F86,x | Properties | Per-instance behaviour flags (see below) |
+| +10 | 2 | $0FAE,x | GfxExtra (extra1) | Species-specific graphics parameter |
+| +12 | 2 | $0FB4,x | Speed (extra2) | Species-specific; often encodes facing direction |
+| +14 | 2 | $0FB6,x | Speed2 (extra3) | Species-specific additional parameter |
 
 Terminated by species ID `0xFFFF`.
+
+### Properties Field Flags (offset +8)
+
+| Bit | Mask | Name |
+|-----|------|------|
+| 0 | 0x0001 | Invisible (don't draw) |
+| 9 | 0x0200 | Persist off-screen |
+| 10 | 0x0400 | Platform (walkable) |
+| 11 | 0x0800 | Non-responsive (no damage) |
+| 12 | 0x1000 | Extended spritemap |
+| 13 | 0x2000 | Solid to beams |
+
+### Facing Direction Encoding
+
+Enemy facing is **not universal** — each species uses different fields and bits.
+Most enemies determine facing at **runtime** via AI (reacting to Samus position,
+walls, etc.). The following species encode static facing in the population data:
+
+| Species | Field | Bit/Value | Default (0) | Set |
+|---------|-------|-----------|-------------|-----|
+| Wall Space Pirates ($F353..$F493) | Speed (extra2) | bit 0 (0x0001) | Right-facing (left wall) | Left-facing (right wall) |
+| Ninja and walking Space Pirates ($F4D3..$F793) | Speed (extra2) | bit 0 (0x0001) | Left-facing | Right-facing |
+| Namihe ($E73F) | Speed (extra2) | bit 4 (0x0010) | Right wall | Left wall |
+| Fune ($E6FF) | Speed (extra2) | bit 4 (0x0010) | Right wall | Left wall |
+| Ripper ($D3FF/$D43F/$D47F) | Init parameter | non-zero | Right | Left |
+| Geruta ($D2FF) | Init parameter | non-zero | Right | Left |
+| Waver ($D63F) | Init parameter | non-zero | Right | Left |
+| Holtz ($D33F) | Init parameter | non-zero | Right | Left |
+
+**Space Pirate facing:** All 18 variants test `$0FB4,x` (`Enemy.init0`,
+Speed/extra2) bit 0, but wall mounting and facing are not interchangeable.
+Wall initialization at `$B2:EF9F` chooses `$ED36` (left wall, facing right)
+or `$EDAC` (right wall, facing left). Ninja initialization at `$B2:F5DE`
+and walking initialization at `$B2:FD02` instead choose explicitly left/right-facing
+lists, with bit 0 clear for left and set for right. The editor toggle follows each
+family's encoding and preserves all unrelated speed bits.
+
+**Namihe/Fune facing** (verified from disassembly at `$A8:96F2`):
+The init AI loads `$0FB4,x` (Speed/extra2), masks bits 0-3, and branches on
+the result. Bit 4 (`0x0010`) determines wall mounting side.
 
 ## Multi-Piece Enemies and Possessors
 

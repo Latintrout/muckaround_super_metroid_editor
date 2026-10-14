@@ -180,7 +180,9 @@ fun EnemySpriteViewer(
 
         val smap = EnemySpritemap(rp)
         smap.renderSpecialEnemyPreview(entry.speciesId, td, pal)?.let { return@remember it }
-        val defaultSmap = smap.findDefaultSpritemap(entry.speciesId) ?: return@remember null
+        val defaultSmap = smap.findDefaultSpritemap(entry.speciesId)
+            ?: smap.findAnimationFrames(entry.speciesId, maxFrames = 1).firstOrNull()?.spritemap
+            ?: return@remember null
         val renderTileData = EnemySpriteGraphics.loadStandardOamRenderTileData(rp, entry.speciesId, td) ?: td
         val result = smap.renderSpritemap(defaultSmap, renderTileData, pal) ?: return@remember null
         val totalPixels = result.width * result.height

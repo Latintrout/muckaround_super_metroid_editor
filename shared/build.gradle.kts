@@ -161,6 +161,18 @@ tasks.named("jvmProcessResources") {
 
 val regularJvmTest = tasks.named<org.gradle.api.tasks.testing.Test>("jvmTest")
 
+tasks.register<org.gradle.api.tasks.testing.Test>("spriteCoverageTest") {
+    group = "verification"
+    description = "Audit visible previews for every source enemy header"
+    dependsOn(tasks.named("jvmTestClasses"), rootProject.tasks.named("parityEnemyHeaders"))
+    testClassesDirs = regularJvmTest.get().testClassesDirs
+    classpath = regularJvmTest.get().classpath
+    useJUnitPlatform { includeTags("parity") }
+    filter { includeTestsMatching("com.supermetroid.editor.rom.EnemySpeciesStatusSourceParityTest") }
+    systemProperty("smedit.requireParityFixtures", "true")
+    outputs.upToDateWhen { false }
+}
+
 tasks.register<org.gradle.api.tasks.testing.Test>("parityTest") {
     group = "verification"
     description = "Run strict source/ROM parity-tagged tests"

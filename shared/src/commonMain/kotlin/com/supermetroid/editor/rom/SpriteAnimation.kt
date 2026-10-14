@@ -59,6 +59,31 @@ data class SpriteAnimation(
     val hasTiming: Boolean get() = frames.any { it.durationTicks > 0 }
 }
 
+/** Keep the same source origin and canvas across every frame so playback never recenters a pose. */
+fun anchoredSpriteAnimation(
+    name: String,
+    frames: List<Pair<Int, EnemySpritemap.AssembledSprite>>,
+    loop: Boolean,
+): SpriteAnimation {
+    require(frames.isNotEmpty())
+    val left = frames.minOf { -it.second.originX }
+    val top = frames.minOf { -it.second.originY }
+    val right = frames.maxOf { it.second.width - it.second.originX }
+    val bottom = frames.maxOf { it.second.height - it.second.originY }
+    val width = right - left
+    val height = bottom - top
+    return SpriteAnimation(name, frames.map { (ticks, sprite) ->
+        val pixels = IntArray(width * height)
+        for (y in 0 until sprite.height) for (x in 0 until sprite.width) {
+            val pixel = sprite.pixels[y * sprite.width + x]
+            if (pixel ushr 24 != 0) {
+                pixels[(y - sprite.originY - top) * width + x - sprite.originX - left] = pixel
+            }
+        }
+        SpriteAnimationFrame(pixels, width, height, ticks, name)
+    }, loop)
+}
+
 /**
  * Renders a sprite sheet image from animation frames.
  *

@@ -1779,6 +1779,38 @@ internal fun TilePropertiesPanel(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
 
+                        // Facing direction (species-specific, user-friendly toggle)
+                        val facingInfo = enemyFacingFieldInfo(enemy.id)
+                        if (facingInfo != null) {
+                            val currentFacingRight = facingInfo.isFacingRight(editInitParam, editExtra2)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Facing:", fontSize = LocalEditorTheme.current.fontSize.value.body,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(80.dp))
+                                Surface(
+                                    modifier = Modifier.height(24.dp).clickable {
+                                        val toggled = !currentFacingRight
+                                        val result = facingInfo.applyFacing(editInitParam, editExtra2, toggled)
+                                        editInitParam = result.first
+                                        editExtra2 = result.second
+                                    },
+                                    shape = MaterialTheme.shapes.small,
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                ) {
+                                    Text(
+                                        if (currentFacingRight) "\u25B6 Right" else "\u25C0 Left",
+                                        fontSize = LocalEditorTheme.current.fontSize.value.body,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
+
                         // Extended fields
                         @Composable
                         fun HexField(label: String, value: String, onValueChange: (String) -> Unit) {
@@ -1788,7 +1820,7 @@ internal fun TilePropertiesPanel(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(label, fontSize = LocalEditorTheme.current.fontSize.value.body, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(68.dp))
+                                    modifier = Modifier.width(80.dp), maxLines = 1)
                                 AppTextInput(
                                     value = value, onValueChange = onValueChange,
                                     modifier = Modifier.weight(1f),

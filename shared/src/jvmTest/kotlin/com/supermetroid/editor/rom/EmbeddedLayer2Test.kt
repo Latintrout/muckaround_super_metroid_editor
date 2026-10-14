@@ -1,6 +1,7 @@
 package com.supermetroid.editor.rom
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -10,6 +11,40 @@ import java.io.File
 class EmbeddedLayer2Test {
 
     private fun loadTestRom(): RomParser? = TestRomHelper.loadRomParser()
+
+    @Test
+    fun `Double Chamber layer 2 skips its full allocated BTS region`() {
+        val parser = TestRomHelper.requireRomParser()
+        val room = requireNotNull(parser.readRoomHeader(0xADAD))
+        val decoded = parser.decompressLZ2(room.levelDataPtr)
+        assertEquals(4, room.width)
+        assertEquals(2, room.height)
+        assertEquals(0x1800, (decoded[0].toInt() and 0xFF) or ((decoded[1].toInt() and 0xFF) shl 8))
+
+        // The vanilla stream allocates 3072 blocks, although the room displays 2048.
+        // Its Layer 2 starts at $2402, beyond all 3072 BTS bytes.
+        val expected = IntArray(2048) { index ->
+            val offset = 0x2402 + index * 2
+            (decoded[offset].toInt() and 0xFF) or ((decoded[offset + 1].toInt() and 0xFF) shl 8)
+        }
+        assertEquals(0x03C1, expected[0])
+        assertEquals(0x03C0, expected[2 * 64 + 42])
+        assertArrayEquals(expected, parser.readEmbeddedLayer2(decoded, 64, 32))
+
+        val graphics = TileGraphics(parser)
+        assertTrue(graphics.loadTileset(room.tileset))
+        val background = requireNotNull(MapRenderer(parser, graphics).renderLayer2(room, decoded))
+        val firstTile = IntArray(256) { index -> background[(index / 16) * 1024 + index % 16] }
+        assertArrayEquals(graphics.renderMetatile(0x03C1), firstTile)
+    }
+
+    @Test
+    fun `unused allocated BTS bytes do not count as embedded layer 2`() {
+        val decoded = ByteArray(2 + 0x1800 + 3072).also {
+            it[1] = 0x18
+        }
+        assertNull(RomParser(ByteArray(0)).readEmbeddedLayer2(decoded, 16, 16))
+    }
 
     @Test
     fun `embedded L2 data layout is L1-BTS-L2`() {

@@ -677,6 +677,9 @@ data class TilesetGfxData(
     val spriteTileBlocks: MutableMap<String, String> = mutableMapOf(), // value = base64 raw 4bpp
     val palettes: MutableMap<String, String> = mutableMapOf(),        // key = tilesetId, value = base64 BGR555 (256 bytes raw)
     val spritePalettes: MutableMap<String, String> = mutableMapOf(),  // key = regionId (e.g. "samus_power"), value = base64 BGR555
+    /** Source-address keys are checked against NativeSpriteAssets, never arbitrary ROM offsets. */
+    val visualTileBlocks: MutableMap<String, String> = mutableMapOf(), // decoded native asset bytes
+    val visualPalettes: MutableMap<String, String> = mutableMapOf(), // one exact 32-byte BGR555 row
     val paletteEffects: MutableMap<String, String> = mutableMapOf(),  // key = regionId or "tileset:N", value = effectId
     /** Project-owned community source; ROM injection is a separate guarded export layer. */
     var samusCommunitySource: CommunitySamusSpriteSource? = null,
@@ -937,7 +940,7 @@ data class SmEditProject(
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
-        const val CURRENT_PROJECT_FORMAT_VERSION = 11
+        const val CURRENT_PROJECT_FORMAT_VERSION = 12
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

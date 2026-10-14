@@ -1,21 +1,148 @@
 package com.supermetroid.editor.ui
 
 import com.supermetroid.editor.data.CustomItemDef
+import com.supermetroid.editor.rom.BossPoseScanner
+import com.supermetroid.editor.rom.EnemySpriteGraphics
+import com.supermetroid.editor.rom.EnemySpritemap
 import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.RoomRenderData
+import com.supermetroid.editor.rom.ShipSpritemap
+import com.supermetroid.editor.rom.PirateSpritemap
+import com.supermetroid.editor.rom.RoomBossPreview
+import com.supermetroid.editor.rom.CrawlerSpritemap
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
 
-internal object EnemySpriteCache {
-    private val cache = mutableMapOf<String, BufferedImage?>()
+/**
+ * Assembles and caches enemy sprites from ROM data (OAM spritemaps + tile data + palette).
+ * Falls back to bundled PNG resources if ROM assembly fails.
+ *
+ * Call [setRomParser] when a ROM is loaded to enable native rendering.
+ * The cache is keyed by species ID hex string (e.g. "D47F").
+ */
+internal data class AnchoredEnemySprite(val image: BufferedImage, val originX: Int, val originY: Int)
 
-    fun get(hexId: String): BufferedImage? {
-        return cache.getOrPut(hexId) {
-            val stream = EnemySpriteCache::class.java.getResourceAsStream("/enemies/$hexId.png")
-            stream?.use { ImageIO.read(it) }
+internal object EnemySpriteCache {
+    /** Cache key: "speciesHex" for default, "speciesHex:initParam" for directional variants. */
+    private val cache = mutableMapOf<String, AnchoredEnemySprite?>()
+    private var romParser: RomParser? = null
+
+    /** Set (or clear) the ROM parser. Clears the cache so sprites are re-assembled. */
+    fun setRomParser(rp: RomParser?) {
+        if (rp !== romParser) {
+            romParser = rp
+            cache.clear()
         }
+    }
+
+    /** Get the default sprite for a species (no direction). */
+    fun get(hexId: String): BufferedImage? = preview(hexId, 0)?.image
+
+    /**
+     * Get a direction-aware sprite for a species + initParam.
+     * If initParam selects a valid direction from the species' direction table,
+     * a different spritemap is rendered (e.g. left-facing vs right-facing).
+     * Falls back to the default sprite if no direction table exists.
+     */
+    fun get(hexId: String, initParam: Int): BufferedImage? = preview(hexId, initParam)?.image
+
+    private fun preview(hexId: String, initParam: Int): AnchoredEnemySprite? {
+        val key = if (initParam == 0) hexId else "$hexId:$initParam"
+        return cache.getOrPut(key) {
+            val id = hexId.toIntOrNull(16) ?: return@getOrPut null
+            assembleFromRom(id, initParam)
+                ?: if (id in RoomBossPreview.SPECIES) null else if (initParam == 0) loadPngFallback(hexId) else preview(hexId, 0)
+        }
+    }
+
+    fun getPreview(enemy: RomParser.EnemyEntry): AnchoredEnemySprite? {
+        val hexId = enemy.id.toString(16).uppercase().padStart(4, '0')
+        if (enemy.id == ShipSpritemap.TOP_SPECIES || enemy.id == ShipSpritemap.BOTTOM_SPECIES) {
+            val pad = enemy.id == ShipSpritemap.BOTTOM_SPECIES && enemy.extra3 != 0
+            return cache.getOrPut("ship:$hexId:$pad") {
+                romParser?.let { ShipSpritemap(it).renderPart(enemy.id, entrancePad = pad) }
+                    ?.let(::assembledSpriteToImage)
+            }
+        }
+        if (PirateSpritemap.supports(enemy.id)) {
+            return cache.getOrPut("pirate:$hexId:${enemy.extra2 and 1}") {
+                romParser?.let { PirateSpritemap(it).renderInitial(enemy.id, enemy.extra2) }
+                    ?.let(::assembledSpriteToImage)
+            }
+        }
+        if (enemy.id in CrawlerSpritemap.SPECIES) {
+            return cache.getOrPut("crawler:$hexId:${enemy.initParam and 3}") {
+                romParser?.let { CrawlerSpritemap(it).renderInitial(enemy.id, enemy.initParam) }?.let(::assembledSpriteToImage)
+            }
+        }
+        return preview(hexId, enemy.initParam)
+    }
+
+    private fun assembleFromRom(speciesId: Int, initParam: Int): AnchoredEnemySprite? {
+        val rp = romParser ?: return null
+        if (speciesId in RoomBossPreview.SPECIES) return RoomBossPreview(rp).render(speciesId)?.let(::assembledSpriteToImage)
+
+        // Load tile data and palette from ROM
+        val tileData = EnemySpriteGraphics.loadEnemyTileData(rp, speciesId)
+        val previewTileSource = EnemySpriteGraphics.loadEnemyPreviewTileSource(rp, speciesId, tileData)
+        val td = previewTileSource?.bytes ?: return null
+        val paletteSource = EnemySpriteGraphics.loadEnemyPreviewPaletteSource(rp, speciesId)
+        val palette = paletteSource?.colors ?: return null
+
+        // Boss special rendering (Torizos)
+        if (BossPoseScanner.usesSpecialAssembledPreview(speciesId)) {
+            val renderTd = EnemySpriteGraphics.loadEnemyRenderTileData(rp, speciesId, td) ?: td
+            val scanner = BossPoseScanner(rp)
+            val pose = scanner.scanPoses(speciesId, minEntries = 3).firstOrNull() ?: return null
+            val assembled = scanner.renderPose(pose, renderTd, palette) ?: return null
+            return assembledSpriteToImage(assembled)
+        }
+
+        // Standard OAM spritemap rendering
+        val smap = EnemySpritemap(rp)
+        smap.renderSpecialEnemyPreview(speciesId, td, palette)?.let {
+            return assembledSpriteToImage(it)
+        }
+
+        // Try initParam-specific direction if non-zero
+        val renderTd = EnemySpriteGraphics.loadStandardOamRenderTileData(rp, speciesId, td) ?: td
+        if (initParam != 0) {
+            val dirSmap = smap.findSpritemapForInitParam(speciesId, initParam)
+            if (dirSmap != null) {
+                val assembled = smap.renderSpritemap(dirSmap, renderTd, palette)
+                if (assembled != null && isValidSprite(assembled)) {
+                    return assembledSpriteToImage(assembled)
+                }
+            }
+        }
+
+        val defaultSmap = smap.findDefaultSpritemap(speciesId)
+            ?: smap.findAnimationFrames(speciesId, maxFrames = 1).firstOrNull()?.spritemap
+            ?: return null
+        val assembled = smap.renderSpritemap(defaultSmap, renderTd, palette) ?: return null
+        if (!isValidSprite(assembled)) return null
+
+        return assembledSpriteToImage(assembled)
+    }
+
+    private fun isValidSprite(sprite: EnemySpritemap.AssembledSprite): Boolean {
+        val totalPixels = sprite.width * sprite.height
+        if (totalPixels <= 64) return true
+        val nonTransparent = sprite.pixels.count { (it ushr 24) > 0 }
+        return nonTransparent >= totalPixels * 5 / 100
+    }
+
+    private fun assembledSpriteToImage(sprite: EnemySpritemap.AssembledSprite): AnchoredEnemySprite {
+        val img = BufferedImage(sprite.width, sprite.height, BufferedImage.TYPE_INT_ARGB)
+        img.setRGB(0, 0, sprite.width, sprite.height, sprite.pixels, 0, sprite.width)
+        return AnchoredEnemySprite(img, sprite.originX, sprite.originY)
+    }
+
+    private fun loadPngFallback(hexId: String): AnchoredEnemySprite? {
+        val stream = EnemySpriteCache::class.java.getResourceAsStream("/enemies/$hexId.png")
+        return stream?.use { ImageIO.read(it) }?.let { AnchoredEnemySprite(it, it.width / 2, it.height / 2) }
     }
 }
 
@@ -94,16 +221,131 @@ internal fun doorCapOverlayBorderColor(plmId: Int): java.awt.Color? =
 
 internal const val SCREEN_PX = 16 * 16  // 256 — one screen in pixels
 
-/** Enemy IDs whose sprites should be horizontally flipped when initParam != 0. */
-internal val ENEMY_IDS_FLIP_BY_INIT_PARAM = setOf(
-    0xE6FF, // Fune
-    0xE73F, // Namihe
-    0xD47F, // Ripper
-    0xD2FF, // Geruta
-    0xD33F, // Holtz
-    0xD63F, // Waver
-    0xDD3F, // Sova
+internal fun hiddenRoomEnemyCompanions(enemies: List<RomParser.EnemyEntry>): Set<Int> =
+    enemies.flatMap { RoomBossPreview.COMPANIONS[it.id].orEmpty() }.toSet()
+
+/** Only the preview moves; stored population coordinates and export data are untouched. */
+internal fun roomEnemyDisplayPosition(enemy: RomParser.EnemyEntry, width: Int, height: Int, preview: AnchoredEnemySprite?): Pair<Int, Int> {
+    if (enemy.id !in RoomBossPreview.SPECIES || preview == null) return enemy.x to enemy.y
+    val image = preview.image
+    val left = enemy.x - preview.originX
+    val top = enemy.y - preview.originY
+    val outside = enemy.x <= 0 || enemy.y <= 0 || enemy.x >= width || enemy.y >= height ||
+        left + image.width <= 0 || top + image.height <= 0 || left >= width || top >= height
+    return if (outside) (width / 2 + preview.originX - image.width / 2) to (height / 2 + preview.originY - image.height / 2)
+        else enemy.x to enemy.y
+}
+
+/**
+ * Determine whether an enemy sprite should be horizontally flipped based on its
+ * population data fields. Returns true if the sprite should be drawn mirrored.
+ *
+ * Most enemies determine facing at runtime (AI reacts to Samus position, walls, etc.)
+ * so we can only resolve facing for species whose population data encodes it:
+ *
+ * - **Namihe / Fune**: `extra2` bit 4 (0x0010) = wall side. Set = left wall (flip sprite).
+ * - **Ripper variants**: `initParam` non-zero = moving left (flip sprite).
+ *
+ * This function is intentionally conservative — returning false for unknown species
+ * means we show the default ROM spritemap direction.
+ */
+internal fun shouldFlipEnemySprite(enemy: RomParser.EnemyEntry): Boolean {
+    // Their source-selected initial poses already contain the correct OAM facing.
+    if (PirateSpritemap.supports(enemy.id)) return false
+    return when (enemy.id) {
+        // Namihe / Fune: extra2 bit 4 indicates left-wall mounting
+        0xE73F, 0xE6FF -> (enemy.extra2 and 0x0010) != 0
+        // Ripper / Ripper 2 / Ripper (gold): initParam non-zero = leftward
+        0xD3FF, 0xD43F, 0xD47F -> enemy.initParam != 0
+        // Geruta: initParam non-zero = facing left
+        0xD2FF -> enemy.initParam != 0
+        // Waver: initParam non-zero = facing left
+        0xD63F -> enemy.initParam != 0
+        // Holtz: initParam non-zero = facing left
+        0xD33F -> enemy.initParam != 0
+        else -> false
+    }
+}
+
+/**
+ * Describes how facing direction is encoded for a specific enemy species,
+ * allowing the UI to display a simple Left/Right toggle and read/write
+ * the correct underlying field and bit.
+ */
+internal data class EnemyFacingInfo(
+    val fieldName: String,
+    /** Read the current facing from the hex field values. True = facing right. */
+    val isFacingRight: (initParamHex: String, extra2Hex: String) -> Boolean,
+    /** Apply a facing and return the updated (initParamHex, extra2Hex). */
+    val applyFacing: (initParamHex: String, extra2Hex: String, facingRight: Boolean) -> Pair<String, String>,
 )
+
+/**
+ * Return facing-field info for species that encode direction in population data,
+ * or null if the species determines facing at runtime (no user control).
+ */
+internal fun enemyFacingFieldInfo(speciesId: Int): EnemyFacingInfo? {
+    return when (speciesId) {
+        // Namihe / Fune: extra2 bit 4 (0x0010). Clear = right wall, Set = left wall.
+        0xE73F, 0xE6FF -> EnemyFacingInfo(
+            fieldName = "Speed (extra2) bit 4",
+            isFacingRight = { _, extra2Hex ->
+                val v = extra2Hex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                (v and 0x0010) == 0
+            },
+            applyFacing = { initP, extra2Hex, facingRight ->
+                val v = extra2Hex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                val updated = if (facingRight) v and 0x0010.inv() else v or 0x0010
+                initP to updated.toString(16).uppercase().padStart(4, '0')
+            },
+        )
+        // Wall pirates: clear = left wall, facing right; set = right wall, facing left.
+        // $B2:EF9F chooses MovingDownLeftWall / MovingDownRightWall, not left/right-facing.
+        0xF353, 0xF393, 0xF3D3, 0xF413, 0xF453, 0xF493 -> EnemyFacingInfo(
+            fieldName = "Speed (extra2) bit 0",
+            isFacingRight = { _, extra2Hex ->
+                val v = extra2Hex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                (v and 0x0001) == 0
+            },
+            applyFacing = { initP, extra2Hex, facingRight ->
+                val v = extra2Hex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                val updated = if (facingRight) v and 0x0001.inv() else v or 0x0001
+                initP to updated.toString(16).uppercase().padStart(4, '0')
+            },
+        )
+        // Ninja and walking pirates: clear = facing left; set = facing right.
+        0xF4D3, 0xF513, 0xF553, 0xF593, 0xF5D3, 0xF613,
+        0xF653, 0xF693, 0xF6D3, 0xF713,
+        0xF753, 0xF793,
+        -> EnemyFacingInfo(
+            fieldName = "Speed (extra2) bit 0",
+            isFacingRight = { _, extra2Hex ->
+                val v = extra2Hex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                (v and 0x0001) != 0
+            },
+            applyFacing = { initP, extra2Hex, facingRight ->
+                val v = extra2Hex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                val updated = if (facingRight) v or 0x0001 else v and 0x0001.inv()
+                initP to updated.toString(16).uppercase().padStart(4, '0')
+            },
+        )
+        // Ripper / Ripper 2 / Ripper (gold), Geruta, Waver, Holtz:
+        // initParam 0 = right, non-zero = left
+        0xD3FF, 0xD43F, 0xD47F, 0xD2FF, 0xD63F, 0xD33F -> EnemyFacingInfo(
+            fieldName = "Tilemaps (initParam)",
+            isFacingRight = { initParamHex, _ ->
+                val v = initParamHex.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: 0
+                v == 0
+            },
+            applyFacing = { _, extra2, facingRight ->
+                val ip = if (facingRight) "0000" else "0001"
+                ip to extra2
+            },
+        )
+        else -> null
+    }
+}
+
 
 internal fun drawSpeedBoosterOverlay(g2: java.awt.Graphics2D, x: Int, y: Int, size: Int, color: java.awt.Color) {
     // Background
@@ -602,19 +844,17 @@ internal fun buildCompositeImage(
         g.font = labelFont
         val fm = g.fontMetrics
         val markerColor = java.awt.Color(0xFF, 0x66, 0x44)
+        val hiddenCompanions = hiddenRoomEnemyCompanions(data.enemyEntries)
         for (enemy in data.enemyEntries) {
-            val name = RomParser.enemyName(enemy.id)
-            val ex = enemy.x
-            val ey = enemy.y
+            if (enemy.id in hiddenCompanions) continue
+            val preview = EnemySpriteCache.getPreview(enemy)
+            val (ex, ey) = roomEnemyDisplayPosition(enemy, data.width, data.height, preview)
             if (ex < 0 || ex >= data.width || ey < 0 || ey >= data.height) continue
-
-            val hexId = enemy.id.toString(16).uppercase().padStart(4, '0')
-            val sprite = EnemySpriteCache.get(hexId)
-            if (sprite != null) {
-                val sx = ex - sprite.width / 2
-                val sy = ey - sprite.height / 2
-                // Flip sprite horizontally when initParam indicates right-facing
-                val flipH = enemy.initParam != 0 && enemy.id in ENEMY_IDS_FLIP_BY_INIT_PARAM
+            val sprite = preview?.image
+            if (preview != null && sprite != null) {
+                val flipH = shouldFlipEnemySprite(enemy)
+                val sx = ex - if (flipH) sprite.width - preview.originX else preview.originX
+                val sy = ey - preview.originY
                 if (flipH) {
                     g2.drawImage(sprite, sx + sprite.width, sy, sx, sy + sprite.height,
                         0, 0, sprite.width, sprite.height, null)
@@ -633,13 +873,17 @@ internal fun buildCompositeImage(
                 g2.stroke = java.awt.BasicStroke(1f)
             }
 
-            if (showEnemyNames && (showMetaNames || !RomParser.isMapMetaEnemy(enemy.id))) {
+            // The top, bottom and entrance pad are one ship, so only its top entry owns a label.
+            if (showEnemyNames && enemy.id != ShipSpritemap.BOTTOM_SPECIES &&
+                (showMetaNames || !RomParser.isMapMetaEnemy(enemy.id))) {
+                val name = RomParser.enemyName(enemy.id)
                 val textWidth = fm.stringWidth(name)
                 val badgeW = textWidth + 6
                 val badgeH = fm.height + 2
-                val bx = ex - badgeW / 2
-                val spriteH = sprite?.height ?: 12
-                val by = ey - spriteH / 2 - badgeH - 2
+                val labelCenter = if (enemy.id in RoomBossPreview.SPECIES && preview != null)
+                    ex - preview.originX + preview.image.width / 2 else ex
+                val bx = (labelCenter - badgeW / 2).coerceIn(0, maxOf(0, data.width - badgeW - 1))
+                val by = (ey - (preview?.originY ?: 6) - badgeH - 2).coerceIn(0, maxOf(0, data.height - badgeH - 1))
                 g2.color = java.awt.Color(0, 0, 0, 200)
                 g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
                 g2.color = markerColor

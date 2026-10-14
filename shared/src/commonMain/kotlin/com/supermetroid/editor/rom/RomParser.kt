@@ -1478,14 +1478,9 @@ class RomParser(
      * do not determine whether this payload exists.
      */
     fun readEmbeddedLayer2(levelData: ByteArray, blocksWide: Int, blocksTall: Int): IntArray? {
-        if (levelData.size < 2) return null
-        val layer1Size = (levelData[0].toInt() and 0xFF) or ((levelData[1].toInt() and 0xFF) shl 8)
+        if (blocksWide <= 0 || blocksTall <= 0) return null
         val totalBlocks = blocksWide * blocksTall
-        // Layout: [2-byte header][L1 data][BTS data][L2 data]
-        val btsStart = 2 + layer1Size
-        val layer2Start = btsStart + totalBlocks
-        val layer2End = layer2Start + totalBlocks * 2
-        if (levelData.size < layer2End) return null
+        val layer2Start = embeddedLayer2StartOffset(levelData, totalBlocks) ?: return null
 
         val words = IntArray(totalBlocks)
         for (i in 0 until totalBlocks) {
@@ -2068,7 +2063,7 @@ class RomParser(
             0xCFFF to "Cacatac",
             0xD03F to "Owtch",
             0xD07F to "Samus' Ship",
-            0xD0BF to "Samus' Ship (firing)",
+            0xD0BF to "Samus' Ship Bottom / Entrance Pad",
             // ── Chozo / Statues ──
             0xD0FF to "Mellow",
             0xD13F to "Mella",
