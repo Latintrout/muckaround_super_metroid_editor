@@ -1116,8 +1116,11 @@ terminators, list bytes, state pointers, complete allocation claims, and other
 write owners are checked against the established planner. No command values are
 duplicated in project JSON or reapplied as a second post-compile room patch.
 
-GUI edits target **this trigger in this state**. Shared lists and command resources
-are copied on write so another trigger/state is not changed implicitly. Editing a
+GUI edits target the selected trigger in its chosen scope. New placement defaults
+to **All states**; existing triggers retain their membership unless their scope
+menu requests otherwise. **This state** copies shared lists/commands on write;
+**All states** updates the affected trigger rows together with their command reference.
+Another trigger is not changed implicitly. Editing a
 shared command macro directly in ASM updates all its references. Independent
 equal streams are not deduplicated by their contents. Unused supported owned
 macros are pruned; helpers mentioned by custom source (including disabled modules)

@@ -250,6 +250,12 @@ entry size.
 
 ## GUI
 
+The room view's **Tile Meta** visibility choices are global SMEDIT preferences, not
+project/room edits. Every toggle updates app config immediately and survives view
+changes and restarts. Stable overlay names are stored rather than labels/ordinals;
+old configs keep the existing defaults, while an explicit empty selection stays
+all-off. A forced Layer 2 editing preview does not change the stored visibility choice.
+
 The initial inspector uses an ordered decision list because that is the runtime structure and is
 usually clearer than a free-form graph:
 

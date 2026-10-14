@@ -1,5 +1,6 @@
 package com.supermetroid.editor
 
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.widthIn
 import com.supermetroid.editor.ui.ProjectToolbar
+import com.supermetroid.editor.ui.ProjectToolbarActionPadding
+import com.supermetroid.editor.ui.ProjectToolbarActionMinWidth
 import com.supermetroid.editor.asm.placementAfterObjectMigration
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -773,10 +776,10 @@ fun main() = application {
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
             ) {
-                // Wrap complete controls, never squeeze their labels into vertical text.
+                // Project controls stay left; actions stay right and wrap whole controls.
                 ProjectToolbar(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                ) {
+                    leadingContent = {
                         Button(
                             enabled = !romLoadInFlight && !editorState.romBuildInProgress && !asmWorkspaceState.previewBusy && !asmWorkspaceState.busy,
                             shape = RoundedCornerShape(6.dp),
@@ -800,9 +803,11 @@ fun main() = application {
                                 color = MaterialTheme.colorScheme.onBackground,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                modifier = Modifier.widthIn(max = 360.dp).align(Alignment.CenterVertically),
+                                modifier = Modifier.widthIn(max = 360.dp),
                             )
                         }
+                    },
+                ) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -842,6 +847,8 @@ fun main() = application {
                             } == true && !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress
                             OutlinedButton(
                                 onClick = ::buildAsmProject,
+                                modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                                contentPadding = ProjectToolbarActionPadding,
                                 enabled = romEditable && !asmWorkspaceState.busy &&
                                     !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress,
                                 shape = RoundedCornerShape(6.dp),
@@ -872,6 +879,8 @@ fun main() = application {
                         }
                         Button(
                             onClick = ::runProjectInEmulator,
+                            modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                            contentPadding = ProjectToolbarActionPadding,
                             enabled = romEditable && !asmWorkspaceState.busy &&
                                 !asmWorkspaceState.previewBusy && !editorState.romBuildInProgress,
                             shape = RoundedCornerShape(6.dp),
@@ -886,6 +895,8 @@ fun main() = application {
                             Text(if (editorState.romBuildInProgress) "RUNNING…" else "RUN", fontSize = fs.detail, softWrap = false)
                         }
                         OutlinedButton(
+                            modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                            contentPadding = ProjectToolbarActionPadding,
                             onClick = {
                                 if (emulatorEnabled) {
                                     // Closing is a lifecycle boundary: release the current
@@ -913,6 +924,8 @@ fun main() = application {
                         }
                         Box {
                             Button(
+                                modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                                contentPadding = ProjectToolbarActionPadding,
                                 onClick = {
                                     val parser = romParser
                                     if (parser != null) {
@@ -935,6 +948,8 @@ fun main() = application {
                             }
                         }
                         Button(
+                            modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                            contentPadding = ProjectToolbarActionPadding,
                             onClick = {
                                 scope.launch {
                                     if (asmWorkspaceState.unsavedSourceFileIds.isNotEmpty()) {
@@ -954,6 +969,8 @@ fun main() = application {
                             Text(if (editorState.dirty || hasUnsavedAsm) "Save*" else "Save", fontSize = fs.body, softWrap = false)
                         }
                         Button(
+                            modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                            contentPadding = ProjectToolbarActionPadding,
                             onClick = {
                                 romParser?.let { editorState.exportToRom(it) }
                             },
@@ -961,6 +978,8 @@ fun main() = application {
                             shape = RoundedCornerShape(6.dp),
                         ) { Text("Export ROM", fontSize = fs.body, softWrap = false) }
                         Button(
+                            modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                            contentPadding = ProjectToolbarActionPadding,
                             onClick = {
                                 romParser?.let { editorState.exportToIps(it) }
                             },
@@ -970,6 +989,8 @@ fun main() = application {
                         Box {
                             OutlinedButton(
                                 onClick = { settingsOpen = !settingsOpen },
+                                modifier = Modifier.defaultMinSize(minWidth = ProjectToolbarActionMinWidth),
+                                contentPadding = ProjectToolbarActionPadding,
                                 shape = RoundedCornerShape(6.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
                                     containerColor = if (settingsOpen) MaterialTheme.colorScheme.primaryContainer

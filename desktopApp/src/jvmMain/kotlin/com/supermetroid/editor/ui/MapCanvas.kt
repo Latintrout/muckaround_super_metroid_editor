@@ -278,12 +278,8 @@ fun MapCanvas(
     var showApplySelectionDialog by remember { mutableStateOf(false) }
     var applySelectionStateIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingLayoutRevert by remember { mutableStateOf<LayoutEditScope?>(null) }
-    val overlayToggles = remember { mutableStateMapOf<TileOverlay, Boolean>(
-        TileOverlay.ITEMS to true,
-        TileOverlay.ENEMIES to true,
-        TileOverlay.LAYER2 to true,
-        TileOverlay.LIQUID to true,
-    ) }
+    val overlayPreferences = remember { TileOverlayPreferences() }
+    val overlayToggles = overlayPreferences.toggles
     val overlayCount = overlayToggles.values.count { it }
     val customItems = remember(editorState?.patchVersion, editorState?.project?.patches) {
         editorState?.enabledCustomItems().orEmpty()
@@ -575,7 +571,7 @@ fun MapCanvas(
                                         }
                                     },
                                     onClick = {
-                                        overlayToggles[overlay] = !isOn
+                                        overlayPreferences.toggle(overlay)
                                     }
                                 )
                             }

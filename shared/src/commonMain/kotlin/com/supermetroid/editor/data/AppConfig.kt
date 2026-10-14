@@ -58,6 +58,8 @@ data class AppSettings(
     val roomEditorHighlightItems: Boolean = true,
     val roomEditorShowEnemyNames: Boolean = true,
     val roomEditorShowFlatSlopeSurfaces: Boolean = true,
+    /** Stable TileOverlay names. Null keeps legacy defaults; an empty list means all off. */
+    val roomEditorEnabledTileOverlays: List<String>? = null,
     val mainSidebarWidthDp: Float = 340f,
     val sidebarBottomPaneHeightDp: Float = 0f,
     val asmProblemsPaneHeightDp: Float = 180f,
