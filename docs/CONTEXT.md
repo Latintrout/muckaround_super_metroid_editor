@@ -204,6 +204,11 @@ ownership, state sharing and geometry together. Custom references/notes, global
 assets and unrelated rooms survive. Added-room projects and bulk reset remain
 guarded. See [compound reset](asm/reference_workspace.md#compound-room-reset).
 
+Biome themes now join generation's source/model transaction: authored Default FX,
+state tilesets, global tileset recolors, geometry and camera data undo together.
+Source FX remains reciprocal; tileset/palette metadata still uses the existing
+export backend. See [compound themes](asm/reference_workspace.md#compound-biome-themes).
+
 ## Background Programs and Embedded Layer 2
 
 Room-state `bgDataPtr` addresses a bank-`$8F` library-background command program;

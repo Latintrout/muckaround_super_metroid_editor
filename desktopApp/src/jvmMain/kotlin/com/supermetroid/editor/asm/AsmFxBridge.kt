@@ -33,44 +33,8 @@ internal class AsmFxBridge(private val catalog: AsmPlmSourceCatalog, private val
         val staged = room.copy(states = room.states.toMutableList())
         staged.ensureStateManifest(catalog.parser)
         requireDoorRoutedFxOwnership(staged, catalog.parser)
-        val states = catalog.parser.inspectRoomStates(roomId).states
         val before = sourceText()
-        val prefix = AsmFxSource.prefix(roomId)
-        require(!Regex("(?m)^macro $prefix").containsMatchIn(before)) { "Existing FX declarations need review before adoption." }
-        val tables = linkedMapOf<Pair<Int, List<RomParser.FxEntry>>, SourceFxResource>()
-        val addition = buildString {
-            appendLine("; SMEDIT room effects · ${roomName.replace('\n', ' ').replace('\r', ' ')}")
-            appendLine("; Four dw words + eight db bytes per header. First matching incoming door wins.")
-            appendLine("; A complete Default header ends lookup; otherwise dw FFFF means no FX.")
-            for (state in staged.states) {
-                val pc = requireNotNull(states.getOrNull(requireNotNull(state.baseSourceStateIndex()))?.stateDataPcOffset)
-                val pointer = catalog.parser.readStateData(pc).getValue("fxPtr")
-                val entries = readSourceFxResource(catalog.parser, pointer, "FX room $roomName").entries.toMutableList()
-                fun applyDefault(change: FxChange?) {
-                    if (change == null) return
-                    val index = entries.indexOfFirst { it.doorSelect == 0 }
-                    val original = entries.getOrNull(index) ?: emptyDefaultFxEntry()
-                    val changed = original.withFxChange(change)
-                    if (index >= 0) entries[index] = changed else if (changed != original) entries.add(changed)
-                }
-                applyDefault(room.fxChange)
-                applyDefault(state.fxChange)
-                for ((key, change) in state.doorFxChanges) {
-                    val door = requireNotNull(key.toIntOrNull(16)) { "Invalid door FX key." }
-                    val index = entries.indexOfFirst { it.doorSelect == door }
-                    require(door != 0 && index >= 0) { "GUI door FX override has no matching native header." }
-                    entries[index] = entries[index].withFxChange(change)
-                }
-                val resource = tables.getOrPut(pointer to entries.toList()) {
-                    SourceFxResource(prefix + "Table_${tables.size + 1}", entries.toList()).also {
-                        validateSourceFxDoors(roomId, it, catalog.parser)
-                        appendLine(AsmFxSource.renderTable(it))
-                    }
-                }
-                appendLine(AsmFxSource.renderState(roomId, state.id, resource.identity))
-            }
-        }
-        val after = before.trimEnd() + "\n\n" + addition
+        val after = planFxMigration(before, staged, catalog.parser, roomName)
         val oldStates = room.states.toList()
         val common = room.fxChange
         val overrides = staged.states.associate { it.id to (it.fxChange to it.doorFxChanges.toMap()) }

@@ -9,6 +9,7 @@ import com.supermetroid.editor.rom.SourceSaveResource
 import com.supermetroid.editor.rom.validateSourceSaveOwnership
 import com.supermetroid.editor.rom.words
 import com.supermetroid.editor.rom.ensureStateManifest
+import com.supermetroid.editor.rom.baseSourceStateIndex
 import com.supermetroid.editor.rom.validateSourceSaveLinks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -512,6 +513,75 @@ internal class AsmPlmSourceBridge(
         val restored = com.supermetroid.editor.data.RoomEdits(roomId).also { it.ensureStateManifest(catalog.parser) }
         return AsmRoomResetPlan(owner, room, snapshotRoomForResize(room), restored,
             sources.mapValues { (id, before) -> before to after.getValue(id) }, resetExternalReferences(sources.keys))
+    }
+
+    fun planTheme(roomId: Int, name: String, stateIds: Set<String>, tileset: Int?, change: com.supermetroid.editor.data.FxChange?,
+                  generation: AsmRoomGenerationPlan? = null): AsmRoomThemePlan {
+        val owner = project()
+        require(owner.asmWorkspace.enabled && owner.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) { "Room themes require ASM mode." }
+        require(owner.newRooms.isEmpty()) { "Themes in projects with added rooms need stable source identities first." }
+        require(tileset == null || tileset in 0..28) { "Unsupported theme tileset." }
+        val room = owner.rooms.getValue(owner.roomKey(roomId))
+        val beforeModel = snapshotRoomForResize(room)
+        val staged = snapshotRoomForResize(room)
+        require(stateIds.isNotEmpty() && staged.states.map { it.id }.containsAll(stateIds)) { "Select existing room states before applying a theme." }
+        if (generation != null) {
+            require(generation.owner === owner && generation.room === room && generation.sourceRevision == workspace.sourceBufferRevision) { "Generation inputs changed; try again." }
+            generation.metadataAfter.applyTo(staged)
+        }
+        val nativeStates = catalog.parser.parseRoomStatesWithData(roomId)
+        if (tileset != null) for (state in staged.states.filter { it.id in stateIds }) {
+            val native = nativeStates.getOrNull(requireNotNull(state.baseSourceStateIndex()))
+            val existing = state.stateDataChange ?: com.supermetroid.editor.data.StateDataChange()
+            state.stateDataChange = existing.copy(tileset = tileset.takeUnless {
+                it == native?.tileset && staged.stateDataChange?.tileset == null
+            }).takeUnless { it == com.supermetroid.editor.data.StateDataChange() }
+        }
+        val sources = linkedMapOf(PLM_SOURCE_FILE to (sourceText() to (generation?.after ?: sourceText())))
+        if (change != null || staged.asmFxSourceVersion != 0) {
+            val before = workspace.projectSourceText(FX_SOURCE_FILE)
+            var text = before
+            if (change != null) {
+                if (staged.asmFxSourceVersion == 0) {
+                    text = planFxMigration(text, staged, catalog.parser, name)
+                    staged.fxChange = null
+                    staged.states.forEach { it.fxChange = null; it.doorFxChanges.clear() }
+                    staged.asmFxSourceVersion = 1
+                }
+                com.supermetroid.editor.rom.requireDoorRoutedFxOwnership(staged, catalog.parser)
+                text = AsmFxSource(text).replaceDefaults(staged, stateIds, change)
+                val external = workspace.projectSourceTextsExcept(FX_SOURCE_FILE).flatMap { AsmFxSource.references(it).asSequence() }.toSet()
+                text = AsmFxSource(AsmFxSource(text).tidy(staged, external)).withComments(staged)
+                AsmFxSource(text).resources(staged).values.forEach { com.supermetroid.editor.rom.validateSourceFxDoors(roomId, it, catalog.parser) }
+            }
+            sources[FX_SOURCE_FILE] = before to text
+        }
+        if (room.asmEnemySourceVersion != 0) workspace.projectSourceText(ENEMY_SOURCE_FILE).let { sources[ENEMY_SOURCE_FILE] = it to it }
+        return AsmRoomThemePlan(owner, room, beforeModel, staged, workspace.sourceBufferRevision, sources, resetExternalReferences(sources.keys))
+    }
+
+    /** A themed generation also owns layout sidecars in afterModel; publish all banks and metadata once. */
+    fun applyTheme(plan: AsmRoomThemePlan, beforeTransition: () -> Unit, applySidecar: (Boolean) -> Unit,
+                   afterTransition: (Boolean) -> Unit) {
+        val afterSnapshot = snapshotRoomForResize(plan.afterModel)
+        fun validate(undo: Boolean) {
+            val expected = if (undo) plan.afterModel else plan.room
+            require(project() === plan.owner && plan.owner.rooms[plan.owner.roomKey(plan.room.roomId)] === expected &&
+                expected == if (undo) afterSnapshot else plan.beforeModel) { "Room data changed; undo newer room/state edits before restoring this theme." }
+            require(resetExternalReferences(plan.replacements.keys) == plan.externalReferences) { "Custom source references changed; undo those edits before restoring this theme." }
+            beforeTransition()
+        }
+        fun apply(undo: Boolean) {
+            plan.owner.rooms[plan.owner.roomKey(plan.room.roomId)] = if (undo) plan.room else plan.afterModel
+            applySidecar(undo)
+        }
+        fun notify(undo: Boolean) { onMetadataChanged(); afterTransition(undo) }
+        validate(false)
+        require(plan.sourceRevision == workspace.sourceBufferRevision) { "Project source changed while the theme was planned; try again." }
+        workspace.replaceProjectSources(plan.replacements,
+            beforeUndo = { validate(true); apply(true) }, beforeRedo = { validate(false); apply(false) },
+            afterUndo = { notify(true) }, afterRedo = { notify(false) },
+            beforeApply = { apply(false) }, afterApply = { notify(false) })
     }
 
     private fun resetExternalReferences(participants: Set<String>): Set<String> =

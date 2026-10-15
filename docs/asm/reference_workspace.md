@@ -96,7 +96,12 @@ available in either mode.
     **Ctrl+D** on Windows and Linux to open a definition. Cmd/Ctrl-click and
     middle-click remain convenient pointer equivalents, while ordinary click
     only moves the caret or changes the selection and never recenters the source.
-    **Go to Definition** is also in the editor's right-click menu. **Find Usages**
+    **Go to Definition** is also in the editor's right-click menu. Literal
+    `incsrc` filenames (quoted or unquoted) open the included source in the current
+    Project/Reference workspace, relative to the containing file. Nested paths,
+    `..` segments within the source tree and unsaved include operands are supported;
+    missing files and expression-based paths are never guessed by basename.
+    Read-only source includes are clickable too. **Find Usages**
     uses **Cmd/Ctrl+U** and immediately expands the in-place result list; labels
     and macros share the same usage count, Prev/Next cycle, and navigation history.
     Editable-source pointer navigation retains its measured text layout across
@@ -1385,8 +1390,8 @@ two additional headers *after* Default, selected by her AI through `Load_FX_Entr
 (`$89:AB02`). Moving only the door-visible prefix would break her acid transitions.
 Adoption therefore blocks that native table without replacing source or metadata.
 Supporting it needs explicit indexed records/consumers, not a relaxed door parser.
-Project-created rooms and compound FX themes remain guarded. Whole-room reset
-has a joint source transaction (below). Arbitrary expressions are not interpreted
+Project-created rooms remain guarded. Whole-room reset and biome themes have joint
+source transactions (below). Arbitrary expressions are not interpreted
 by this first FX lens.
 
 Acceptance: in an ASM project use **Room Info → Default FX**, change water/height,
@@ -1500,8 +1505,8 @@ Objects can still be added when their decorative tile bytes already match.
 Scroll-trigger patterns remain explicitly guarded: a tile-only pattern does not
 carry a named command-list resource. Use **Add scroll trigger** for those. This
 slice does not imply that selecting/moving tiles also selects or moves actors or
-PLMs. Whole-room themes and added-room source identities retain their existing
-guards; the whole-room reset transaction is described below.
+PLMs. Added-room source identities retain their existing guards; whole-room reset
+and themed generation transactions are described below.
 
 `AsmPlmSourceBridgeTest` exercises staging, rollback, scopes, gate pairs, slots,
 cross-view undo, interrupted strokes, reopen and the ROM-only backend using
@@ -1527,10 +1532,14 @@ on the bottom row, matching the existing generator policy. Target states retain
 their shared list/grid identities where possible; a shared subset forks once,
 and independent resources are never merged simply because their values match.
 
-States sharing a generated layout must have the same protected non-scroll
-objects, actor placements and effective geometry. If they differ, the status
-message asks for **This state** instead of guessing which branch's objects to
-protect. Malformed drafts, changed inputs, custom unsupported initial presets,
+States sharing a generated layout may have different object and actor lists.
+Generation protects the union of their placements, including state-specific
+door caps and important-object approach areas, then writes one common maze.
+Each state's non-scroll objects, actors, graphics, FX and scripts remain separate;
+generation does not merge those lists. Private geometry overrides that disagree
+with the shared layout still require **Make layout unique to this state…**.
+Placements changed while the sharing prompt is open require a fresh generation.
+Malformed drafts, changed inputs, custom unsupported initial presets,
 or competing original PLM source block the entire operation. A later source undo
 also refuses to overwrite newer layout/state changes. Existing handwritten notes,
 custom references and save resources survive; only unreachable owned scroll
@@ -1543,13 +1552,17 @@ GUI edits, and checked compiled placements use the same existing lenses. ROM-onl
 generation retains its delta backend. Bulk Generate/Reset skips source-owned
 rooms: bulk reset must not remove only geometry while leaving generated camera
 source behind. Use the single-room reset or Undo on the complete source transaction
-instead. Compound FX themes and added-room identities remain separate work.
+instead. Added-room identities remain separate work; themes now participate in
+the generation transaction described below.
 
 `AsmRoomGenerationSourceTest` covers atomic adoption, shared subsets, invalid
 drafts, stale plans, save preservation, cross-view undo, reopen, typed export,
 ordinary Generate and the ROM-only backend. The real-Asar integration
 `compound generated room data` builds the authored result with an ordinary ROM
 patch, then undoes adoption and builds the restored legacy inputs as well.
+The Flyway shared-maze integration builds generation, undo and redo across its
+different native states, checking one layout pointer and unchanged state-specific
+object lists, enemy populations/GFX, FX and scripts.
 
 ## Compound room resize
 
@@ -1618,6 +1631,43 @@ test `whole room source reset` builds the edited room, its native reset and its
 restored authored result, checking all resource families, save records, state graphs,
 an unrelated room/ROM patch and base-ROM immutability.
 
+## Compound biome themes
+
+**Generate → Theme → Generate room** now stages theme and layout changes together
+in existing-room ASM projects. One transaction owns generated Layer 1/BTS geometry,
+initial grids and obsolete scroll-trigger cleanup in bank `$8F`, Default FX in
+bank `$83`, state tileset overrides and any palette recolor. Invalid FX drafts,
+unsupported indexed FX, unavailable palettes, malformed inputs or stale previews
+leave every part unchanged. Any layout-scope choice happens before publication.
+
+The theme applies to the states sharing the generated layout; choosing a private
+layout limits it to that state. FX keeps all incoming-door variants, unrelated
+fields, handwritten notes and independent resource identities. Shared target subsets
+fork once rather than modifying sibling states. Source values remain authored in
+ASM, not duplicated as JSON FX overrides. Tileset selectors and palette overrides
+still use the existing project metadata/export backend; this is not yet reciprocal
+graphics-asset authoring.
+
+Palette recolors are **global to the selected tileset**, as before. Other rooms
+using that tileset see the same recolor. Undo restores the previous palette bytes
+and effect tag, not a guessed vanilla palette, and refuses to overwrite a newer
+edit to that palette. Unrelated palettes are untouched. Clearing a theme's palette
+effect selection does not implicitly delete an existing custom override.
+
+Canvas Undo/Redo or ASM Undo/Redo from a participating bank restores source,
+ownership, geometry, tileset and palette together. Newer raw source or room-model
+changes block the whole transition; prior GUI history remains usable after undo.
+Raw edits through **Room Info → Default FX → ASM** continue to update the GUI.
+Save/reopen and Build use the same projections. Added-room projects, bulk
+generation of source-owned rooms, and Mother Brain's indexed after-Default FX
+remain guarded.
+
+`AsmRoomThemeSourceTest` covers adoption, scope, aliasing, palette guards,
+reciprocal raw edits, save/reopen and the actual Generate entry point.
+`asmBuildIntegrationTest --tests '*themed generation compiles*'` checks actual
+Asar output for theme and layout data, the previous result after undo, redo,
+ordinary ROM patches and base-ROM immutability.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -1639,9 +1689,8 @@ Follow-up work can now be incremental:
    GUI, including state exceptions and copy-on-write. Initial screen grids,
    scroll-trigger commands, paired save-spawn records and ordinary door/default FX
    now use the same authority contract, including paired enemy populations/GFX.
-   Tile/PLM pattern strokes, room generation, resizing and reset now have atomic source/model undo boundaries.
-   Next extend source-aware compound themes and one asset-owned graphics
-   example. Then extend full
+   Tile/PLM pattern strokes, room generation, themes, resizing and reset now have atomic source/model undo boundaries.
+   Next add one asset-owned graphics example. Then extend full
    authoring to rewritten state graphs, level data, doors, headers, and state selectors;
    then give project-created rooms stable source
    identities. Graphics, map, text, and sound encoders should follow the same

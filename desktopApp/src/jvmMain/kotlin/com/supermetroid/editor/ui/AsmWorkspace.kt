@@ -126,6 +126,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import com.supermetroid.editor.asm.AsmDocumentFindState
 import com.supermetroid.editor.asm.asmDocumentLineOffsets
+import com.supermetroid.editor.asm.asmSourceInclude
+import com.supermetroid.editor.asm.asmSourceIncludeAt
+import com.supermetroid.editor.asm.resolveSourceInclude
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -2962,6 +2965,7 @@ private fun AsmSourceCanvas(
                                         "label" -> state.openLabel(source.id, lineIndex, annotation.item)
                                         "definition" -> state.showReferences(source.id, lineIndex, annotation.item)
                                         "asset" -> state.openAssetReference(annotation.item)
+                                        "source" -> state.openSource(annotation.item)
                                         "instruction" -> state.showInstruction(annotation.item)
                                         "macro" -> index.resolveMacro(annotation.item)?.let { macro ->
                                             state.openMacro(macro)
@@ -4058,6 +4062,9 @@ internal fun asmEditableReferenceIsNavigable(
     pageStartLine: Int,
 ): Boolean {
     val sourceIndex = index ?: return false
+    asmSourceIncludeAt(pageText, requestedOffset)?.let { include ->
+        return sourceIndex.resolveSourceInclude(fileId, include.path) != null
+    }
     val tokenReference = asmEditableTokenAt(pageText, requestedOffset, pageStartLine) ?: return false
     val token = tokenReference.token
     if (token.startsWith('"') && sourceIndex.resolveAsset(token.removeSurrounding("\"")) != null) return true
@@ -4079,7 +4086,7 @@ internal fun asmEditableReferenceIsNavigable(
         sourceIndex.resolveLabel(fileId, tokenReference.lineIndex, token) != null
 }
 
-private fun asmOpenEditableReference(
+internal fun asmOpenEditableReference(
     state: AsmWorkspaceState,
     index: AsmReferenceIndex?,
     fileId: String,
@@ -4088,6 +4095,11 @@ private fun asmOpenEditableReference(
     pageStartLine: Int,
 ): Boolean {
     val sourceIndex = index ?: return false
+    asmSourceIncludeAt(pageText, requestedOffset)?.let { include ->
+        val target = sourceIndex.resolveSourceInclude(fileId, include.path) ?: return false
+        state.openSource(target.id)
+        return true
+    }
     val tokenReference = asmEditableTokenAt(pageText, requestedOffset, pageStartLine)
     val token = tokenReference?.token
     if (token?.startsWith('"') == true) {
@@ -5035,6 +5047,17 @@ private fun asmAnnotatedLine(
     val stringColor = if (isDarkCodeTheme()) Color(0xFFC3E88D) else Color(0xFF397B24)
     val definitionColor = if (isDarkCodeTheme()) Color(0xFFFFCB6B) else Color(0xFF8A6100)
     val foreground = codeForeground()
+    val include = asmSourceInclude(line)
+    val includedFile = if (include != null && fileId != null) index?.resolveSourceInclude(fileId, include.path) else null
+    if (include != null && includedFile != null) return buildAnnotatedString {
+        append(line.take(include.range.first))
+        pushStringAnnotation("source", includedFile.id)
+        pushStyle(SpanStyle(color = labelColor))
+        append(line.substring(include.range))
+        pop()
+        pop()
+        append(line.substring(include.range.last + 1))
+    }
     val commentStart = line.indexOf(';').let { if (it < 0) line.length else it }
     val code = line.substring(0, commentStart)
     val tokenRegex = Regex(
@@ -5191,6 +5214,9 @@ private fun asmEditableHighlight(
         val macroDefinition = if (index != null && fileId != null) {
             index.macrosAt(fileId, pageStartLine + lineIndex).firstOrNull()
         } else null
+        val includedFile = if (index != null && fileId != null) {
+            asmSourceInclude(line)?.let { index.resolveSourceInclude(fileId, it.path) }
+        } else null
         val instruction = matches.firstOrNull { match ->
             match.value != definition && AsmInstructionReference.find(match.value.substringBefore('.')) != null
         }
@@ -5206,7 +5232,7 @@ private fun asmEditableHighlight(
                 token.startsWith('"') -> {
                     val asset = index?.resolveAsset(token.removeSurrounding("\""))
                     SpanStyle(
-                        color = if (asset == null) colors.string else colors.symbol,
+                        color = if (asset == null && includedFile == null) colors.string else colors.symbol,
                     )
                 }
                 token == definition || token == macroDefinition?.name -> SpanStyle(

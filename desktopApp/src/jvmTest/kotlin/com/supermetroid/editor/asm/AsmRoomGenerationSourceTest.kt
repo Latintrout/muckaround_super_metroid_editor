@@ -2,6 +2,9 @@ package com.supermetroid.editor.asm
 
 import com.supermetroid.editor.data.*
 import com.supermetroid.editor.rom.*
+import com.supermetroid.editor.procgen.BiomeRules
+import com.supermetroid.editor.procgen.BiomeStyle
+import com.supermetroid.editor.procgen.TilesetProfile
 import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.LayoutEditScope
 import kotlinx.coroutines.runBlocking
@@ -15,13 +18,15 @@ class AsmRoomGenerationSourceTest {
     @TempDir lateinit var directory: File
     private data class Fixture(val workspace: AsmWorkspaceState, val bridge: AsmPlmSourceBridge, val project: SmEditProject,
                                val editor: EditorState, val file: File)
-    private suspend fun fixture(adopt: Boolean = false, invalidPreset: Boolean = false, withSave: Boolean = false): Fixture {
+    private suspend fun fixture(adopt: Boolean = false, invalidPreset: Boolean = false, withSave: Boolean = false,
+                                withActors: Boolean = false): Fixture {
         val root = File(directory, "reference")
         val src = File(root, "src").apply { mkdirs() }
         val data = File(root, "data").apply { mkdirs() }
         val macros = "macro PLMPopEntry(ID, X, Y, Param)\n dw <ID>\n db <X>, <Y>\n dw <Param>\nendmacro\n"
-        File(src, "main.asm").writeText("incsrc macros.asm\nincsrc bank_8F.asm\n")
+        File(src, "main.asm").writeText("incsrc macros.asm\nincsrc bank_8F.asm\nincsrc bank_A1.asm\n")
         File(src, PLM_SOURCE_FILE).writeText("; Reference bank remains intact\n")
+        File(src, ENEMY_SOURCE_FILE).writeText("; Reference actors remain intact\n")
         File(src, "macros.asm").writeText(macros)
         val reference = AsmReferenceWorkspace(root,
             AsmReferenceMetadata(AsmReferenceContract.REPOSITORY_URL, AsmReferenceContract.COMMIT, "test", "test.sfc", "ab".repeat(32), 0x300000, 0),
@@ -38,6 +43,21 @@ class AsmRoomGenerationSourceTest {
         val level = ByteArray(2 + 32 * 32 * 3).also { it[1] = 8 }
         LZ5Compressor.compress(level).copyInto(rom, 0x200000)
         for (pc in listOf(0x791F8 + 18, 0x79300)) { rom[pc + 1] = 0x80.toByte(); rom[pc + 2] = 0xC0.toByte() }
+        if (withActors) {
+            fun word(pc: Int, value: Int) { rom[pc] = value.toByte(); rom[pc + 1] = (value ushr 8).toByte() }
+            val actor = RomParser.EnemyEntry(0xD13F, 22 * 16, 20 * 16, 0x1234, 0x2800, 1, 2, 3)
+            for ((index, pc) in listOf(0x791F8 + 18, 0x79300).withIndex()) {
+                word(pc + 8, 0x8800 + index * 0x100)
+                word(pc + 10, 0x8800)
+                SourceEnemyPopulation("native", listOf(if (index == 0) actor else actor.copy(x = 24 * 16, y = 8 * 16)), index + 1)
+                    .bytes().copyInto(rom, 0x108800 + index * 0x100)
+            }
+            SourceEnemyGraphics("native", listOf(RomParser.EnemyGfxEntry(actor.id, 1))).bytes().copyInto(rom, 0x1A0800)
+            word(0x100000 + (actor.id and 0x7FFF), 32)
+            rom[0x100000 + (actor.id and 0x7FFF) + 12] = 0xA2.toByte()
+            word(0x100000 + (actor.id and 0x7FFF) + 54, actor.id)
+            rom[0x100000 + (actor.id and 0x7FFF) + 56] = 0xAD.toByte()
+        }
         if (invalidPreset) rom[0x79300 + 14] = 2
         val parser = RomParser(rom)
         val project = SmEditProject("test.sfc")
@@ -178,22 +198,124 @@ class AsmRoomGenerationSourceTest {
         assertFalse(f.workspace.canUndoSource(PLM_SOURCE_FILE))
     }
 
-    @Test fun `different protected objects in sharing states require an independent layout`() = runBlocking {
+    @Test fun `different objects stay state local while sharing the generated layout and reciprocal undo`() = runBlocking {
         val f = fixture(adopt = true)
         val room = f.project.rooms.getValue("91F8")
         val other = room.states.first { it.id != f.editor.currentPlmStateId() }.id
         f.bridge.editManaged(room.roomId, other, false, { false }, RomParser.PlmEntry(0xEEE7, 12, 12, 0x51))
         val before = f.bridge.sourceText()
         val pixels = f.editor.workingLevelData!!.copyOf()
-        assertFalse(f.generate())
-        assertContains(f.editor.statusMessage, "Choose This state")
+        assertTrue(f.generate(), f.editor.statusMessage)
+        assertEquals(1, room.states.map { it.resources.level }.distinct().size)
+        assertFalse(f.editor.workingPlms.any { it.id == 0xEEE7 })
+        assertTrue(f.bridge.managedView(room.roomId, other).document!!.entries.any { it.id == 0xEEE7 })
+        assertTrue(f.editor.undo(), f.editor.statusMessage)
         assertEquals(before, f.bridge.sourceText())
         assertContentEquals(pixels, f.editor.workingLevelData)
-        f.editor.setCurrentLayoutEditScope(LayoutEditScope.THIS_STATE)
-        val otherGrid = f.bridge.initialScrolls.view(room.roomId, other).resource
-        assertTrue(f.generate(), f.editor.statusMessage)
-        assertEquals(otherGrid, f.bridge.initialScrolls.view(room.roomId, other).resource)
+        assertTrue(f.editor.redo(), f.editor.statusMessage)
         assertTrue(f.bridge.managedView(room.roomId, other).document!!.entries.any { it.id == 0xEEE7 })
+    }
+
+    private suspend fun checkSharedMazeProtection(managedActors: Boolean) {
+        val f = fixture(adopt = true, withActors = true)
+        val parser = f.bridge.catalog.parser
+        val room = f.project.rooms.getValue("91F8")
+        val other = room.states.first { it.id != f.editor.currentPlmStateId() }.id
+        val script = RomParser.PlmEntry(0xB63B, 12, 12, 0x51)
+        f.bridge.editManaged(room.roomId, other, false, { false }, script)
+        if (managedActors) f.bridge.enemies.migrate(room.roomId, "Landing Site")
+        f.editor.refreshLinkedPlms()
+        val actorSource = f.bridge.enemies.sourceText()
+        val objectsBefore = room.states.associate { it.id to f.bridge.managedView(room.roomId, it.id).document!!.entries }
+        val actorsBefore = parser.parseRoomStatesWithData(room.roomId).map { parser.parseEnemyPopulation(it.enemySetPtr) }
+        val pixels = f.editor.workingLevelData!!.copyOf()
+        val words = IntArray(32 * 32) { f.editor.readBlockWord(it % 32, it / 32) }
+        val bts = IntArray(32 * 32) { f.editor.readBts(it % 32, it / 32) }
+        val changed = f.editor.generateBiome(BiomeRules.roll(BiomeStyle.PIPE_MAZE, 1234L), TilesetProfile.synthetic(), 1234L,
+            keepLandingSiteShipClear = false, romParser = parser)
+        assertTrue(changed > 0, f.editor.statusMessage)
+        val generated = f.editor.workingLevelData!!.copyOf()
+        val placements = listOf(script.x to script.y) + actorsBefore.flatten().map { it.x / 16 to it.y / 16 }
+        for ((x, y) in placements) for (dy in -2..2) for (dx in -2..2) {
+            val index = (y + dy) * 32 + x + dx
+            assertEquals(words[index], f.editor.readBlockWord(x + dx, y + dy), "Protected tile at ${x + dx},${y + dy}")
+            assertEquals(bts[index], f.editor.readBts(x + dx, y + dy))
+        }
+        room.states.forEachIndexed { index, state ->
+            f.editor.switchRoomState(state.id, parser)
+            assertContentEquals(generated, f.editor.workingLevelData)
+            assertEquals(actorsBefore[index], f.editor.workingEnemies)
+            assertEquals(objectsBefore.getValue(state.id).filterNot { RomParser.isScrollPlm(it.id) }, f.editor.workingPlms)
+            assertEquals(listOf(1, 1, 2, 2), f.editor.workingScrolls.toList())
+        }
+        assertEquals(actorSource, f.bridge.enemies.sourceText(), "Generating does not rewrite state-owned actor tables")
+        assertEquals(1, room.states.map { it.resources.level }.distinct().size)
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertContentEquals(pixels, f.editor.workingLevelData)
+        assertTrue(f.workspace.redoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertContentEquals(generated, f.editor.workingLevelData)
+    }
+
+    @Test fun `maze protects the union of native state actors and source objects`() = runBlocking { checkSharedMazeProtection(false) }
+
+    @Test fun `maze protects the union of source owned state actors and objects`() = runBlocking { checkSharedMazeProtection(true) }
+
+    @Test fun `invalid sibling actor source blocks ordinary generation before adopting or changing anything`() = runBlocking {
+        val f = fixture(withActors = true)
+        f.bridge.enemies.migrate(0x91F8, "Landing Site")
+        f.editor.refreshLinkedPlms()
+        val source = f.bridge.enemies.sourceText()
+        val broken = source.replace("db \$01 ; Required kills", "db \$100 ; Required kills")
+        assertNotEquals(source, broken)
+        f.workspace.replaceProjectSource(ENEMY_SOURCE_FILE, source, broken)
+        val objects = f.bridge.sourceText()
+        val metadata = AsmRoomBank8FMetadata.capture(f.project.rooms.getValue("91F8"))
+        val pixels = f.editor.workingLevelData!!.copyOf()
+        assertEquals(0, f.editor.generateBiome(BiomeRules.roll(BiomeStyle.PIPE_MAZE, 1234L), TilesetProfile.synthetic(), 1234L,
+            romParser = f.bridge.catalog.parser))
+        assertContains(f.editor.statusMessage, "Generation blocked")
+        assertEquals(broken, f.bridge.enemies.sourceText())
+        assertEquals(objects, f.bridge.sourceText())
+        assertEquals(metadata, AsmRoomBank8FMetadata.capture(f.project.rooms.getValue("91F8")))
+        assertContentEquals(pixels, f.editor.workingLevelData)
+        assertTrue(f.editor.undoStack.isEmpty())
+    }
+
+    @Test fun `changed sibling placements while choosing shared scope require a fresh generation`() = runBlocking {
+        val f = fixture(adopt = true, withActors = true)
+        val parser = f.bridge.catalog.parser
+        val editor = EditorState().apply {
+            testMode = true; initForProject(f.file, f.project); asmPlmSourceBridge = f.bridge
+            loadRoom(0x91F8, parser, parser.readRoomHeader(0x91F8)!!)
+        }
+        val pixels = editor.workingLevelData!!.copyOf()
+        assertEquals(0, editor.generateBiome(BiomeRules.roll(BiomeStyle.PIPE_MAZE, 1234L), TilesetProfile.synthetic(), 1234L,
+            romParser = parser))
+        assertNotNull(editor.pendingLayoutEditScope)
+        val room = f.project.rooms.getValue("91F8")
+        val other = room.states.first { it.id != editor.currentPlmStateId() }.id
+        f.bridge.editManaged(room.roomId, other, false, { false }, RomParser.PlmEntry(0xB63B, 20, 20, 0x51))
+        val source = f.bridge.sourceText()
+        editor.resolvePendingLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        assertContains(editor.statusMessage, "changed since generation was prepared")
+        assertEquals(source, f.bridge.sourceText())
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertTrue(editor.undoStack.isEmpty())
+    }
+
+    @Test fun `conflicting private geometry still blocks without partially changing source or layout`() = runBlocking {
+        val f = fixture(adopt = true)
+        val room = f.project.rooms.getValue("91F8")
+        room.states.first { it.id != f.editor.currentPlmStateId() }.operations +=
+            EditOperation("Legacy private geometry", listOf(TileEdit(20, 20, 0, 0x8123, 0, 0)))
+        val source = f.bridge.sourceText()
+        val pixels = f.editor.workingLevelData!!.copyOf()
+        assertEquals(0, f.editor.generateBiome(BiomeRules.roll(BiomeStyle.PIPE_MAZE, 1234L), TilesetProfile.synthetic(), 1234L,
+            romParser = f.bridge.catalog.parser))
+        assertContains(f.editor.statusMessage, "different private geometry")
+        assertEquals(source, f.bridge.sourceText())
+        assertContentEquals(pixels, f.editor.workingLevelData)
+        assertTrue(f.editor.undoStack.isEmpty())
     }
 
     @Test fun `stale source and metadata plans fail before callbacks or source writes`() = runBlocking {

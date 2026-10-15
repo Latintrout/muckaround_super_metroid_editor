@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import com.supermetroid.editor.ui.asmOpenEditableReference
+import com.supermetroid.editor.ui.asmEditableReferenceIsNavigable
 
 class AsmProjectWorkspaceTest {
     @TempDir
@@ -25,6 +27,32 @@ class AsmProjectWorkspaceTest {
         File(reference.root, "src/bank_8F.asm").writeText("org ${'$'}8F8000\nTestObjects:\n    dw ${'$'}0000\n")
         File(reference.root, "src/bank_83.asm").writeText("org ${'$'}838000\nTestFx:\n    dw ${'$'}FFFF\n")
         File(reference.root, "src/macros.asm").writeText("; macros\n")
+    }
+
+    @Test fun `include definition navigation uses live operands and preserves project source buffers`() = runBlocking {
+        val reference = roomReference()
+        File(reference.root, "src/bank_82.asm").writeText("; Original bank 82\n")
+        val repository = AsmProjectWorkspaceRepository(emptyList(), emptyList())
+        val file = File(tempDirectory, "Include.smedit").apply { writeText("{}") }
+        repository.initialize(file.path, reference)
+        val state = AsmWorkspaceState(projectRepository = repository)
+        state.bindProject(file.path, true)
+        val bank = state.projectSourceText("bank_82.asm")
+        state.replaceProjectSource("bank_82.asm", bank, "$bank; unsaved project edit\n")
+        for (line in listOf("incsrc bank_82.asm", "incsrc \"bank_82.asm\" ; engine")) {
+            state.openSource("main.asm")
+            val page = "; unsaved page\n$line"
+            val offset = page.indexOf("bank_82") + 4
+            assertTrue(asmEditableReferenceIsNavigable(state.workspace?.index, "main.asm", page, offset, 500))
+            assertTrue(asmOpenEditableReference(state, state.workspace?.index, "main.asm", page, offset, 500))
+            assertEquals("bank_82.asm", state.selectedFileId)
+            assertEquals(0, state.selectedLineIndex)
+            assertEquals(AsmWorkspaceKind.PROJECT, state.workspaceKind)
+            assertEquals("$bank; unsaved project edit\n", state.sourceEditText("bank_82.asm"))
+        }
+        val missing = "incsrc missing.asm"
+        assertFalse(asmOpenEditableReference(state, state.workspace?.index, "main.asm", missing, missing.indexOf("missing"), 0))
+        assertEquals("bank_82.asm", state.selectedFileId)
     }
 
     @Test fun `compound source undo is atomic from either bank and refuses newer edits`() = runBlocking {

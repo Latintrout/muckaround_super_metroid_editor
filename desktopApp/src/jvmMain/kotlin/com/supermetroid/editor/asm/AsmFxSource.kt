@@ -130,6 +130,30 @@ internal class AsmFxSource(val text: String) {
         return text.replaceRange(wrapper.range, renderState(room.roomId, stateId, name)).trimEnd() + "\n\n" +
             body.replaceFirst("macro ${old.name}()", "macro $name()")
     }
+    /** Fork once per affected sharing group; independent equal-valued tables stay independent. */
+    fun replaceDefaults(room: RoomEdits, stateIds: Set<String>, change: com.supermetroid.editor.data.FxChange): String {
+        val inputs = resources(room)
+        require(stateIds.isNotEmpty() && inputs.keys.containsAll(stateIds)) { "Unknown FX target states." }
+        var result = text
+        for ((identity, states) in inputs.entries.filter { it.key in stateIds }.groupBy { it.value.identity }) {
+            val source = AsmFxSource(result)
+            val replacement = (states.first().value.entries.singleOrNull { it.doorSelect == 0 }
+                ?: com.supermetroid.editor.rom.emptyDefaultFxEntry()).withFxChange(change)
+            val detach = inputs.any { it.key !in stateIds && it.value.identity == identity }
+            val first = states.first().key
+            result = source.replaceEntry(room, first, 0, replacement, detach)
+            val updated = AsmFxSource(result)
+            val newIdentity = updated.reference(room.roomId, first)
+            if (newIdentity != identity) {
+                result = states.drop(1).map { updated.macro(stateName(room.roomId, it.key)) }
+                    .sortedByDescending { it.range.first }.fold(result) { current, wrapper ->
+                        current.replaceRange(wrapper.range, current.substring(wrapper.range).replace("%$identity()", "%$newIdentity()"))
+                    }
+            }
+        }
+        return result
+    }
+
     fun tidy(room: RoomEdits, external: Set<String> = emptySet()): String {
         val owned = macros.values.filter { it.name.startsWith(prefix(room.roomId)) }
         val outside = owned.sortedByDescending { it.range.first }.fold(text) { current, m -> current.removeRange(m.range) }

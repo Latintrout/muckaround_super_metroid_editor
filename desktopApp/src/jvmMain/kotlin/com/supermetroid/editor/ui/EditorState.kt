@@ -8122,19 +8122,31 @@ class EditorState(
         seed: Long,
         keepLandingSiteShipClear: Boolean = true,
         romParser: RomParser? = null,
+        theme: BiomeTheme? = null,
     ): Int {
         val w = workingBlocksWide
         val h = workingBlocksTall
         if (w <= 0 || h <= 0) return 0
+        if (theme != null && (theme.tilesetId != null || theme.paletteEffectId != null || theme.fxType != null) &&
+            !asmNavigationEnabled && !hasManagedPlms() && !hasManagedInitialScrolls() && !hasManagedFx() && !hasManagedEnemies()) {
+            val parser = romParser ?: currentRomParser
+            if (parser == null) { postStatus("Theme blocked: load a ROM first."); return 0 }
+            applyBiomeTheme(theme, parser)
+        }
 
         val n = w * h
         val origWords = IntArray(n) { readBlockWord(it % w, it / w) }
         val origBts = IntArray(n) { readBts(it % w, it / w) }
+        val stateContents = runCatching { biomeGenerationStateContents() }.getOrElse {
+            postStatus("Generation blocked: ${it.message ?: "Review the room source before generating."}")
+            return 0
+        }
         val options = buildBiomeGenerationOptions(
             keepLandingSiteShipClear,
             romParser,
             origWords,
             origBts,
+            stateContents,
         )
         val result = BiomeGenerator(rules, profile, seed, options).generate(w, h, origWords, origBts)
 
@@ -8151,6 +8163,8 @@ class EditorState(
             edits,
             scrollEdits,
             scrollPlmRemoves,
+            theme,
+            validatePreparedInputs = { validateBiomeGenerationStateContents(stateContents) },
         )
         return if (applied) edits.size else 0
     }
@@ -8549,12 +8563,61 @@ class EditorState(
         return plms
     }
 
+    private data class BiomeGenerationStateContents(
+        val plms: List<RomParser.PlmEntry>,
+        val enemies: List<RomParser.EnemyEntry>,
+    )
+
+    /** Protect every branch using this layout, without merging its state-owned resources. */
+    private fun biomeGenerationStateContents(): Map<String, BiomeGenerationStateContents> {
+        if (project.asmWorkspace.buildMode != ProjectRomBuildMode.ASM_SOURCE && !hasManagedPlms() && !hasManagedInitialScrolls()) {
+            return mapOf("This state" to BiomeGenerationStateContents(_workingPlms.toList(), _workingEnemies.toList()))
+        }
+        val parser = requireNotNull(currentRomParser)
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
+        val room = project.getOrCreateRoom(currentRoomId)
+        val selected = requireNotNull(currentStateEdits())
+        val lists = effectiveAuthoredStatePlms()
+        require(lists.size == room.states.size) { "Room object state coverage is incomplete." }
+        val objects = room.states.mapIndexed { index, state -> state.id to lists[index].second }.toMap()
+        require(objects.getValue(selected.id) == _workingPlms) { "Room objects changed; wait for the source preview, then generate again." }
+        val nativeStates = parser.parseRoomStatesWithData(currentRoomId)
+        return room.states.filter { it.resources.level == selected.resources.level }.associate { state ->
+            require(effectiveLevelDataForState(room, state, parser)?.contentEquals(workingLevelData) == true) {
+                "States sharing this layout have different private geometry. Make the layout unique to this state before generating."
+            }
+            val actors = if (hasManagedEnemies()) {
+                val view = bridge.enemies.view(currentRoomId, state.id)
+                require(view.problem == null) { view.problem ?: "Invalid actor source." }
+                requireNotNull(view.resource).population.entries
+            } else {
+                val native = requireNotNull(nativeStates.getOrNull(state.baseSourceStateIndex() ?: -1))
+                com.supermetroid.editor.rom.applyEnemyChanges(parser.parseEnemyPopulation(native.enemySetPtr), room.enemyChanges + state.enemyChanges)
+            }
+            if (state.id == selected.id) require(actors == _workingEnemies) {
+                "Actors changed; wait for the source preview, then generate again."
+            }
+            state.id to BiomeGenerationStateContents(objects.getValue(state.id).toList(), actors.toList())
+        }
+    }
+
+    private fun validateBiomeGenerationStateContents(prepared: Map<String, BiomeGenerationStateContents>) {
+        // Choosing Make unique may narrow the target set while the scope prompt is open.
+        // Its already-generated maze is conservative; changed/new placements need a new run.
+        require(biomeGenerationStateContents().all { (id, contents) -> prepared[id] == contents }) {
+            "Room objects or actors changed since generation was prepared. Generate again."
+        }
+    }
+
     private fun buildBiomeGenerationOptions(
         keepLandingSiteShipClear: Boolean,
         romParser: RomParser?,
         originalWords: IntArray,
         originalBts: IntArray,
+        stateContents: Map<String, BiomeGenerationStateContents> = biomeGenerationStateContents(),
     ): BiomeGenerationOptions {
+        val plms = stateContents.values.flatMap { it.plms }.distinct()
+        val enemies = stateContents.values.flatMap { it.enemies }.distinct()
         val preserveRects = ArrayList<BiomeGenerationRect>()
         val forceAirRects = ArrayList<BiomeGenerationRect>()
         val hardForceAirRects = ArrayList<BiomeGenerationRect>()
@@ -8569,14 +8632,14 @@ class EditorState(
             workingBlocksWide,
             workingBlocksTall,
         )
-        addImportantPlmProtection(preserveRects, hardForceAirRects, workingBlocksWide, workingBlocksTall, _workingPlms)
+        addImportantPlmProtection(preserveRects, hardForceAirRects, workingBlocksWide, workingBlocksTall, plms)
         preserveRects.addAll(
             buildDoorCapPreserveRectsForRoom(
                 romParser,
                 currentRoomId,
                 workingBlocksWide,
                 workingBlocksTall,
-                _workingPlms,
+                plms,
             )
         )
         return BiomeGenerationOptions(
@@ -8588,8 +8651,8 @@ class EditorState(
                 height = workingBlocksTall,
                 originalWords = originalWords,
                 originalBts = originalBts,
-                plms = _workingPlms,
-                enemies = _workingEnemies,
+                plms = plms,
+                enemies = enemies,
             ),
         )
     }
@@ -8649,6 +8712,8 @@ class EditorState(
         edits: List<TileEdit>,
         scrollEdits: List<ScrollChange>,
         scrollPlmRemoves: List<PlmChange>,
+        theme: BiomeTheme? = null,
+        validatePreparedInputs: (() -> Unit)? = null,
     ): Boolean {
         if (edits.isEmpty() && scrollEdits.isEmpty() && scrollPlmRemoves.isEmpty() &&
             project.asmWorkspace.buildMode != ProjectRomBuildMode.ASM_SOURCE && !hasManagedPlms() && !hasManagedInitialScrolls()) return false
@@ -8656,12 +8721,15 @@ class EditorState(
         val stateId = currentPlmStateId()
         if (!allowOrQueueLayoutEdit {
                 if (currentRoomId == roomId && currentPlmStateId() == stateId) {
-                    applyGeneratedRoomOperation(description, edits, scrollEdits, scrollPlmRemoves)
+                    applyGeneratedRoomOperation(description, edits, scrollEdits, scrollPlmRemoves, theme, validatePreparedInputs)
                 } else postStatus("Generation cancelled: the selected room/state changed.")
             }
         ) return false
+        if (runCatching { validatePreparedInputs?.invoke() }.onFailure {
+                postStatus("Generation blocked: ${it.message ?: "Room inputs changed. Generate again."}")
+            }.isFailure) return false
         if (project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE || hasManagedPlms() || hasManagedInitialScrolls()) {
-            return applySourceGeneratedRoomOperation(description, edits, scrollEdits, scrollPlmRemoves)
+            return applySourceGeneratedRoomOperation(description, edits, scrollEdits, scrollPlmRemoves, theme)
         }
         if (scrollPlmRemoves.isNotEmpty() && blockLinkedPlmMutation()) return false
         // Generation edits the active whole layout resource. State-owned PLMs
@@ -8703,7 +8771,7 @@ class EditorState(
     }
 
     private fun applySourceGeneratedRoomOperation(description: String, edits: List<TileEdit>,
-                                                 scrollEdits: List<ScrollChange>, removals: List<PlmChange>): Boolean = runCatching {
+                                                 scrollEdits: List<ScrollChange>, removals: List<PlmChange>, theme: BiomeTheme? = null): Boolean = runCatching {
         require(pendingEdits.isEmpty() && pendingSourcePattern == null) { "Finish the active tile stroke before generating." }
         val parser = requireNotNull(currentRomParser)
         val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
@@ -8724,25 +8792,7 @@ class EditorState(
         require(lists.size == room.states.size) { "Room object state coverage is incomplete." }
         val objectsBefore = room.states.mapIndexed { index, state -> state.id to lists[index].second }.toMap()
         require(objectsBefore.getValue(selected.id) == _workingPlms) { "Room objects changed; wait for the source preview, then generate again." }
-        val nativeStates = parser.parseRoomStatesWithData(currentRoomId)
-        fun actors(state: RoomStateEdits): List<RomParser.EnemyEntry> {
-            if (hasManagedEnemies()) {
-                val view = bridge.enemies.view(currentRoomId, state.id)
-                require(view.problem == null) { view.problem ?: "Invalid actor source." }
-                return requireNotNull(view.resource).population.entries
-            }
-            val native = requireNotNull(nativeStates.getOrNull(state.baseSourceStateIndex() ?: -1))
-            return com.supermetroid.editor.rom.applyEnemyChanges(parser.parseEnemyPopulation(native.enemySetPtr), room.enemyChanges + state.enemyChanges)
-        }
-        val selectedActors = actors(selected)
-        require(selectedActors == _workingEnemies) { "Actors changed; wait for the source preview, then generate again." }
-        for (state in targets) {
-            require(objectsBefore.getValue(state.id).filterNot { RomParser.isScrollPlm(it.id) } ==
-                objectsBefore.getValue(selected.id).filterNot { RomParser.isScrollPlm(it.id) } && actors(state) == selectedActors &&
-                effectiveLevelDataForState(room, state, parser)?.contentEquals(workingLevelData) == true) {
-                "States sharing this layout have different objects, actors or private geometry. Choose This state for the layout before generating."
-            }
-        }
+        biomeGenerationStateContents()
         val projected = effectiveLevelDataForState(room, selected, parser, prospectiveLayoutEdits = edits)
         val expected = requireNotNull(workingLevelData).copyOf()
         val layerBytes = (expected[0].toInt() and 255) or ((expected[1].toInt() and 255) shl 8)
@@ -8756,6 +8806,9 @@ class EditorState(
         val plan = bridge.planGeneration(currentRoomId, parser.readRoomHeader(currentRoomId)?.name ?: "Room",
             targets.map { it.id }.toSet(), ::isEditorItemPlm)
         require(plan.gridsBefore.getValue(selected.id) == _workingScrolls.toList()) { "Initial scrolls changed; wait for the source preview, then generate again." }
+        if (theme != null && (theme.tilesetId != null || theme.paletteEffectId != null || theme.fxType != null)) {
+            return@runCatching applySourceRoomTheme(theme, parser, targets.map { it.id }.toSet(), plan, edits, description)
+        }
         val operation = EditOperation(description, edits)
         val layout = prepareSourceLayoutEdit(operation)
         fun preview(undo: Boolean) {
@@ -8885,6 +8938,9 @@ class EditorState(
                 loadRoom(roomId, parser, native)
                 if (undo && selectedBefore != null && plan.room.states.any { it.id == selectedBefore })
                     switchRoomState(selectedBefore, parser)
+                // Reload replays persisted operations into GUI history; replace that projection
+                // with the exact session history, including its source transaction identities.
+                undoStack.clear(); redoStack.clear(); managedPlmUndo.clear(); itemScopeSnapshots.clear()
                 if (sourceChange == null) sourceChange = requireNotNull(bridge.sourceUndoHead())
                 managedPlmUndo.putAll(previousManaged)
                 managedPlmUndo[operation] = ManagedSourceUndo(PLM_SOURCE_FILE,
@@ -8906,15 +8962,14 @@ class EditorState(
      * as a state-data change for ROM export), install the theme's palette
      * recolor as a tileset palette override, and set liquid/atmosphere FX.
      * Reloads the room's TileGraphics so the canvas shows the new look
-     * immediately. Call before [generateBiome] so the generated layout is
-     * dressed with the theme tileset's vocabulary.
+     * immediately. For generation, pass the theme to [generateBiome] so source,
+     * geometry and visual metadata are committed in one transaction.
      */
-    fun applyBiomeTheme(theme: BiomeTheme, romParser: RomParser) {
-        if (theme.fxType != null && hasManagedFx()) {
-            postStatus("Theme blocked: combined palette/layout/FX edits are not source-aware yet. No changes applied.")
-            return
+    fun applyBiomeTheme(theme: BiomeTheme, romParser: RomParser): Boolean {
+        if (theme.tilesetId == null && theme.paletteEffectId == null && theme.fxType == null) return false
+        if (asmNavigationEnabled || hasManagedPlms() || hasManagedInitialScrolls() || hasManagedFx() || hasManagedEnemies()) {
+            return applySourceRoomTheme(theme, romParser)
         }
-        if (theme.tilesetId == null && theme.paletteEffectId == null && theme.fxType == null) return
         val targetTileset = theme.tilesetId ?: currentTilesetId
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         val stateEdits = currentStateEdits()
@@ -8967,7 +9022,107 @@ class EditorState(
 
         dirty = true
         editVersion++
+        return true
     }
+
+    /** Theme values and optional generated geometry cross one source/model history boundary. */
+    private fun applySourceRoomTheme(
+        theme: BiomeTheme,
+        parser: RomParser,
+        targets: Set<String>? = null,
+        generation: com.supermetroid.editor.asm.AsmRoomGenerationPlan? = null,
+        edits: List<TileEdit> = emptyList(),
+        description: String = "Apply theme (${theme.displayName})",
+    ): Boolean = runCatching {
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
+        require(bridge.catalog.parser === parser) { "The room ROM changed; wait for the source workspace." }
+        fun requireIdle() {
+            require(pendingEdits.isEmpty() && pendingSourcePattern == null && floatingSelection == null &&
+                pendingPlmAdds.isEmpty() && pendingPlmRemoves.isEmpty() && pendingLayoutEditScope == null) {
+                "Finish the active tile stroke, selection or scope choice before applying or restoring a theme."
+            }
+        }
+        requireIdle()
+        val selected = requireNotNull(currentStateEdits()) { "Select an existing room state." }
+        val roomId = currentRoomId
+        val native = requireNotNull(parser.readRoomHeader(roomId))
+        val targetTileset = theme.tilesetId ?: currentTilesetId
+        require(targetTileset in 0..28) { "Unsupported theme tileset." }
+        val paletteKey = targetTileset.toString()
+        val effectKey = "tileset:$targetTileset"
+        val paletteBefore = project.customGfx.palettes[paletteKey]
+        val effectBefore = project.customGfx.paletteEffects[effectKey]
+        var paletteAfter = paletteBefore
+        var effectAfter = effectBefore
+        val paletteEffectId = theme.paletteEffectId
+        if (paletteEffectId != null) {
+            val effect = requireNotNull(PaletteEffects.findEffect(paletteEffectId)) { "Unknown theme palette effect." }
+            val colors = requireNotNull(readTilesetPalette(targetTileset, parser, includeOverride = false)) { "The theme's native palette is unavailable." }
+            effect.apply(colors)
+            val bytes = ByteArray(256)
+            for (i in colors.indices) { bytes[i * 2] = colors[i].toByte(); bytes[i * 2 + 1] = (colors[i] ushr 8).toByte() }
+            paletteAfter = Base64.getEncoder().encodeToString(bytes)
+            effectAfter = paletteEffectId
+        }
+        val change = theme.fxType?.let { type ->
+            require(!theme.isLiquid || theme.liquidFraction.isFinite() && theme.liquidFraction in 0.0..1.0) { "Invalid theme liquid height." }
+            if (theme.isLiquid) {
+                val heightPx = workingBlocksTall * 16
+                val surface = (heightPx * theme.liquidFraction).toInt().coerceIn(0x20, maxOf(0x20, heightPx - 0x20))
+                FxChange(fxType = type, liquidSurfaceStart = surface, liquidSurfaceNew = surface, liquidSpeed = 0, liquidDelay = 0,
+                    fxBitA = 2, fxBitB = 2, fxBitC = 0)
+            } else FxChange(fxType = type, liquidSurfaceStart = 0xFFFF, liquidSurfaceNew = 0xFFFF)
+        }
+        val plan = bridge.planTheme(roomId, native.name, targets ?: setOf(selected.id), theme.tilesetId, change, generation)
+        if (edits.isEmpty() && plan.beforeModel == plan.afterModel && plan.replacements.values.all { it.first == it.second } &&
+            paletteBefore == paletteAfter && effectBefore == effectAfter) {
+            postStatus("${theme.displayName} already matches the room.")
+            return@runCatching false
+        }
+        val operation = EditOperation(description, edits)
+        if (edits.isNotEmpty()) {
+            val level = selected.resources.level
+            plan.afterModel.levelResourceOperations.getOrPut(level, ::mutableListOf).add(operation.tileOnly())
+        }
+        val previousUndo = undoStack.toList()
+        val previousManaged = java.util.IdentityHashMap(managedPlmUndo)
+        val previousItemScopes = java.util.IdentityHashMap(itemScopeSnapshots)
+        var changeHead: AsmSourceTextChange? = null
+        var applied = false
+        bridge.applyTheme(plan, beforeTransition = {
+            requireIdle()
+            require(project.customGfx.palettes[paletteKey] == (if (applied) paletteAfter else paletteBefore) &&
+                project.customGfx.paletteEffects[effectKey] == (if (applied) effectAfter else effectBefore)) {
+                "The shared tileset palette changed; restore the newer palette edit before undoing this theme."
+            }
+        }, applySidecar = { undo ->
+            val palette = if (undo) paletteBefore else paletteAfter
+            val effect = if (undo) effectBefore else effectAfter
+            if (palette == null) project.customGfx.palettes.remove(paletteKey) else project.customGfx.palettes[paletteKey] = palette
+            if (effect == null) project.customGfx.paletteEffects.remove(effectKey) else project.customGfx.paletteEffects[effectKey] = effect
+            applied = !undo
+        }, afterTransition = { undo ->
+            if (currentRoomId == roomId) {
+                val active = currentPlmStateId() ?: selected.id
+                loadRoom(roomId, parser, native)
+                switchRoomState(active, parser)
+                undoStack.clear(); redoStack.clear(); managedPlmUndo.clear(); itemScopeSnapshots.clear()
+                if (changeHead == null) changeHead = requireNotNull(bridge.sourceUndoHead())
+                managedPlmUndo.putAll(previousManaged)
+                managedPlmUndo[operation] = ManagedSourceUndo(PLM_SOURCE_FILE,
+                    plan.replacements.getValue(PLM_SOURCE_FILE).first,
+                    plan.replacements.getValue(PLM_SOURCE_FILE).second, changeHead)
+                itemScopeSnapshots.putAll(previousItemScopes)
+                undoStack.addAll(previousUndo)
+                if (undo) redoStack.add(operation) else undoStack.add(operation)
+            } else if (currentTilesetId == targetTileset) reloadCurrentRoomTileGraphics(parser)
+            if (editorTilesetId == targetTileset) loadEditorTileset(targetTileset, parser)
+            paletteVersion++; dirty = true; undoVersion++; editVersion++
+        })
+        postStatus("Applied ${theme.displayName}${if (generation != null) " with generated layout and camera data" else ""}." +
+            if (theme.paletteEffectId != null) " The palette is shared by rooms using tileset $targetTileset." else "")
+        true
+    }.getOrElse { postStatus("Theme blocked: ${it.message ?: "No changes applied."}"); false }
 
     private fun pushEditOperation(op: EditOperation) {
         undoStack.add(op)

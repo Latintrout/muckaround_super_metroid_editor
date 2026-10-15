@@ -9942,7 +9942,7 @@ macro SmeditFx_91F8_Table_3()
     dw $FFFF ; Liquid Target
     dw $0000 ; Liquid Speed (signed 8.8)
     db $00 ; Liquid Delay (frames; 00 = stopped)
-    db $18 ; FX Type - Unused (no native FX handler)
+    db $0A ; FX Type - Rain
     db $02 ; FX A · default layer blend
     db $0E ; FX B · Layer 3 blend
     db $00 ; FX C · liquid options

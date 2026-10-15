@@ -116,7 +116,7 @@ drafts cannot be overwritten by GUI, and Build checks whole bank-$83 allocations
 state `+$06` pointers and actual Asar bytes alongside existing ROM patches.
 The map previews Default, not entrance-specific or later runtime changes.
 Mother Brain's after-Default runtime-indexed FX records, custom header/dispatch
-layouts, added-room adoption and compound FX themes are explicit guarded
+layouts and added-room adoption are explicit guarded
 boundaries. See [room FX authoring](../asm/reference_workspace.md#reciprocal-room-fx).
 
 Initial Screen Scrolls are also reciprocal in ASM projects. A grid change or its
@@ -132,11 +132,11 @@ parity compose with the existing PLM/save/trigger and ordinary ROM-patch paths.
 Room generation now combines geometry, initial grids and scroll-trigger cleanup
 in one source/model transaction, including any needed adoption. Acknowledged
 sharing updates camera data for the same layout's states; a private layout limits
-the action to that state. Sharing states with different protected objects, actors
-or private geometry require an independent layout rather than a guessed merge.
+the action to that state. Shared generation protects the union of all target
+states' object and actor placements while retaining their separate lists; only
+conflicting private geometry requires an independent layout.
 Source undo restores retired GUI inputs as well as geometry; stale/malformed
-inputs change nothing. Bulk Generate/Reset skips source-owned rooms. Compound FX
-themes remain guarded. See
+inputs change nothing. Bulk Generate/Reset skips source-owned rooms. See
 [compound room generation](../asm/reference_workspace.md#compound-room-generation).
 
 Room resize now applies to every state's layout, authored initial grid and scroll
@@ -148,6 +148,15 @@ save cameras are rejected before mutation. GUI and ASM undo restore dimensions,
 source and prior ownership together, with guards against newer room, actor-source
 and incoming-door edits. The existing 50-screen grid limit and added-room source
 identity boundary remain. See [compound room resize](../asm/reference_workspace.md#compound-room-resize).
+
+Themed generation now stages tileset changes, palette recolors and authored
+Default FX together with geometry and camera data. The same layout-sharing scope
+governs all targets, and FX subsets detach once without changing siblings or
+entrance variants. One cross-bank undo restores source, room identity, geometry
+and prior palette bytes/effect tag. Newer source, model or shared-palette edits
+block the entire transition. Palette overrides remain global to a tileset and
+still use the existing metadata/export backend; full reciprocal graphics assets
+remain separate work. See [compound biome themes](../asm/reference_workspace.md#compound-biome-themes).
 
 Single-room reset now retires every source ownership marker and restores native
 header/state/layout/resource data through one cross-bank source/model transaction.

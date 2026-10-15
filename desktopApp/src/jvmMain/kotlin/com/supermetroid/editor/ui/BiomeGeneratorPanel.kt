@@ -430,16 +430,18 @@ fun BiomeGeneratorPanel(
                 val runRules = rulesForSeed(runSeed)
                 val runTheme = theme.resolve(runSeed)
                 val runProfile = profileForTheme(runTheme, romParser)
-                editorState.applyBiomeTheme(runTheme, romParser)
                 val applied = editorState.generateBiome(
                     runRules,
                     runProfile,
                     runSeed,
                     keepLandingSiteShipClear = keepLandingSiteShipClear,
                     romParser = romParser,
+                    theme = runTheme,
                 )
                 rememberUsedSeed(runSeed)
-                status = buildString {
+                status = if (editorState.statusMessage.startsWith("Theme blocked:") || editorState.statusMessage.startsWith("Generation blocked:")) {
+                    editorState.statusMessage
+                } else buildString {
                     append(if (applied > 0) "Rewrote $applied tiles" else "No layout changes")
                     if (runTheme.tilesetId != null) append(" as ${runTheme.displayName}")
                     append(" (seed $runSeed, scrolls reset, Ctrl+Z undoes)")

@@ -43,6 +43,157 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `Flyway generates one shared maze without merging state objects actors FX or scripts`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        val native = parser.readRoomHeader(0x9879)!!
+        val nativeStates = parser.parseRoomStatesWithData(native.roomId)
+        assertTrue(nativeStates.map { parser.parsePlmSet(it.plmSetPtr) }.distinct().size > 1)
+        assertTrue(nativeStates.map { parser.parseEnemyPopulation(it.enemySetPtr) }.distinct().size > 1)
+        editor.loadRoom(native.roomId, parser, native)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        val room = project.rooms.getValue("9879")
+        val before = editor.workingLevelData!!.copyOf()
+        val sourceBefore = bridge.sourceText()
+        val profile = com.supermetroid.editor.procgen.TilesetProfileCache.getOrLearn(parser,
+            parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }, native.tileset)
+        assertTrue(editor.generateBiome(
+            com.supermetroid.editor.procgen.BiomeRules.roll(com.supermetroid.editor.procgen.BiomeStyle.PIPE_MAZE, 1234L),
+            profile, 1234L, romParser = parser) > 0, editor.statusMessage)
+        val generated = editor.workingLevelData!!.copyOf()
+        assertEquals(1, room.states.map { it.resources.level }.distinct().size)
+        assertEquals(0, room.asmEnemySourceVersion)
+        assertEquals(0, room.asmFxSourceVersion)
+        room.states.forEachIndexed { index, state ->
+            editor.switchRoomState(state.id, parser)
+            assertContentEquals(generated, editor.workingLevelData)
+            assertEquals(parser.parsePlmSet(nativeStates[index].plmSetPtr).filterNot { RomParser.isScrollPlm(it.id) }, editor.workingPlms)
+            assertEquals(parser.parseEnemyPopulation(nativeStates[index].enemySetPtr), editor.workingEnemies)
+        }
+        suspend fun buildAndVerify(authored: Boolean) {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            val states = built.parseRoomStatesWithData(native.roomId)
+            assertEquals(nativeStates.size, states.size)
+            assertEquals(1, states.map { it.levelDataPtr }.distinct().size, "All Flyway states retain one shared layout")
+            nativeStates.zip(states).forEach { (base, actual) ->
+                assertContentEquals(if (authored) generated else before, built.decompressLZ2(actual.levelDataPtr))
+                assertEquals(parser.parsePlmSet(base.plmSetPtr).filterNot { authored && RomParser.isScrollPlm(it.id) }, built.parsePlmSet(actual.plmSetPtr))
+                assertContentEquals(com.supermetroid.editor.rom.readSourceEnemyPopulation(parser, base.enemySetPtr, "native").bytes(),
+                    com.supermetroid.editor.rom.readSourceEnemyPopulation(built, actual.enemySetPtr, "compiled").bytes())
+                assertContentEquals(com.supermetroid.editor.rom.readSourceEnemyGraphics(parser, base.enemyGfxPtr, "native").bytes(),
+                    com.supermetroid.editor.rom.readSourceEnemyGraphics(built, actual.enemyGfxPtr, "compiled").bytes())
+                assertEquals(parser.parseFxEntries(base.fxPtr), built.parseFxEntries(actual.fxPtr))
+                assertEquals(base.tileset, actual.tileset)
+                assertEquals(base.mainAsmPtr, actual.mainAsmPtr)
+                assertEquals(base.setupAsmPtr, actual.setupAsmPtr)
+                assertEquals(if (authored) listOf(2, 2, 2) else parser.parseScrollData(base.scrollPtr, native.width, native.height).toList(),
+                    built.parseScrollData(actual.scrollPtr, native.width, native.height).toList())
+            }
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes(), "The input ROM remains untouched")
+        }
+        buildAndVerify(true)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertContentEquals(before, editor.workingLevelData)
+        assertEquals(sourceBefore, bridge.sourceText())
+        buildAndVerify(false)
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertContentEquals(generated, editor.workingLevelData)
+        buildAndVerify(true)
+    }
+
+    @Test fun `themed generation compiles FX palette tileset and geometry with reciprocal ASM edits and undo`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        val native = parser.readRoomHeader(0xACB3)!!
+        val nativeStates = parser.parseRoomStatesWithData(native.roomId)
+        editor.loadRoom(native.roomId, parser, native)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.addScrollTriggerWithCommands(8, 8, listOf(com.supermetroid.editor.data.ScrollCommand(0, 0)))
+        assertTrue(editor.ensureFxSource(native.name), editor.statusMessage)
+        assertTrue(workspace.saveAllSources(), workspace.error)
+        val selected = editor.currentPlmStateId()!!
+        val originalRoom = project.rooms.getValue("ACB3")
+        val targets = originalRoom.states.filter { it.resources.level == originalRoom.states.single { state -> state.id == selected }.resources.level }.map { it.id }.toSet()
+        val beforePixels = editor.workingLevelData!!.copyOf()
+        val beforeSources = listOf(PLM_SOURCE_FILE, FX_SOURCE_FILE).associateWith { workspace.projectSourceText(it) }
+        val theme = com.supermetroid.editor.procgen.BiomeTheme.CONCRETE.first { it.id == "grotto" }.copy(paletteEffectId = "icecold")
+        val paletteBefore = editor.readTilesetPalette(theme.tilesetId!!, parser, includeOverride = false)!!
+        val bytesBefore = ByteArray(256).also { bytes -> for (i in paletteBefore.indices) {
+            bytes[i * 2] = paletteBefore[i].toByte(); bytes[i * 2 + 1] = (paletteBefore[i] ushr 8).toByte()
+        } }
+        project.customGfx.palettes[theme.tilesetId.toString()] = Base64.getEncoder().encodeToString(bytesBefore)
+        project.customGfx.paletteEffects["tileset:${theme.tilesetId}"] = "previous"
+        val profile = com.supermetroid.editor.procgen.TilesetProfileCache.getOrLearn(parser,
+            parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }, theme.tilesetId!!)
+        val count = editor.generateBiome(
+            com.supermetroid.editor.procgen.BiomeRules.roll(com.supermetroid.editor.procgen.BiomeStyle.PIPE_MAZE, 1234L),
+            profile, 1234L, romParser = parser, theme = theme)
+        assertTrue(count > 0, editor.statusMessage)
+        val themedPixels = editor.workingLevelData!!.copyOf()
+        assertEquals(theme.tilesetId, editor.currentTilesetId)
+        assertEquals(6, editor.effectiveFxEntries(native.roomId, parser).last().fxType)
+        project.patches += SmPatch("theme-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        suspend fun buildAndVerify(themed: Boolean) {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            val states = built.parseRoomStatesWithData(native.roomId)
+            val room = project.rooms.getValue("ACB3")
+            room.states.forEachIndexed { index, state ->
+                val base = nativeStates[state.sourceStateIndex ?: state.templateSourceStateIndex!!]
+                assertEquals(if (themed && state.id in targets) theme.tilesetId else base.tileset, states[index].tileset)
+                assertContentEquals(if (state.id in targets) (if (themed) themedPixels else beforePixels) else parser.decompressLZ2(base.levelDataPtr),
+                    built.decompressLZ2(states[index].levelDataPtr))
+                assertEquals(bridge.fx.view(native.roomId, state.id).resource!!.entries, built.parseFxEntries(states[index].fxPtr))
+                if (room.asmInitialScrollSourceVersion != 0) assertEquals(bridge.initialScrolls.view(native.roomId, state.id).resource!!.values,
+                    built.parseScrollData(states[index].scrollPtr, native.width, native.height).toList())
+                if (themed && state.id in targets) assertTrue(built.parsePlmSet(states[index].plmSetPtr).none { RomParser.isScrollPlm(it.id) })
+            }
+            val palette = Base64.getDecoder().decode(project.customGfx.palettes.getValue(theme.tilesetId.toString()))
+            val actual = EditorState().readTilesetPalette(theme.tilesetId!!, built, includeOverride = false)!!
+            assertEquals((0 until 128).map { (palette[it * 2].toInt() and 255) or ((palette[it * 2 + 1].toInt() and 255) shl 8) }, actual.toList())
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify(true)
+        val source = bridge.fx.sourceText()
+        val fx = bridge.fx.view(native.roomId, selected).resource!!
+        val body = authoredMacroBody(source, fx.identity)
+        val draft = source.replace(body, body.replace("db ${'$'}06 ; FX Type", "db ${'$'}08 ; FX Type"))
+        assertNotEquals(source, draft)
+        workspace.replaceProjectSource(FX_SOURCE_FILE, source, draft)
+        editor.refreshLinkedPlms()
+        assertEquals(8, editor.effectiveFxEntries(native.roomId, parser).last().fxType)
+        assertFalse(editor.undo(), "A newer raw FX edit must block the whole themed generation undo")
+        assertContentEquals(themedPixels, editor.workingLevelData)
+        assertTrue(workspace.undoSourceEdit(FX_SOURCE_FILE))
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertTrue(project.rooms.getValue("ACB3") === originalRoom)
+        assertEquals(beforeSources, beforeSources.mapValues { workspace.projectSourceText(it.key) })
+        assertEquals("previous", project.customGfx.paletteEffects["tileset:${theme.tilesetId}"])
+        assertContentEquals(beforePixels, editor.workingLevelData)
+        buildAndVerify(false)
+        assertTrue(workspace.redoSourceEdit(FX_SOURCE_FILE), workspace.error)
+        buildAndVerify(true)
+    }
+
     @Test fun `whole room source reset and cross bank undo compile native and authored resources with real Asar`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)
