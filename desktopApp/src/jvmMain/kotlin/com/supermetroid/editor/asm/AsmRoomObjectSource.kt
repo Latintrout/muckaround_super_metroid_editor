@@ -324,6 +324,35 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
         }
     }
 
+    /** Repoint all room lists together; original streams and externally referenced helpers stay intact. */
+    fun resizeScrolls(room: RoomEdits, oldWidth: Int, oldHeight: Int, width: Int, height: Int,
+                      originalCommands: (Int) -> List<ScrollCommand>): String {
+        resources(room, oldWidth * oldHeight)
+        val names = mutableMapOf<String, String>()
+        val additions = StringBuilder()
+        val edits = mutableListOf<Pair<IntRange, String>>()
+        var ordinal = 1
+        for (table in room.states.map { table(room.roomId, it.id) }.distinctBy { it.resource.name }) {
+            for (record in table.document.records.filter { it.entry.id == 0xB703 }) {
+                val identity = record.scrollResource ?: "ROM:${record.entry.param}"
+                val commands = record.scrollResource?.let { scrollResource(room.roomId, it, oldWidth * oldHeight).commands }
+                    ?: originalCommands(record.entry.param)
+                val remapped = resizeScrollCommands(commands, oldWidth, width, height)
+                if (record.scrollResource != null && commands == remapped) continue
+                val name = names.getOrPut(identity) {
+                    while (contains(prefix(room.roomId) + "Scroll_$ordinal")) ordinal++
+                    (prefix(room.roomId) + "Scroll_${ordinal++}").also {
+                        additions.appendLine(AsmScrollCommandSource.render(it, remapped, width, height))
+                    }
+                }
+                edits += record.fields[3] to "$name&\$FFFF"
+            }
+        }
+        val updated = replaceRanges(edits) + if (additions.isEmpty()) "" else "\n$additions"
+        AsmRoomObjectSource(updated, symbols).resources(room, width * height)
+        return updated
+    }
+
     /** One source transaction: allocate a named resource and repoint only this state's trigger.
      * Shared command/list resources are detached rather than changed behind another consumer's back. */
     fun editScroll(room: RoomEdits, stateId: String, x: Int, y: Int, commands: List<ScrollCommand>, width: Int, height: Int,
@@ -365,20 +394,24 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
     /** Changing one state first forks its list; All states writes direct rows to each current list. */
     fun edit(room: RoomEdits, stateId: String, allStates: Boolean, remove: (RomParser.PlmEntry) -> Boolean,
              add: RomParser.PlmEntry?, externalReferences: Set<String> = emptySet(), addScrollReference: String? = null,
-             companions: List<RomParser.PlmEntry> = emptyList()): String {
+             companions: List<RomParser.PlmEntry> = emptyList(), stateIds: Set<String>? = null): String {
         add?.let(AsmPlmDocument::validateEntry)
         companions.forEach(AsmPlmDocument::validateEntry)
-        val states = if (allStates) room.states.map { it.id } else listOf(stateId)
+        val states = stateIds?.toList() ?: if (allStates) room.states.map { it.id } else listOf(stateId)
+        require(states.isNotEmpty() && states.all { id -> room.states.any { it.id == id } }) { "Unknown object source states." }
         var result = text
         val edited = mutableSetOf<String>()
         for (state in states) {
             var source = AsmRoomObjectSource(result, symbols)
             var table = source.table(room.roomId, state)
-            if (!allStates && room.states.count { source.table(room.roomId, it.id).resource.name == table.resource.name } > 1) {
+            if (room.states.any { it.id !in states && source.table(room.roomId, it.id).resource.name == table.resource.name }) {
                 val name = source.uniqueName(prefix(room.roomId) + "List_")
                 val body = result.substring(table.resource.bodyStart, table.resource.bodyEnd)
-                result = result.replaceRange(table.root.bodyStart, table.root.bodyEnd, "    %$name()\n") +
-                    "\nmacro $name()\n${body}endmacro\n"
+                val wrappers = states.map { source.table(room.roomId, it) }.filter { it.resource.name == table.resource.name }.map { it.root }
+                result = wrappers.sortedByDescending { it.bodyStart }.fold(result) { current, wrapper ->
+                    current.replaceRange(wrapper.bodyStart, wrapper.bodyEnd,
+                        current.substring(wrapper.bodyStart, wrapper.bodyEnd).replace("%${table.resource.name}()", "%$name()"))
+                } + "\nmacro $name()\n${body}endmacro\n"
                 source = AsmRoomObjectSource(result, symbols)
                 table = source.table(room.roomId, state)
             }

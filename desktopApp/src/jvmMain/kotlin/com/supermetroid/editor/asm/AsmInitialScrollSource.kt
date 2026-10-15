@@ -68,21 +68,69 @@ internal class AsmInitialScrollSource(val text: String, private val symbols: Map
         val inputs = resources(room, width, height)
         require(index in 0 until width * height && value in 0..2)
         val selected = inputs.getValue(stateId)
-        if (selected.values[index] == value) return text
-        if (inputs.values.count { it.identity == selected.identity } > 1) {
-            var ordinal = 1
-            while (prefix(room.roomId) + "Table_$ordinal" in macros) ordinal++
-            val name = prefix(room.roomId) + "Table_$ordinal"
-            val table = macro(selected.identity)
-            val cell = fields(selected.identity)[index].first
-            val clone = text.substring(table.range).replaceRange(cell.first - table.range.first until cell.last + 1 - table.range.first, hex(value))
-                .replaceFirst("macro ${selected.identity}()", "macro $name()")
-            val wrapper = macro(stateName(room.roomId, stateId))
-            return text.replaceRange(wrapper.range, renderState(room.roomId, stateId, name))
-                .trimEnd() + "\n\n" + clone
+        return editGrids(room, setOf(stateId), width, height, selected.values.toMutableList().also { it[index] = value })
+    }
+
+    /** Batch grid edits preserve independent identities and fork a shared table only once per affected group. */
+    fun editGrids(room: RoomEdits, stateIds: Set<String>, width: Int, height: Int, values: List<Int>): String {
+        val inputs = resources(room, width, height)
+        require(stateIds.isNotEmpty() && inputs.keys.containsAll(stateIds)) { "Unknown initial scroll states." }
+        require(values.size == width * height && values.all { it in 0..2 }) { "Invalid initial scroll grid." }
+        var result = text
+        for ((identity, states) in inputs.entries.filter { it.key in stateIds }.groupBy { it.value.identity }) {
+            if (states.first().value.values == values) continue
+            val source = AsmInitialScrollSource(result, symbols)
+            val table = source.macro(identity)
+            val changes = source.fields(identity).mapIndexedNotNull { index, (span, old) ->
+                if (old == values[index]) null else span to hex(values[index])
+            }
+            if (inputs.any { it.key !in stateIds && it.value.identity == identity }) {
+                var ordinal = 1
+                while (prefix(room.roomId) + "Table_$ordinal" in source.macros) ordinal++
+                val name = prefix(room.roomId) + "Table_$ordinal"
+                val clone = changes.sortedByDescending { it.first.first }.fold(result.substring(table.range)) { body, (span, value) ->
+                    body.replaceRange(span.first - table.range.first..span.last - table.range.first, value)
+                }.replaceFirst("macro $identity()", "macro $name()")
+                result = states.map { source.macro(stateName(room.roomId, it.key)) }.sortedByDescending { it.range.first }
+                    .fold(result) { current, wrapper -> current.replaceRange(wrapper.range, current.substring(wrapper.range).replace("%$identity()", "%$name()")) }
+                    .trimEnd() + "\n\n" + clone
+            } else {
+                result = changes.sortedByDescending { it.first.first }.fold(result) { current, (span, value) -> current.replaceRange(span, value) }
+            }
         }
-        // Preserve notes, whitespace and all other tokens on a private table.
-        return text.replaceRange(fields(selected.identity)[index].first, hex(value))
+        return result
+    }
+
+    /** Room dimensions are shared: resize every physical table once, retaining independent identities. */
+    fun resize(room: RoomEdits, oldWidth: Int, oldHeight: Int, width: Int, height: Int): String {
+        val inputs = resources(room, oldWidth, oldHeight)
+        val changes = inputs.values.distinctBy { it.identity }.map { table ->
+            val values = List(width * height) { index ->
+                val x = index % width
+                val y = index / width
+                if (x < oldWidth && y < oldHeight) table.values[y * oldWidth + x] else 1
+            }
+            val resized = SourceInitialScrollResource(table.identity, width, height, values)
+            val m = macro(table.identity)
+            val tokens = fields(table.identity).map { text.substring(it.first) }
+            // Restructuring db rows keeps literal/symbol spelling and handwritten notes.
+            val notes = m.body.lineSequence().mapNotNull { line ->
+                val comment = line.substringAfter(';', "").trim()
+                    .replace(Regex("^Screen \\([0-9]+,[0-9]+\\) · (Red|Blue|Green)\\s*;?\\s*"), "")
+                comment.takeIf { it.isNotEmpty() }
+            }.joinToString("") { "    ; $it\n" }
+            val body = buildString {
+                append(notes)
+                resized.values.forEachIndexed { index, value ->
+                    val x = index % width
+                    val y = index / width
+                    val token = if (x < oldWidth && y < oldHeight) tokens[y * oldWidth + x] else hex(value)
+                    appendLine("    db $token ; Screen (${x + 1},${y + 1}) · ${listOf("Red", "Blue", "Green")[value]}")
+                }
+            }
+            (m.bodyStart until m.bodyStart + m.body.length) to body
+        }
+        return changes.sortedByDescending { it.first.first }.fold(text) { current, (span, replacement) -> current.replaceRange(span, replacement) }
     }
 
     fun tidy(room: RoomEdits, externalReferences: Set<String> = emptySet()): String {

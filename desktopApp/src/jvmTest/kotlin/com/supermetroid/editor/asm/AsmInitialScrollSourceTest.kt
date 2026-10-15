@@ -164,16 +164,20 @@ class AsmInitialScrollSourceTest {
         assertFails { AsmInitialScrollSource(text).resources(room.copy(scrollChanges = mutableListOf(ScrollChange(0, 0, 2, 1))), 2, 2) }
     }
 
-    @Test fun `source ownership persists and unsupported compound operations cannot partially change a room`() = runBlocking {
+    @Test fun `source ownership survives reciprocal resize and whole room reset undo`() = runBlocking {
         val f = fixture()
         val editor = f.editor()
         editor.setScroll(0, 0, 0, 2)
         val before = f.bridge.sourceText()
         val pixels = editor.workingLevelData!!.copyOf()
-        editor.resizeRoom(2, 2, 3, 2)
+        assertTrue(editor.resizeRoom(2, 2, 3, 2), editor.statusMessage)
+        assertEquals(48, editor.workingBlocksWide)
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
         assertEquals(32, editor.workingBlocksWide)
         assertContentEquals(pixels, editor.workingLevelData)
-        assertFalse(editor.resetCurrentRoomToOriginal(f.bridge.catalog.parser))
+        assertTrue(editor.resetCurrentRoomToOriginal(f.bridge.catalog.parser), editor.statusMessage)
+        assertFalse(f.project.rooms.getValue("91F8").hasEdits)
+        assertTrue(editor.undo(), editor.statusMessage)
         editor.setProjectRomBuildMode(ProjectRomBuildMode.PATCHED_ROM)
         assertEquals(ProjectRomBuildMode.ASM_SOURCE, f.project.asmWorkspace.buildMode)
         editor.setScroll(-1, 0, 1, 2)

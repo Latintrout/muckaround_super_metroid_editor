@@ -97,7 +97,7 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 | File | Contents |
 |------|----------|
-| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, selected-object placement vs. behavior links, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, reciprocal PLM, scroll-trigger, save-spawn, initial-scroll, ordinary FX and paired enemy population/GFX authoring (shared/private source authority, state isolation, shared undo and checked build ownership), atomic tile/PLM pattern strokes, guarded runtime-indexed Mother Brain FX, generated asset/room/patch inputs, Room Data/build reports, format checks, parity tests, and remaining compound operations, complete room-source authoring and runtime debugging. |
+| [`asm/reference_workspace.md`](asm/reference_workspace.md) | ASM reference and editable project workspace, source/asset navigation, selected-object placement vs. behavior links, pane-local Find and workspace search, Library, pinned cross-platform Asar builds, reciprocal PLM, scroll-trigger, save-spawn, initial-scroll, ordinary FX and paired enemy population/GFX authoring (shared/private source authority, state isolation, shared undo and checked build ownership), atomic tile/PLM pattern strokes and compound room generation, guarded runtime-indexed Mother Brain FX, generated asset/room/patch inputs, Room Data/build reports, format checks, parity tests, and remaining compound operations, complete room-source authoring and runtime debugging. |
 
 ### Project Planning (`docs/project/`)
 
@@ -196,6 +196,13 @@ in East Pants. Door ASM is entered with a synthetic JSR-style return and must en
 `RTS`; mixed scroll-plus-gameplay routines must not be replaced by scroll-only code.
 In the room scroll grid, orange corner markers/chips are touch-trigger outcomes and
 cyan corner markers/chips are possible incoming Door ASM initialization outcomes.
+
+In ASM mode, existing-room generation and resize share one source/layout history
+boundary; single-room reset now spans objects/scrolls, FX and enemies across all
+three authored banks. Reset restores native room data, while Undo restores source,
+ownership, state sharing and geometry together. Custom references/notes, global
+assets and unrelated rooms survive. Added-room projects and bulk reset remain
+guarded. See [compound reset](asm/reference_workspace.md#compound-room-reset).
 
 ## Background Programs and Embedded Layer 2
 

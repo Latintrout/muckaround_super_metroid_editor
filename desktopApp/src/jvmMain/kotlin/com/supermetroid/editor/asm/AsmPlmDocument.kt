@@ -60,37 +60,59 @@ internal data class AsmPlmDocument(
 
         /** Index a bank once per revision, not once per room on every recomposition. */
         class Source(val text: String) {
-            private val labels = labelPattern.findAll(text).groupBy { it.groupValues[1] }
+            private val declarations = labelPattern.findAll(text).toList()
+            private val labels = declarations.groupBy { it.groupValues[1] }
+            private val addressPattern = Regex(";8F([0-9A-Fa-f]{4});")
+            private val plmReferencePattern = Regex("%PLMPop\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\),?")
             private val addressLabels by lazy {
-                val addressPattern = Regex(";8F([0-9A-Fa-f]{4});")
-                buildMap {
-                    for (declaration in labels.values.flatten()) {
-                        if (!declaration.groupValues[1].startsWith("PLMPopulation_")) continue
-                        var address = addressPattern.find(declaration.value)
-                        var start = text.indexOf('\n', declaration.range.last + 1)
-                        // Only the first emitted line may supply a missing address annotation.
-                        while (address == null && start >= 0 && start + 1 < text.length) {
-                            start++
-                            val end = text.indexOf('\n', start).let { if (it < 0) text.length else it }
-                            val line = text.substring(start, end)
-                            if (line.substringBefore(';').isNotBlank()) {
-                                address = addressPattern.find(line)
-                                break
-                            }
-                            start = if (end == text.length) -1 else end
-                        }
-                        address?.groupValues?.get(1)?.toIntOrNull(16)?.let { pointer ->
-                            put(pointer, declaration.groupValues[1])
-                        }
+                declarations.filter { it.groupValues[1].startsWith("PLMPopulation_") }
+                    .mapNotNull { declaration -> annotatedPointer(declaration)?.let { it to declaration.groupValues[1] } }
+                    .groupBy({ it.first }, { it.second })
+            }
+            private val stateDeclarations by lazy {
+                declarations.withIndex().filter { it.value.groupValues[1].startsWith("RoomState_") }
+                    .mapNotNull { declaration -> annotatedPointer(declaration.value)?.let { it to declaration } }
+                    .groupBy({ it.first }, { it.second })
+            }
+
+            private fun annotatedPointer(declaration: MatchResult): Int? {
+                var address = addressPattern.find(declaration.value)
+                var start = text.indexOf('\n', declaration.range.last + 1)
+                // Only the first emitted line may supply a missing address annotation.
+                while (address == null && start >= 0 && start + 1 < text.length) {
+                    start++
+                    val end = text.indexOf('\n', start).let { if (it < 0) text.length else it }
+                    val line = text.substring(start, end)
+                    if (line.substringBefore(';').isNotBlank()) {
+                        address = addressPattern.find(line)
+                        break
                     }
+                    start = if (end == text.length) -1 else end
                 }
+                return address?.groupValues?.get(1)?.toIntOrNull(16)
             }
 
             fun parse(label: String, symbols: Map<String, Int>): AsmPlmDocument =
                 parseDeclaration(text, label, symbols, labels[label].orEmpty())
 
-            fun labelAtPointer(pointer: Int): String? {
-                return addressLabels[pointer]
+            fun labelsAtPointer(pointer: Int): List<String> = addressLabels[pointer].orEmpty()
+
+            fun labelAtPointer(pointer: Int): String? = labelsAtPointer(pointer).singleOrNull()
+
+            /** Follow a state's actual symbolic operand; population address comments can contain typos. */
+            fun plmLabelAtState(pointer: Int): String? {
+                val states = stateDeclarations[pointer].orEmpty()
+                if (states.isEmpty()) return null
+                require(states.size == 1) { "Multiple source room states are annotated at \$8F:${pointer.toString(16).uppercase()}." }
+                val state = states.single()
+                require(labels.getValue(state.value.groupValues[1]).size == 1) { "Duplicate source room-state label." }
+                val end = declarations.getOrNull(state.index + 1)?.range?.first ?: text.length
+                val code = text.substring(state.value.range.last + 1, end).lineSequence()
+                    .map { it.substringBefore(';').trim() }.filter { it.isNotEmpty() }.toList()
+                require(code.firstOrNull()?.startsWith("%StateHeader(") == true) { "Expected a source StateHeader declaration." }
+                val references = code.mapNotNull { plmReferencePattern.matchEntire(it)?.groupValues?.get(1) }
+                require(references.size == 1) { "Expected one symbolic PLMPop reference in ${state.value.groupValues[1]}." }
+                return references.single()
             }
         }
 

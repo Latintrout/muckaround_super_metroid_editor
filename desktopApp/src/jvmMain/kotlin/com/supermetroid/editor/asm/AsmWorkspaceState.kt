@@ -60,6 +60,15 @@ internal data class AsmSourcePaneState(
     val referenceMacro: AsmMacroId? = null,
 )
 
+/** Identity shared by every document in a compound edit. Notifications run only after commit. */
+internal class AsmSourceEditGroup(
+    val fileIds: Set<String>,
+    val beforeUndo: (() -> Unit)?,
+    val beforeRedo: (() -> Unit)?,
+    val afterUndo: (() -> Unit)?,
+    val afterRedo: (() -> Unit)?,
+)
+
 internal data class AsmSourceTextChange(
     val offset: Int,
     val removed: String,
@@ -67,6 +76,7 @@ internal data class AsmSourceTextChange(
     /** Ownership transitions and compound layout/source edits undo atomically with their text. */
     val beforeUndo: (() -> Unit)? = null,
     val beforeRedo: (() -> Unit)? = null,
+    val group: AsmSourceEditGroup? = null,
 ) {
     fun undo(text: String): String? = replaceExpected(text, inserted, removed)
     fun redo(text: String): String? = replaceExpected(text, removed, inserted)
@@ -765,6 +775,35 @@ internal class AsmWorkspaceState(
         editSessionSerial++
     }
 
+    /** Validate every document first, then publish one history boundary across all of them.
+     * Unchanged participants still receive an anchor: metadata-only edits must remain undoable,
+     * and a newer edit in any participating bank must block a partial compound undo. */
+    fun replaceProjectSources(
+        replacements: Map<String, Pair<String, String>>,
+        beforeUndo: (() -> Unit)? = null,
+        beforeRedo: (() -> Unit)? = null,
+        afterUndo: (() -> Unit)? = null,
+        afterRedo: (() -> Unit)? = null,
+        beforeApply: (() -> Unit)? = null,
+        afterApply: (() -> Unit)? = null,
+    ) {
+        check(!busy && projectWorkspace != null) { "ASM workspace is busy or unavailable." }
+        require(replacements.isNotEmpty()) { "A source transaction needs at least one document." }
+        for ((id, texts) in replacements) check(projectSourceText(id) == texts.first) {
+            "Source $id changed while this edit was open. Try again."
+        }
+        val group = AsmSourceEditGroup(replacements.keys.toSet(), beforeUndo, beforeRedo, afterUndo, afterRedo)
+        beforeApply?.invoke()
+        for ((id, texts) in replacements) {
+            val change = (AsmSourceTextChange.between(texts.first, texts.second) ?: AsmSourceTextChange(0, "", ""))
+                .copy(group = group)
+            recordSourceUndo(id, texts.first, texts.second, change)
+            applySourceEditText(id, texts.second)
+        }
+        editSessionSerial++
+        notifySourceTransition(afterApply)
+    }
+
     fun updateSourceEditText(fileId: String, text: String, undoChange: AsmSourceTextChange? = null) {
         if (workspaceKind != AsmWorkspaceKind.PROJECT || workspace?.index?.file(fileId) == null) return
         val previous = sourceEditText(fileId)
@@ -820,6 +859,7 @@ internal class AsmWorkspaceState(
         val selectedId = fileId ?: return false
         val undo = sourceUndoStacks[selectedId] ?: return false
         val change = undo.lastOrNull() ?: return false
+        change.group?.let { return moveSourceGroup(it, undoing = true) }
         val current = sourceEditText(selectedId)
         val restored = change.undo(current) ?: return false
         try { change.beforeUndo?.invoke() } catch (problem: Exception) {
@@ -837,6 +877,7 @@ internal class AsmWorkspaceState(
         val selectedId = fileId ?: return false
         val redo = sourceRedoStacks[selectedId] ?: return false
         val change = redo.lastOrNull() ?: return false
+        change.group?.let { return moveSourceGroup(it, undoing = false) }
         val current = sourceEditText(selectedId)
         val restored = change.redo(current) ?: return false
         try { change.beforeRedo?.invoke() } catch (problem: Exception) {
@@ -848,6 +889,43 @@ internal class AsmWorkspaceState(
         applySourceEditText(selectedId, restored)
         editSessionSerial++
         return true
+    }
+
+    private fun moveSourceGroup(group: AsmSourceEditGroup, undoing: Boolean): Boolean {
+        val from = if (undoing) sourceUndoStacks else sourceRedoStacks
+        val to = if (undoing) sourceRedoStacks else sourceUndoStacks
+        val staged = linkedMapOf<String, Pair<AsmSourceTextChange, String>>()
+        try {
+            for (id in group.fileIds) {
+                val change = requireNotNull(from[id]?.lastOrNull()) { "Source history is unavailable in $id; no part of this transaction was changed." }
+                require(change.group === group) {
+                    "Source history changed in $id; ${if (undoing) "undo" else "redo"} newer edits there first. No part of this transaction was changed."
+                }
+                val text = sourceEditText(id)
+                val restored = if (undoing) change.undo(text) else change.redo(text)
+                requireNotNull(restored) { "Source $id changed; cannot restore this transaction safely." }
+                staged[id] = change to restored
+            }
+            (if (undoing) group.beforeUndo else group.beforeRedo)?.invoke()
+        } catch (problem: Exception) {
+            error = problem.message ?: "Cannot restore this source/model transaction safely."
+            return false
+        }
+        for ((id, entry) in staged) {
+            from.getValue(id).removeAt(from.getValue(id).lastIndex)
+            to.getOrPut(id, ::mutableListOf).add(entry.first)
+            applySourceEditText(id, entry.second)
+        }
+        editSessionSerial++
+        // Preview notifications cannot roll back an already committed source/model transaction.
+        notifySourceTransition(if (undoing) group.afterUndo else group.afterRedo)
+        return true
+    }
+
+    private fun notifySourceTransition(notification: (() -> Unit)?) {
+        try { notification?.invoke() } catch (problem: Exception) {
+            error = "Source changed, but preview refresh failed: ${problem.message}"
+        }
     }
 
     fun publishLiveDiagnostics(
@@ -872,7 +950,9 @@ internal class AsmWorkspaceState(
     fun projectSourceTextsExcept(fileId: String): Sequence<String> =
         projectSourceReadersExcept(fileId).asSequence().map { it() }
 
-    fun projectSourceReadersExcept(fileId: String): List<() -> String> {
+    fun projectSourceReadersExcept(fileId: String): List<() -> String> = projectSourceReadersExcept(setOf(fileId))
+
+    fun projectSourceReadersExcept(fileIds: Set<String>): List<() -> String> {
         val project = projectWorkspace ?: return emptyList()
         val originals = java.io.File(project.originalDirectory, "src")
         val sources = originals.walkTopDown().filter { it.isFile && it.extension.equals("asm", true) }
@@ -880,7 +960,7 @@ internal class AsmWorkspaceState(
         project.projectModuleFileIds.forEach { id ->
             sources[id] = java.io.File(project.root, "modules/${id.removePrefix(ASM_PROJECT_MODULE_PREFIX)}")
         }
-        return sources.filterKeys { it != fileId }.map { (id, original) ->
+        return sources.filterKeys { it !in fileIds }.map { (id, original) ->
             // This cannot depend on the IDE index: it may be partial or still rebuilding.
             // Unchanged buffers also cannot hide a newer external authored edit.
             val buffered = sourceBuffers[id]?.takeIf { id in dirtySourceFileIds }

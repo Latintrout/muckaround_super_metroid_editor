@@ -1282,8 +1282,7 @@ private fun RoomResizeRow(room: Room, editorState: EditorState) {
                 Surface(
                     modifier = Modifier.weight(1f).height(26.dp)
                         .clickable(enabled = changed) {
-                            editorState.resizeRoom(currentWidth, currentHeight, newWidth, newHeight)
-                            editingSize = false
+                            if (editorState.resizeRoom(currentWidth, currentHeight, newWidth, newHeight)) editingSize = false
                         },
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
                     color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,

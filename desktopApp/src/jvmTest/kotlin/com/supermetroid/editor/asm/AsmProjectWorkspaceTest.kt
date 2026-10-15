@@ -27,6 +27,62 @@ class AsmProjectWorkspaceTest {
         File(reference.root, "src/macros.asm").writeText("; macros\n")
     }
 
+    @Test fun `compound source undo is atomic from either bank and refuses newer edits`() = runBlocking {
+        val repository = AsmProjectWorkspaceRepository(emptyList(), emptyList())
+        val file = File(tempDirectory, "Compound.smedit").apply { writeText("{}") }
+        repository.initialize(file.path, roomReference())
+        val state = AsmWorkspaceState(projectRepository = repository)
+        state.bindProject(file.path, true)
+        val before = listOf(PLM_SOURCE_FILE, FX_SOURCE_FILE).associateWith { state.projectSourceText(it) }
+        var model = 1
+        var notifications = 0
+        val replacements = before.mapValues { (_, text) -> text to "$text; compound\n" }
+        state.replaceProjectSources(replacements,
+            beforeUndo = { check(model == 1); model = 0 }, beforeRedo = { check(model == 0); model = 1 },
+            afterUndo = { assertEquals(before, before.mapValues { state.projectSourceText(it.key) }); notifications++ },
+            afterRedo = { assertTrue(before.keys.all { state.projectSourceText(it).endsWith("; compound\n") }); notifications++ })
+        val fx = state.projectSourceText(FX_SOURCE_FILE)
+        state.replaceProjectSource(FX_SOURCE_FILE, fx, "$fx; newer\n")
+        assertFalse(state.undoSourceEdit(PLM_SOURCE_FILE))
+        assertEquals(1, model)
+        assertEquals(replacements.getValue(PLM_SOURCE_FILE).second, state.projectSourceText(PLM_SOURCE_FILE))
+        assertEquals(0, notifications)
+        assertTrue(state.undoSourceEdit(FX_SOURCE_FILE))
+        assertTrue(state.undoSourceEdit(PLM_SOURCE_FILE))
+        assertEquals(0, model)
+        assertEquals(before, before.mapValues { state.projectSourceText(it.key) })
+        assertTrue(state.redoSourceEdit(FX_SOURCE_FILE))
+        assertEquals(1, model)
+        assertEquals(2, notifications)
+        assertTrue(state.undoSourceEdit(FX_SOURCE_FILE))
+        state.replaceProjectSource(PLM_SOURCE_FILE, before.getValue(PLM_SOURCE_FILE), before.getValue(PLM_SOURCE_FILE) + "; branched\n")
+        assertFalse(state.redoSourceEdit(FX_SOURCE_FILE), "A discarded member redo must never partially restore another bank")
+        assertEquals(0, model)
+        assertEquals(before.getValue(FX_SOURCE_FILE), state.projectSourceText(FX_SOURCE_FILE))
+    }
+
+    @Test fun `compound source validation and callback failures leave every document and history unchanged`() = runBlocking {
+        val repository = AsmProjectWorkspaceRepository(emptyList(), emptyList())
+        val file = File(tempDirectory, "Guarded.smedit").apply { writeText("{}") }
+        repository.initialize(file.path, roomReference())
+        val state = AsmWorkspaceState(projectRepository = repository)
+        state.bindProject(file.path, true)
+        val plms = state.projectSourceText(PLM_SOURCE_FILE)
+        val fx = state.projectSourceText(FX_SOURCE_FILE)
+        assertThrows<IllegalStateException> {
+            state.replaceProjectSources(mapOf(PLM_SOURCE_FILE to (plms to "lost"), FX_SOURCE_FILE to ("stale" to "lost")))
+        }
+        assertEquals(plms, state.projectSourceText(PLM_SOURCE_FILE))
+        assertFalse(state.canUndoSource(PLM_SOURCE_FILE))
+        state.replaceProjectSources(mapOf(PLM_SOURCE_FILE to (plms to plms), FX_SOURCE_FILE to (fx to "$fx; changed\n")),
+            beforeUndo = { error("Newer room metadata must be undone first") })
+        val head = state.sourceUndoHead(PLM_SOURCE_FILE)
+        assertFalse(state.undoSourceEdit(PLM_SOURCE_FILE))
+        assertSame(head, state.sourceUndoHead(PLM_SOURCE_FILE))
+        assertEquals("$fx; changed\n", state.projectSourceText(FX_SOURCE_FILE))
+        assertFalse(state.canRedoSource(FX_SOURCE_FILE))
+    }
+
     @Test fun `late global reference loading does not lock project edits or replace the project view`() = runBlocking {
         val repository = AsmProjectWorkspaceRepository(emptyList(), starterModules = emptyList())
         val file = File(tempDirectory, "Global Reference.smedit").apply { writeText("{}") }

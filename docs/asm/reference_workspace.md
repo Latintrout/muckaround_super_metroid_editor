@@ -854,12 +854,19 @@ below preserves those differences instead of flattening them into one shared tab
 
 ### Selected-object navigation
 
-Click an item/PLM on the room canvas, then **ASM** next to its name. In source
+Right-click an item/PLM's tile on the room canvas, find **Items / PLMs** in the
+tile properties panel, then click **ASM** next to its name. In source
 mode, navigation verifies the selected room/state's list identity and matches
 the full ID/X/Y/parameter tuple against the **current buffer**, including unsaved
 changes. It highlights the matching entry rather than stopping at the population
 label or opening the shared behavior definition. Identical duplicate records,
 invalid drafts, ownership conflicts and unmatched states are not guessed.
+
+Original list identity follows the room state's symbolic `%PLMPop` reference,
+verified against the base ROM's complete list. This recovers the missile-refill
+and Big Pink lists despite their duplicated `$8F:8550` population annotations in
+the pinned reference. Address-only lookup retains all candidates and requires a
+unique full-list ROM match; conflicting state references remain unavailable.
 
 For a supported GUI-managed room, this action now automatically migrates its
 complete effective object lists into project source, then opens the selected entry.
@@ -1072,8 +1079,8 @@ dirty source banks and checks already-saved managed room blocks for cleanup.
 
 Current boundaries: this conversion supports existing rooms in projects without
 added rooms. Changed resource links, conflicting
-original-source edits and arbitrary macro expressions still need review. Mixed tile/PLM operations
-and whole-room reset are guarded until their compound source transactions exist.
+original-source edits and arbitrary macro expressions still need review. Compound
+tile/PLM operations and whole-room reset now use the transactions described below.
 Original fixed-layout declarations retain their earlier count/address restriction;
 the appended managed lists support growth/shrinkage and state-local detachment.
 This is **object-source migration, not full room-header/selector/level-data source
@@ -1312,10 +1319,10 @@ ownership guards; `asmBuildIntegrationTest --tests '*initial screen scrolls*'`
 checks real Asar output, coexistence with PLM authoring, sentinel materialization,
 new-state graph relocation, ordinary patches and base-ROM immutability.
 
-Current boundaries: project-created rooms, whole-room reset/resize and compound
-generation changing an adopted initial grid are guarded rather than partially
-translated. A joint source-aware resize/generation transaction and explicit
-re-sharing controls are future work.
+Current boundaries: project-created rooms are guarded rather than partially
+translated. Room generation, resizing and reset now have joint
+source/layout transactions (see below). Explicit re-sharing controls remain
+future work.
 
 ## Reciprocal room FX
 
@@ -1378,8 +1385,8 @@ two additional headers *after* Default, selected by her AI through `Load_FX_Entr
 (`$89:AB02`). Moving only the door-visible prefix would break her acid transitions.
 Adoption therefore blocks that native table without replacing source or metadata.
 Supporting it needs explicit indexed records/consumers, not a relaxed door parser.
-Project-created rooms and compound whole-room reset/FX generation remain guarded
-until they have a joint source transaction. Arbitrary expressions are not interpreted
+Project-created rooms and compound FX themes remain guarded. Whole-room reset
+has a joint source transaction (below). Arbitrary expressions are not interpreted
 by this first FX lens.
 
 Acceptance: in an ASM project use **Room Info → Default FX**, change water/height,
@@ -1458,8 +1465,8 @@ aliases, malformed/missing GFX, fifth transfers, macro layout changes, helper
 cleanup, headered claims and the complete native-table audit.
 `asmBuildIntegrationTest --tests '*authored enemy populations*'` proves real Asar
 composition with PLMs, scrolls, FX, new conditional states and ordinary patches in
-isolated projects. Project-created rooms and whole-room reset are intentionally
-guarded until those compound operations have stable reciprocal source identities.
+isolated projects. Project-created rooms remain guarded pending stable reciprocal
+source identities; existing-room reset now spans all authored resource banks.
 
 ## Compound tile / object pattern strokes
 
@@ -1493,14 +1500,123 @@ Objects can still be added when their decorative tile bytes already match.
 Scroll-trigger patterns remain explicitly guarded: a tile-only pattern does not
 carry a named command-list resource. Use **Add scroll trigger** for those. This
 slice does not imply that selecting/moving tiles also selects or moves actors or
-PLMs. Whole-room resize, generation/theme/reset, and added-room source identities
-remain separate compound operations with their existing guards.
+PLMs. Whole-room themes and added-room source identities retain their existing
+guards; the whole-room reset transaction is described below.
 
 `AsmPlmSourceBridgeTest` exercises staging, rollback, scopes, gate pairs, slots,
 cross-view undo, interrupted strokes, reopen and the ROM-only backend using
 synthetic fixtures. The real-Asar `authored enemy populations` integration also
 stamps patterns, undoes/redoes them, and checks the final geometry and PLMs in the
 same compiled ROM alongside enemies/GFX, FX, scrolls, new states and ROM patches.
+
+## Compound room generation
+
+In ASM mode, **Generate** and applying a reviewed learned-room candidate now
+combine layout changes, initial camera grids and scroll-PLM cleanup in one
+source/model transaction. If objects or grids still use GUI deltas, both
+adoptions are planned privately first. No source, ownership metadata or tiles
+change until the complete plan validates. One Undo/Redo from Rooms or ASM reverses
+the whole action, including adoption, legacy command maps and save-spawn overrides.
+The same layout sidecar used by pattern strokes owns the geometry history.
+
+Generation follows the existing layout-sharing choice. Choosing **This state**
+forks its layout; choosing all sharing states updates those states' initial grids
+and removes their old scroll triggers/extensions together. Unrelated layouts and
+their camera data are untouched. The generated camera grid is Blue above / Green
+on the bottom row, matching the existing generator policy. Target states retain
+their shared list/grid identities where possible; a shared subset forks once,
+and independent resources are never merged simply because their values match.
+
+States sharing a generated layout must have the same protected non-scroll
+objects, actor placements and effective geometry. If they differ, the status
+message asks for **This state** instead of guessing which branch's objects to
+protect. Malformed drafts, changed inputs, custom unsupported initial presets,
+or competing original PLM source block the entire operation. A later source undo
+also refuses to overwrite newer layout/state changes. Existing handwritten notes,
+custom references and save resources survive; only unreachable owned scroll
+helpers are collected. Source plans check the project source revision so a newer
+macro/custom reference cannot be overwritten by an older plan.
+
+Generated rooms persist ordinary resource-owned tile edits and authored Bank
+`$8F` PLM/grid values, not duplicate JSON values. Reopen, raw ASM edits, subsequent
+GUI edits, and checked compiled placements use the same existing lenses. ROM-only
+generation retains its delta backend. Bulk Generate/Reset skips source-owned
+rooms: bulk reset must not remove only geometry while leaving generated camera
+source behind. Use the single-room reset or Undo on the complete source transaction
+instead. Compound FX themes and added-room identities remain separate work.
+
+`AsmRoomGenerationSourceTest` covers atomic adoption, shared subsets, invalid
+drafts, stale plans, save preservation, cross-view undo, reopen, typed export,
+ordinary Generate and the ROM-only backend. The real-Asar integration
+`compound generated room data` builds the authored result with an ordinary ROM
+patch, then undoes adoption and builds the restored legacy inputs as well.
+
+## Compound room resize
+
+**Room Info → Size → Resize** now works with authored initial scroll grids.
+Room dimensions apply to every state: all Layer 1/BTS/embedded Layer 2 layouts
+and every physical initial grid resize together. Existing sharing and independent
+resource identities survive. New geometry is air and new camera cells are Blue;
+overlapping cells retain their values, literal/symbol spelling and handwritten notes.
+Private layout differences are rebased onto the resized native resource so Save,
+reopen and subsequent edits preserve the same result. Shrink followed by growth
+does not resurrect cropped tiles.
+
+The transaction adopts existing GUI object/grid values when needed, then remaps
+each scroll command by its old screen coordinates. Writes to cropped screens are
+removed. Named command sharing survives; original ROM streams become named room
+resources instead of being modified where other rooms may still reference them.
+Incoming Door ASM is remapped after all GUI DoorDefs are final during export.
+
+Shrinking refuses to strand previously in-room objects, actors, incoming-door
+destinations, incoming ASM scroll writes or save cameras outside the room. Mixed
+incoming routines that cannot be rewritten safely, invalid source, stale previews,
+unsupported dimensions (the existing initial-grid limit is 50 screens), and added
+room projects fail before publishing source, dimensions, metadata or geometry.
+An unsuccessful Apply leaves the resize controls open and reports the reason.
+
+Source and GUI undo/redo restore dimensions, layouts, grid/command declarations
+and any retired GUI inputs together. Newer room/layout edits, actor source changes,
+incoming door changes and active strokes prevent stale source undo from overwriting
+the current project. The base ROM remains unchanged. This adds no project schema or
+second persisted copy of authored camera values.
+
+`AsmRoomResizeSourceTest` covers sharing, independent layouts/commands, growth,
+cropping, adoption, invalid/stale inputs, reciprocal undo, save/actor/entrance guards,
+reopen and typed export. `asmBuildIntegrationTest --tests '*source room resize*'`
+checks real Asar output, an ordinary ROM patch, byte-identical layout/grid previews,
+remapped trigger commands and a subsequent build after undo.
+
+## Compound room reset
+
+**Generate → Reset room** now works for existing rooms in ASM-source projects.
+It restores the native room header, dimensions, state graph, layouts/BTS/embedded
+Layer 2, objects, initial scrolls, FX, enemies/GFX, doors and save-spawn records.
+Only this room's edit record is reset. Native state identities remain as lightweight
+metadata; source ownership and independent GUI overrides are retired together.
+Global palettes, patches, minimaps, other rooms and handwritten original-bank edits
+are deliberately not reset.
+
+The reset removes unreachable generated declarations across banks `$8F`, `$83`
+and `$A1`. Custom/disabled-module references pin helpers and their transitive
+dependencies, even across banks; handwritten notes and unknown custom declarations
+remain intact. Malformed macro envelopes fail before any transaction is published.
+This is a reset of room-editor-owned data, not a checkout of all ASM affecting a room.
+
+One shared undo boundary spans every participating bank and the complete room
+model. Undo/Redo from the canvas or any participating ASM bank restores all of them,
+including added states, resource sharing, prior ownership and the previously selected
+state. Older room-editor history remains usable after undoing reset. Newer edits in
+any participating bank, changed room metadata, external helper references, incoming
+doors or unfinished strokes block a stale transition without changing part of it.
+Incoming entrances on expanded screens must be moved before resetting dimensions.
+Projects containing added rooms and bulk reset remain guarded.
+
+`AsmRoomResetSourceTest` and `AsmProjectWorkspaceTest` cover cleanup, stale inputs,
+metadata-only transactions and reciprocal cross-bank history. The isolated real-Asar
+test `whole room source reset` builds the edited room, its native reset and its
+restored authored result, checking all resource families, save records, state graphs,
+an unrelated room/ROM patch and base-ROM immutability.
 
 ## Next layers
 
@@ -1523,8 +1639,8 @@ Follow-up work can now be incremental:
    GUI, including state exceptions and copy-on-write. Initial screen grids,
    scroll-trigger commands, paired save-spawn records and ordinary door/default FX
    now use the same authority contract, including paired enemy populations/GFX.
-   Tile/PLM pattern strokes now have an atomic source/layout undo boundary.
-   Next extend the remaining source-aware compound operations and one asset-owned graphics
+   Tile/PLM pattern strokes, room generation, resizing and reset now have atomic source/model undo boundaries.
+   Next extend source-aware compound themes and one asset-owned graphics
    example. Then extend full
    authoring to rewritten state graphs, level data, doors, headers, and state selectors;
    then give project-created rooms stable source

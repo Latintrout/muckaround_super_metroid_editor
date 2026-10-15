@@ -43,6 +43,215 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `whole room source reset and cross bank undo compile native and authored resources with real Asar`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        val native = parser.readRoomHeader(0x91F8)!!
+        val nativeStates = parser.parseRoomStatesWithData(native.roomId)
+        editor.loadRoom(native.roomId, parser, native)
+        editor.addPlm(0xB76F, 8, 8, 0x8000)
+        val slot = editor.workingPlms.single { it.id == 0xB76F }.param and 255
+        val nativeSave = parser.readSaveEntry(0, slot)!!.words()
+        val width = editor.workingBlocksWide / 16
+        editor.setScroll(0, 0, if (editor.workingScrolls[0] == 0) 1 else 0, width)
+        assertTrue(editor.ensureEnemySource("Landing Site"), editor.statusMessage)
+        val stateId = editor.currentPlmStateId()!!
+        editor.setRoomStateFxChange(stateId, com.supermetroid.editor.data.FxChange(fxType = 2, liquidSurfaceStart = 0x100), parser)
+        val added = editor.addRoomState(stateId, projectRoomStateCondition(ProjectRoomStateConditionKind.EVENT_SET, 0x0B), parser)
+        editor.switchRoomState(added, parser)
+        val actor = editor.workingEnemies.first()
+        editor.updateEnemy(actor, actor.copy(x = actor.x + 16, extra3 = 0x123))
+        assertTrue(editor.resizeRoom(native.width, native.height, native.width + 1, native.height), editor.statusMessage)
+        val room = project.rooms.getValue("91F8")
+        bridge.fx.migrate(0x9C89, "Brinstar main shaft")
+        val otherRoom = project.rooms.getValue("9C89")
+        val otherFx = bridge.fx.view(otherRoom.roomId, otherRoom.states.first().id).resource!!
+        project.patches += SmPatch("reset-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        suspend fun buildAndVerify(authored: Boolean) {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            val states = built.parseRoomStatesWithData(room.roomId)
+            val header = built.readRoomHeader(room.roomId)!!
+            assertEquals(if (authored) native.width + 1 else native.width, header.width)
+            assertEquals(if (authored) room.states.size else nativeStates.size, states.size)
+            if (authored) {
+                room.states.forEachIndexed { index, state ->
+                    val expectedObjects = bridge.managedView(room.roomId, state.id).document!!.entries
+                    val actualObjects = built.parsePlmSet(states[index].plmSetPtr)
+                    assertEquals(expectedObjects.size, actualObjects.size)
+                    expectedObjects.zip(actualObjects).forEach { (expected, actual) ->
+                        assertEquals(expected, if (expected.id == 0xB703) actual.copy(param = expected.param) else actual)
+                        if (expected.id == 0xB703) assertEquals(
+                            bridge.scrollCommands(room.roomId, state.id, expected).map { Triple(it.screenIndex, it.screenIndex % header.width, it.scrollValue) },
+                            RomParser.decodeScrollCommands(built, actual.param, header.width))
+                    }
+                    assertEquals(bridge.initialScrolls.view(room.roomId, state.id).resource!!.values,
+                        built.parseScrollData(states[index].scrollPtr, header.width, header.height).toList())
+                    assertEquals(bridge.fx.view(room.roomId, state.id).resource!!.entries, built.parseFxEntries(states[index].fxPtr))
+                    val expected = bridge.enemies.view(room.roomId, state.id).resource!!
+                    assertContentEquals(expected.population.bytes(), com.supermetroid.editor.rom.readSourceEnemyPopulation(built, states[index].enemySetPtr, "compiled").bytes())
+                    assertContentEquals(expected.graphics.bytes(), com.supermetroid.editor.rom.readSourceEnemyGraphics(built, states[index].enemyGfxPtr, "compiled").bytes())
+                    val base = nativeStates[state.sourceStateIndex ?: state.templateSourceStateIndex!!]
+                    assertContentEquals(resizeLevelData(parser.decompressLZ2(base.levelDataPtr), native.width, native.height, native.width + 1, native.height),
+                        built.decompressLZ2(states[index].levelDataPtr))
+                }
+                assertEquals(bridge.saveSpawn(room.roomId, 0, slot)!!.words, built.readSaveEntry(0, slot)!!.words())
+            } else {
+                nativeStates.zip(states).forEach { (base, actual) ->
+                    assertContentEquals(parser.decompressLZ2(base.levelDataPtr), built.decompressLZ2(actual.levelDataPtr))
+                    assertEquals(parser.parsePlmSet(base.plmSetPtr), built.parsePlmSet(actual.plmSetPtr))
+                    assertContentEquals(parser.parseScrollData(base.scrollPtr, native.width, native.height), built.parseScrollData(actual.scrollPtr, native.width, native.height))
+                    assertEquals(parser.parseFxEntries(base.fxPtr), built.parseFxEntries(actual.fxPtr))
+                    assertEquals(parser.parseEnemyPopulation(base.enemySetPtr), built.parseEnemyPopulation(actual.enemySetPtr))
+                    assertEquals(parser.parseEnemyGfxSet(base.enemyGfxPtr), built.parseEnemyGfxSet(actual.enemyGfxPtr))
+                }
+                assertEquals(parser.inspectRoomStates(room.roomId).states.map { it.condition }, built.inspectRoomStates(room.roomId).states.map { it.condition })
+                assertEquals(nativeSave, built.readSaveEntry(0, slot)!!.words())
+            }
+            assertEquals(otherFx.entries, built.parseFxEntries(built.parseRoomStatesWithData(otherRoom.roomId).first().fxPtr))
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify(true)
+        val banks = listOf(PLM_SOURCE_FILE, FX_SOURCE_FILE, com.supermetroid.editor.asm.ENEMY_SOURCE_FILE)
+        val sources = banks.associateWith { workspace.projectSourceText(it) }
+        val metadata = com.supermetroid.editor.asm.snapshotRoomForResize(room)
+        assertTrue(editor.resetCurrentRoomToOriginal(parser), editor.statusMessage)
+        assertFalse(project.rooms.getValue("91F8").hasEdits)
+        buildAndVerify(false)
+        assertTrue(workspace.undoSourceEdit(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE), workspace.error)
+        assertEquals(metadata, project.rooms["91F8"])
+        assertEquals(sources, banks.associateWith { workspace.projectSourceText(it) })
+        buildAndVerify(true)
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertFalse(project.rooms.getValue("91F8").hasEdits)
+    }
+
+    @Test fun `source room resize compiles grids triggers and geometry with reciprocal undo and ordinary patches`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        val native = parser.readRoomHeader(0xACB3)!!
+        editor.loadRoom(native.roomId, parser, native)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.addScrollTriggerWithCommands(8, 8, listOf(com.supermetroid.editor.data.ScrollCommand(native.width + 1, 0)))
+        editor.setTileProperties(12, 12, 0, 3)
+        val before = editor.workingLevelData!!.copyOf()
+        val oldGrid = editor.workingScrolls.copyOf()
+        val source = bridge.sourceText()
+        assertTrue(editor.resizeRoom(native.width, native.height, native.width + 1, native.height), editor.statusMessage)
+        val expected = resizeLevelData(before, native.width, native.height, native.width + 1, native.height)
+        assertContentEquals(expected, editor.workingLevelData)
+        val room = project.rooms.getValue("ACB3")
+        project.patches += SmPatch("resize-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        suspend fun buildAndVerify(width: Int, pixels: ByteArray, grid: IntArray) {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            assertEquals(width, built.readRoomHeader(room.roomId)!!.width)
+            room.states.zip(built.parseRoomStatesWithData(room.roomId)).forEach { (state, runtime) ->
+                assertContentEquals(pixels, built.decompressLZ2(runtime.levelDataPtr))
+                assertContentEquals(grid, built.parseScrollData(runtime.scrollPtr, width, native.height))
+                val trigger = built.parsePlmSet(runtime.plmSetPtr).single { it.id == 0xB703 && it.x == 8 && it.y == 8 }
+                assertEquals(listOf(Triple(width + 1, 1, 0)), RomParser.decodeScrollCommands(built, trigger.param, width))
+                if (room.asmInitialScrollSourceVersion != 0) assertEquals(grid.toList(), bridge.initialScrolls.view(room.roomId, state.id).resource!!.values)
+            }
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify(native.width + 1, expected, editor.workingScrolls.copyOf())
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertEquals(source, bridge.sourceText())
+        assertContentEquals(before, editor.workingLevelData)
+        buildAndVerify(native.width, before, oldGrid)
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertContentEquals(expected, editor.workingLevelData)
+    }
+
+    @Test fun `compound generated room data adopts and undoes with real Asar and ordinary ROM patches`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        editor.loadRoom(0xACB3, parser, parser.readRoomHeader(0xACB3)!!)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.addScrollTriggerWithCommands(8, 8, listOf(com.supermetroid.editor.data.ScrollCommand(0, 0)))
+        editor.addPlm(0xB647, 8, 9, 0x8000)
+        assertTrue(editor.workingPlms.any { it.id == 0xB703 }, editor.statusMessage)
+        val beforePixels = editor.workingLevelData!!.copyOf()
+        val beforeObjects = editor.workingPlms.toList()
+        val beforeGrid = editor.workingScrolls.copyOf()
+        val old = editor.readBlockWord(12, 12)
+        val width = editor.workingBlocksWide / 16
+        val height = editor.workingBlocksTall / 16
+        val scrolls = editor.workingScrolls.toList().mapIndexedNotNull { index, value ->
+            val target = if (index / width == height - 1) 2 else 1
+            if (value == target) null else com.supermetroid.editor.data.ScrollChange(index % width, index / width, value, target)
+        }
+        val removals = editor.workingPlms.filter { RomParser.isScrollPlm(it.id) }.map { PlmChange("remove", it.id, it.x, it.y, it.param) }
+        assertTrue(editor.applyGeneratedRoomOperation("Generate biome (real Asar fixture)",
+            listOf(com.supermetroid.editor.data.TileEdit(12, 12, old, old xor 1, editor.readBts(12, 12), editor.readBts(12, 12))), scrolls, removals), editor.statusMessage)
+        val afterPixels = editor.workingLevelData!!.copyOf()
+        val room = project.rooms.getValue("ACB3")
+        assertEquals(1, room.asmPlmSourceVersion)
+        assertEquals(1, room.asmInitialScrollSourceVersion)
+        project.patches += SmPatch("generation-test-patch", "Independent ROM patch", enabled = true,
+            writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x42))))
+        suspend fun buildAndVerify(pixels: ByteArray, sourceOwned: Boolean) {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            val states = built.parseRoomStatesWithData(room.roomId)
+            room.states.forEachIndexed { index, state ->
+                assertContentEquals(pixels, built.decompressLZ2(states[index].levelDataPtr))
+                if (sourceOwned) {
+                    assertEquals(bridge.managedView(room.roomId, state.id).document!!.entries, built.parsePlmSet(states[index].plmSetPtr))
+                    assertEquals(bridge.initialScrolls.view(room.roomId, state.id).resource!!.values,
+                        built.parseScrollData(states[index].scrollPtr, width, height).toList())
+                    assertTrue(built.parsePlmSet(states[index].plmSetPtr).none { RomParser.isScrollPlm(it.id) })
+                } else {
+                    val entries = built.parsePlmSet(states[index].plmSetPtr)
+                    assertTrue(entries.any { it.id == 0xB703 })
+                    val trigger = entries.single { it.id == 0xB703 && it.x == 8 && it.y == 8 }
+                    assertEquals(0, RomParser.decodeScrollCommands(built, trigger.param, width).first().third)
+                    assertContentEquals(beforeGrid, built.parseScrollData(states[index].scrollPtr, width, height))
+                }
+            }
+            assertEquals(0x42, result.resultRom[0x2FFFF0].toInt() and 255)
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify(afterPixels, true)
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(beforePixels, editor.workingLevelData)
+        assertEquals(beforeObjects, editor.workingPlms)
+        assertEquals(0, room.asmPlmSourceVersion)
+        assertEquals(0, room.asmInitialScrollSourceVersion)
+        buildAndVerify(beforePixels, false)
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertContentEquals(afterPixels, editor.workingLevelData)
+    }
+
     @Test fun `authored enemy populations and GFX compose with states PLMs and ROM patches with real Asar parity`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)

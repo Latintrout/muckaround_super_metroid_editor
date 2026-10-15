@@ -572,7 +572,7 @@ fun BiomeGeneratorPanel(
                 status = if (editorState.resetCurrentRoomToOriginal(rp)) {
                     "Reset room to original ROM state"
                 } else {
-                    "Could not reset room"
+                    editorState.statusMessage.ifBlank { "Could not reset room" }
                 }
             },
             modifier = Modifier.fillMaxWidth(),

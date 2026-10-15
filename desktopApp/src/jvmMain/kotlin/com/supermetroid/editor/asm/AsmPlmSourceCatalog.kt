@@ -51,14 +51,22 @@ internal class AsmPlmSourceCatalog(
     fun binding(pointer: Int): ProjectPlmSourceBinding {
         bindings[pointer]?.let { return it }
         require(pointer in 0x8000..0xFFFF && consumers[pointer].orEmpty().isNotEmpty()) { "No existing room owns this PLM list." }
-        val label = originalSource.labelAtPointer(pointer)
-            ?: error("No exact source declaration for this object list. Keep using ROM edits for now.")
-        val original = originalSource.parse(label, symbols)
-        require(original.entries == parser.parsePlmSet(pointer)) {
-            "$label does not match the base ROM. This list cannot be linked safely."
+        val stateLabels = consumers.getValue(pointer).mapNotNull {
+            originalSource.plmLabelAtState(parser.pcToSnes(it.statePc) and 0xFFFF)
+        }.distinct()
+        require(stateLabels.size <= 1) { "Room-state source references disagree about this PLM list. This list cannot be linked safely." }
+        val candidates = stateLabels.ifEmpty { originalSource.labelsAtPointer(pointer) }
+        require(candidates.isNotEmpty()) { "No exact source declaration for this object list. Keep using ROM edits for now." }
+        val entries = parser.parsePlmSet(pointer)
+        val original = if (candidates.size == 1) originalSource.parse(candidates.single(), symbols)
+        else candidates.mapNotNull { runCatching { originalSource.parse(it, symbols) }.getOrNull() }
+            .filter { it.entries == entries }.singleOrNull()
+            ?: error("No unique source declaration matches this PLM list in the base ROM. This list cannot be linked safely.")
+        require(original.entries == entries) {
+            "${original.label} does not match the base ROM. This list cannot be linked safely."
         }
         originalDocuments[pointer] = original
-        return ProjectPlmSourceBinding(label, pointer, original.entries.size).also { bindings[pointer] = it }
+        return ProjectPlmSourceBinding(original.label, pointer, original.entries.size).also { bindings[pointer] = it }
     }
 
     fun document(binding: ProjectPlmSourceBinding, source: String, macros: String): AsmPlmDocument {

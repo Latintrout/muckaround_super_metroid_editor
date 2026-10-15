@@ -253,8 +253,7 @@ class ProjectRoomExporter(
             }
 
             if (isResized && effectiveWidth != room.width) {
-                applyResizedScrollCommandRemap(roomKey, roomId, room, effectiveWidth, effectiveHeight)
-                applyResizedDoorAsmRemap(roomKey, roomId, room, effectiveWidth, effectiveHeight)
+                if (roomEdits.asmPlmSourceVersion == 0) applyResizedScrollCommandRemap(roomKey, roomId, room, effectiveWidth, effectiveHeight)
             }
 
             if (roomEdits.fxChange != null) {
@@ -339,6 +338,15 @@ class ProjectRoomExporter(
                     roomsPatched.add(roomKey)
                 }
             }
+        }
+
+        // All DoorDefs must be final before remapping: a later room's door edit must
+        // not replace an already remapped routine or introduce an unprocessed entrance.
+        for ((roomKey, edits) in project.rooms) {
+            val room = romParser.readRoomHeader(edits.roomId) ?: continue
+            val width = edits.roomHeaderChange?.width ?: room.width
+            val height = edits.roomHeaderChange?.height ?: room.height
+            if (width != room.width) applyResizedDoorAsmRemap(roomKey, edits.roomId, room, width, height)
         }
 
         return ProjectRoomExportResult(
@@ -618,7 +626,7 @@ class ProjectRoomExporter(
 
         var wrote = false
         for ((levelPtr, statesForPtr) in ptrToStates) {
-            val decompressed = runCatching { romParser.decompressLZ2WithSize(levelPtr) }.getOrNull()
+            val decompressed = runCatching { RomParser(romData).decompressLZ2WithSize(levelPtr) }.getOrNull()
             if (decompressed == null) {
                 failExport("Room 0x$roomKey level data \$${levelPtr.toString(16)} could not be decompressed")
             }
@@ -1561,13 +1569,14 @@ class ProjectRoomExporter(
         effectiveWidth: Int,
         effectiveHeight: Int,
     ) {
-        val incomingDoors = romParser.findDoorsLeadingTo(roomId)
+        val current = RomParser(romData)
+        val incomingDoors = current.findDoorsLeadingTo(roomId)
         val generatedAsmPtrs = mutableMapOf<Int, Int>()
         for (door in incomingDoors) {
             if (door.entryCode == 0 || door.entryCode == 0xFFFF) continue
             if (door.entryCode in generatedAsmPtrs) continue
 
-            val analysis = analyzeDoorScrollAsm(romParser, door.entryCode)
+            val analysis = analyzeDoorScrollAsm(current, door.entryCode)
             val writes = analysis.writes
             if (writes.isEmpty()) continue
             if (!analysis.isPureScrollRoutine) failExport(
@@ -1605,14 +1614,14 @@ class ProjectRoomExporter(
 
         if (generatedAsmPtrs.isEmpty()) return
 
-        for (info in RoomRepository().getAllRooms()) {
+        for (info in current.roomCatalog.rooms) {
             val sourceId = info.getRoomIdAsInt()
-            val sourceRoom = romParser.readRoomHeader(sourceId) ?: continue
+            val sourceRoom = current.readRoomHeader(sourceId) ?: continue
             if (sourceRoom.doorOut == 0) continue
-            val doors = romParser.parseDoorList(sourceRoom.doorOut)
+            val doors = current.parseDoorList(sourceRoom.doorOut)
             for ((doorIndex, door) in doors.withIndex()) {
                 if (door.destRoomPtr == roomId && door.entryCode in generatedAsmPtrs) {
-                    val entryPc = romParser.doorEntryPcOffset(sourceRoom.doorOut, doorIndex) ?: continue
+                    val entryPc = current.doorEntryPcOffset(sourceRoom.doorOut, doorIndex) ?: continue
                     writeU16(romData, entryPc + 10, generatedAsmPtrs.getValue(door.entryCode))
                 }
             }
@@ -2781,6 +2790,7 @@ class ProjectRoomExporter(
         val newSize = if (oldLayer2Start != null) newLayer2Start + newBlocks * 2 else newBtsStart + newBlocks
         val out = ByteArray(newSize) { 0 }
         writeU16(out, 0, newLayer1Size)
+        for (index in 0 until newBlocks) writeU16(out, 2 + index * 2, RomConstants.AIR_TILE_WORD)
         for (y in 0 until min(oldBh, newBh)) {
             for (x in 0 until min(oldBw, newBw)) {
                 val oldIndex = y * oldBw + x

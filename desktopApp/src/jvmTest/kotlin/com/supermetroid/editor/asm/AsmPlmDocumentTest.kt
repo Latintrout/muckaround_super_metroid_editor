@@ -51,6 +51,13 @@ class AsmPlmDocumentTest {
         assertEquals("PLMPopulation_Empty", AsmPlmDocument.labelAtPointer("PLMPopulation_Empty:\n ; note\n dw 0 ;8F8040;", 0x8040))
     }
 
+    @Test fun `duplicate address comments retain every candidate without silently choosing one`() {
+        val text = source + "\nPLMPopulation_Other: ;8F8000;\n dw 0\n"
+        val index = AsmPlmDocument.Companion.Source(text)
+        assertEquals(listOf("PLMPopulation_Test", "PLMPopulation_Other"), index.labelsAtPointer(0x8000))
+        assertNull(index.labelAtPointer(0x8000))
+    }
+
     @Test fun `placement lookup selects the full record and its exact line with CRLF and comments`() {
         val text = source.replace("    dw", "    %PLMPopEntry(Item, 8, 9, 12) ; second missile\n    dw")
             .replace("\n", "\r\n")

@@ -191,7 +191,8 @@ class AsmFxSourceTest {
         editor.refreshLinkedPlms()
         assertNull(editor.fxPreviewProblem)
         assertEquals(6, editor.effectiveFxEntries(room.roomId, f.bridge.catalog.parser).last().fxType)
-        assertFalse(editor.resetCurrentRoomToOriginal(f.bridge.catalog.parser))
+        assertTrue(editor.resetCurrentRoomToOriginal(f.bridge.catalog.parser), editor.statusMessage)
+        assertTrue(editor.undo(), editor.statusMessage)
         editor.setProjectRomBuildMode(ProjectRomBuildMode.PATCHED_ROM)
         assertEquals(ProjectRomBuildMode.ASM_SOURCE, f.project.asmWorkspace.buildMode)
     }

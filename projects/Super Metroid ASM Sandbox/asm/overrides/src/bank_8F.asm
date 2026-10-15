@@ -15633,7 +15633,6 @@ macro SmeditObjects_91F8_List_1()
     %PLMPopEntry($C842, $8E, $46, $9003) ; PLM: Door Cap: Grey Left
     %PLMPopEntry($C842, $8E, $16, $9004) ; PLM: Door Cap: Grey Left
     %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
-    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
     %PLMPopEntry($EEF7, $6D, $28, $0056) ; PLM: Speed Booster (Visible)
     %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
     %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)
@@ -15654,7 +15653,6 @@ macro SmeditObjects_91F8_List_2()
     %PLMPopEntry($C872, $8E, $46, $0000) ; PLM: Door Cap: Green Left
     %PLMPopEntry($C85A, $8E, $16, $0001) ; PLM: Door Cap: Yellow Left
     %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
-    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
     %PLMPopEntry($EEF7, $6D, $28, $0056) ; PLM: Speed Booster (Visible)
     %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
     %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)
@@ -15674,7 +15672,6 @@ macro SmeditObjects_91F8_List_3()
     %PLMPopEntry($B647, $1E, $25, $8000) ; PLM: Scroll ext ↑
     %PLMPopEntry($C872, $8E, $46, $0000) ; PLM: Door Cap: Green Left
     %PLMPopEntry($EF0B, $38, $49, $0057) ; PLM: Gravity Suit (Visible)
-    %PLMPopEntry($F300, $4D, $27, $0055) ; PLM: Hyper Beam (Visible)
     %PLMPopEntry($EF23, $52, $4A, $005C) ; PLM: Morph Ball (Visible)
     %PLMPopEntry($C8A2, $8E, $17, $0000) ; PLM: Door Cap: Blue Left
     %PLMPopEntry($EEDB, $71, $10, $0051) ; PLM: Missile (Visible)

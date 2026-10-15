@@ -76,7 +76,7 @@ Equal `GRAPHADR` pointers alone do not authorize sharing: the engine matches GFX
 entries by species ID. Invalid drafts remain saveable, retain the last valid live
 preview and block stale GUI writes/builds. Original source table, pointer, selector
 or loader changes cannot be silently hidden by the authored replacements.
-Project-created rooms, whole-room reset and mixed old-ROM/source undo remain
+Project-created rooms and mixed old-ROM/source undo remain
 explicit guarded boundaries. This is byte/ownership parity, not simulation of AI
 or proof that arbitrary companion arrangements form a playable encounter.
 
@@ -116,7 +116,7 @@ drafts cannot be overwritten by GUI, and Build checks whole bank-$83 allocations
 state `+$06` pointers and actual Asar bytes alongside existing ROM patches.
 The map previews Default, not entrance-specific or later runtime changes.
 Mother Brain's after-Default runtime-indexed FX records, custom header/dispatch
-layouts, added-room adoption and compound generation/reset are explicit guarded
+layouts, added-room adoption and compound FX themes are explicit guarded
 boundaries. See [room FX authoring](../asm/reference_workspace.md#reciprocal-room-fx).
 
 Initial Screen Scrolls are also reciprocal in ASM projects. A grid change or its
@@ -129,8 +129,34 @@ clone their template's table, and reorderings retain stable state identities.
 Invalid drafts remain saveable but block GUI writes; last-good previews are marked
 with the problem. Checked allocations, symbolic state pointers and compiled-byte
 parity compose with the existing PLM/save/trigger and ordinary ROM-patch paths.
-Whole-room reset, resize and combined generation involving an adopted initial grid
-remain explicitly guarded until they have a joint source transaction.
+Room generation now combines geometry, initial grids and scroll-trigger cleanup
+in one source/model transaction, including any needed adoption. Acknowledged
+sharing updates camera data for the same layout's states; a private layout limits
+the action to that state. Sharing states with different protected objects, actors
+or private geometry require an independent layout rather than a guessed merge.
+Source undo restores retired GUI inputs as well as geometry; stale/malformed
+inputs change nothing. Bulk Generate/Reset skips source-owned rooms. Compound FX
+themes remain guarded. See
+[compound room generation](../asm/reference_workspace.md#compound-room-generation).
+
+Room resize now applies to every state's layout, authored initial grid and scroll
+trigger commands in one source/model transaction. Shared and independent resource
+identities and private geometry survive; new cells use air/Blue and cropped screens
+are removed from command lists. Incoming Door ASM follows the final door graph at
+export. Shrinks that strand objects, actors, entrances, incoming scroll writes or
+save cameras are rejected before mutation. GUI and ASM undo restore dimensions,
+source and prior ownership together, with guards against newer room, actor-source
+and incoming-door edits. The existing 50-screen grid limit and added-room source
+identity boundary remain. See [compound room resize](../asm/reference_workspace.md#compound-room-resize).
+
+Single-room reset now retires every source ownership marker and restores native
+header/state/layout/resource data through one cross-bank source/model transaction.
+The clean record retains only native state identities. Undo from the canvas or
+any participating bank restores the original room object, added states, sharing,
+authored declarations and previous editor history. Newer source/model/dependency
+edits block the entire undo, never just one bank. Custom references retain their
+helpers; global assets and other rooms stay untouched. Added-room projects and
+bulk reset remain guarded. See [compound room reset](../asm/reference_workspace.md#compound-room-reset).
 
 ASM projects automatically recognize supported source-only PLM edits against the
 immutable baseline; no per-room linking is required. For that bounded pilot the
