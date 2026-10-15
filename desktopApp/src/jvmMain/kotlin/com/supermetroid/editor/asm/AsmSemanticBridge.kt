@@ -26,7 +26,10 @@ internal data class AsmEditorLink(
 
 internal class AsmSemanticIndex internal constructor(
     private val linksByAddress: Map<Int, List<AsmEditorLink>>,
+    private val roomSourcesByAddress: Map<Int, List<AsmRoomSourceLink>> = emptyMap(),
 ) {
+    fun roomSourcesFor(snesAddress: Int): List<AsmRoomSourceLink> = roomSourcesByAddress[snesAddress].orEmpty().distinct()
+
     fun linksFor(snesAddress: Int, assetPath: String? = null): List<AsmEditorLink> =
         (linksByAddress[snesAddress].orEmpty() + assetPathHints(assetPath))
             .distinctBy(AsmEditorLink::target)
@@ -57,6 +60,7 @@ internal class AsmSemanticIndex internal constructor(
 internal object AsmSemanticBridge {
     fun buildIndex(romParser: RomParser): AsmSemanticIndex {
         val byAddress = linkedMapOf<Int, MutableList<AsmEditorLink>>()
+        val roomSources = linkedMapOf<Int, MutableList<AsmRoomSourceLink>>()
         fun add(address: Int, link: AsmEditorLink) {
             byAddress.getOrPut(address) { mutableListOf() }.add(link)
         }
@@ -64,6 +68,11 @@ internal object AsmSemanticBridge {
         for (roomInfo in romParser.roomCatalog.rooms) {
             val roomId = roomInfo.getRoomIdAsInt()
             val roomTarget = AsmEditorTarget.Room(roomId)
+            fun source(address: Int, kind: RoomAsmSourceKind, stateIndex: Int? = null, detail: String = "Room-wide resource") {
+                roomSources.getOrPut(address) { mutableListOf() }.add(AsmRoomSourceLink(roomId, roomInfo.name, kind, stateIndex, detail))
+            }
+            val roomKinds = RoomAsmSourceKind.entries.filter { it != RoomAsmSourceKind.SAVE_SPAWN }
+            roomKinds.forEach { source(RomConstants.BANK_ROOM_DATA or roomId, it) }
             fun roomLink(detail: String) = AsmEditorLink("Open ${roomInfo.name}", detail, roomTarget)
             fun addRoomPointer(bank: Int, pointer: Int, detail: String) {
                 if (pointer in 0x8000..0xFFFE) add(bank or pointer, roomLink(detail))
@@ -84,12 +93,25 @@ internal object AsmSemanticBridge {
             }
 
             runCatching { romParser.parseRoomStatesWithData(roomId) }.getOrDefault(emptyList())
-                .forEach { state ->
+                .forEachIndexed { stateIndex, state ->
                     val stateName = state.stateInfo.conditionName
+                    val detail = "Native state ${stateIndex + 1} · $stateName"
+                    fun pointerSource(bank: Int, pointer: Int, kind: RoomAsmSourceKind) {
+                        if (pointer in 0x8000..0xFFFE) source(bank or pointer, kind, stateIndex, detail)
+                    }
                     runCatching { romParser.pcToSnes(state.stateInfo.stateDataPcOffset) }.getOrNull()?.let { address ->
                         add(address, roomLink("State record · $stateName"))
+                        roomKinds.forEach { source(address, it, stateIndex, detail) }
                     }
-                    state.levelDataPtr.takeIf { it != 0 }?.let { add(it, roomLink("Room layout · $stateName")) }
+                    state.levelDataPtr.takeIf { it != 0 }?.let {
+                        add(it, roomLink("Room layout · $stateName"))
+                        source(it, RoomAsmSourceKind.LAYOUT, stateIndex, detail)
+                    }
+                    pointerSource(RomConstants.BANK_FX, state.fxPtr, RoomAsmSourceKind.FX)
+                    pointerSource(RomConstants.BANK_ENEMY_SET, state.enemySetPtr, RoomAsmSourceKind.ENEMIES)
+                    pointerSource(RomConstants.BANK_ENEMY_GFX, state.enemyGfxPtr, RoomAsmSourceKind.ENEMY_GRAPHICS)
+                    pointerSource(RomConstants.BANK_ROOM_DATA, state.scrollPtr, RoomAsmSourceKind.INITIAL_SCROLLS)
+                    pointerSource(RomConstants.BANK_ROOM_DATA, state.plmSetPtr, RoomAsmSourceKind.PLMS)
                     addRoomPointer(RomConstants.BANK_FX, state.fxPtr, "FX data · $stateName")
                     addRoomPointer(RomConstants.BANK_ENEMY_SET, state.enemySetPtr, "Enemy population · $stateName")
                     addRoomPointer(RomConstants.BANK_ENEMY_GFX, state.enemyGfxPtr, "Enemy graphics set · $stateName")
@@ -217,7 +239,7 @@ internal object AsmSemanticBridge {
             )
         }
 
-        return AsmSemanticIndex(byAddress.mapValues { (_, links) -> links.distinctBy(AsmEditorLink::target) })
+        return AsmSemanticIndex(byAddress.mapValues { (_, links) -> links.distinctBy(AsmEditorLink::target) }, roomSources)
     }
 
     fun linksFor(

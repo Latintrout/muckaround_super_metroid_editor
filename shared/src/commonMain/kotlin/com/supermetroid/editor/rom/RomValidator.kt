@@ -261,7 +261,7 @@ object RomValidator {
         for ((roomKey, edits) in project.rooms) {
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = rooms[roomId] ?: parser.readRoomHeader(roomId) ?: continue
-            val header = edits.roomHeaderChange ?: continue
+            val header = edits.effectiveHeaderChange ?: continue
             val area = header.area ?: room.area
             val width = header.width ?: room.width
             val height = header.height ?: room.height
@@ -314,7 +314,11 @@ object RomValidator {
         rooms: Map<Int, Room>,
     ): List<Issue> {
         val issues = mutableListOf<Issue>()
-        for ((roomKey, edits) in project.rooms) {
+        for ((roomKey, storedEdits) in project.rooms) {
+            val edits = if (storedEdits.asmStateSelectorsSourceVersion == 0) storedEdits else storedEdits.copy(
+                states = storedEdits.effectiveStates.map { it.copy(condition = it.effectiveCondition, conditionChanged = true, asmConditionProjection = null) }.toMutableList(),
+                stateGraphChanged = true,
+            )
             if (edits.states.isEmpty()) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = rooms[roomId] ?: parser.readRoomHeader(roomId) ?: continue
@@ -324,6 +328,8 @@ object RomValidator {
             fun warning(message: String) {
                 issues += Issue(Severity.WARNING, "Room States", roomId, room.name, message)
             }
+            // Source drafts are validated by their typed build inputs. A headless build has
+            // no GUI projection; its native provenance can still be checked here.
             if (edits.states.size > 64) {
                 error("The ordered state graph has ${edits.states.size} states; the supported maximum is 64")
             }
@@ -789,7 +795,7 @@ object RomValidator {
                         "Save station override points to missing room 0x${spawn.roomId.toString(16).uppercase()}."
                     ))
                 } else {
-                    val targetArea = project.rooms[project.roomKey(spawn.roomId)]?.roomHeaderChange?.area ?: targetRoom.area
+                    val targetArea = project.rooms[project.roomKey(spawn.roomId)]?.effectiveHeaderChange?.area ?: targetRoom.area
                     if (spawn.area != targetArea) {
                         issues.add(Issue(
                             Severity.ERROR, "AreaSave", sourceRoomId, sourceRoomName,
@@ -1152,9 +1158,9 @@ object RomValidator {
             val roomId = metadata.getRoomIdAsInt()
             val room = parser.readRoomHeader(roomId) ?: continue
             val edits = project.rooms[project.roomKey(roomId)]
-            val effectiveArea = edits?.roomHeaderChange?.area ?: room.area
-            val overrideTileset = edits?.stateDataChange?.tileset
-            val stateOverrideTilesets = edits?.states.orEmpty().mapNotNull { it.stateDataChange?.tileset }
+            val effectiveArea = edits?.effectiveHeaderChange?.area ?: room.area
+            val overrideTileset = edits?.effectiveStateDataChange?.tileset
+            val stateOverrideTilesets = edits?.states.orEmpty().mapNotNull { it.effectiveStateDataChange?.tileset }
             val stateOffsets = parser.findAllStateDataOffsets(roomId)
             val usesTileset = if (tilesetId in stateOverrideTilesets) {
                 true

@@ -103,9 +103,6 @@ internal object ProjectFileService {
     ): Boolean {
         if (projectFilePath.isEmpty()) return false
         return try {
-            val emptyKeys = project.rooms.entries.filter { !it.value.hasEdits }.map { it.key }
-            for (key in emptyKeys) project.rooms.remove(key)
-
             val projectFile = File(projectFilePath)
             if (projectFile.isFile) {
                 val existingVersion = runCatching {
@@ -122,6 +119,9 @@ internal object ProjectFileService {
             val paths = ProjectPaths(projectFile)
             val base = paths.resolveBaseRom(project.romPath)
             val portable = project.copy(
+                // Prune the serialized snapshot only. Source/GUI undo retains references to live room
+                // identities, including a room whose last ownership flag was just undone.
+                rooms = project.rooms.filterValues { it.hasEdits }.toMutableMap(),
                 romPath = paths.relativeBaseRom(base),
                 baseRom = project.baseRom ?: base.takeIf(File::isFile)?.let(ProjectLifecycle::identity),
             )
@@ -250,7 +250,7 @@ internal object ProjectFileService {
         onStatus: (String) -> Unit,
     ): AsmCompiledBuildBase? {
         if (project.asmWorkspace.buildMode == ProjectRomBuildMode.PATCHED_ROM) {
-            require(project.rooms.values.none { it.asmLayoutSourceVersion != 0 || it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 || it.asmEnemySourceVersion != 0 }) { "Authored room data requires ASM source mode." }
+            require(project.rooms.values.none { it.asmStateSelectorsSourceVersion != 0 || it.asmRoomPropertiesSourceVersion != 0 || it.asmLayoutSourceVersion != 0 || it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 || it.asmEnemySourceVersion != 0 }) { "Authored room data requires ASM source mode." }
             require(project.asmWorkspace.plmSourceBindings.isEmpty()) { "Linked room objects require ASM source mode." }
             val sourceEdits = if (project.asmWorkspace.enabled && projectFilePath.isNotBlank()) {
                 AsmProjectWorkspaceRepository().sourceOverrideFileIds(projectFilePath)
@@ -309,9 +309,15 @@ internal object ProjectFileService {
         val managedSource = AsmRoomObjectSource(linkedSource, linkedCatalog.symbols)
         val initialScrollSource = AsmInitialScrollSource(linkedSource, linkedCatalog.symbols)
         val layoutSource = com.supermetroid.editor.asm.AsmRoomLayoutSource(linkedSource)
+        val roomPropertiesSource = com.supermetroid.editor.asm.AsmRoomPropertiesSource(linkedSource)
+        val sourceRoomProperties = project.rooms.values.filter { it.asmRoomPropertiesSourceVersion != 0 }.associate { room ->
+            room.roomId to roomPropertiesSource.resource(room)
+        }
+        val selectorSource = com.supermetroid.editor.asm.AsmRoomSelectorsSource(linkedSource)
+        val sourceSelectors = project.rooms.values.filter { it.asmStateSelectorsSourceVersion != 0 }.associate { room -> room.roomId to selectorSource.resource(room) }
         val sourceLayouts = project.rooms.values.filter { it.asmLayoutSourceVersion != 0 }.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
-            room.roomId to layoutSource.resources(room, (room.roomHeaderChange?.width ?: header.width) * 16, (room.roomHeaderChange?.height ?: header.height) * 16)
+            room.roomId to layoutSource.resources(room, (room.effectiveHeaderChange?.width ?: header.width) * 16, (room.effectiveHeaderChange?.height ?: header.height) * 16)
         }
         val fxRooms = project.rooms.values.filter { it.asmFxSourceVersion != 0 }
         val sourceFx = if (fxRooms.isEmpty()) emptyMap() else {
@@ -320,7 +326,7 @@ internal object ProjectFileService {
         }
         val sourceInitialScrolls = project.rooms.values.filter { it.asmInitialScrollSourceVersion != 0 }.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
-            room.roomId to initialScrollSource.resources(room, room.roomHeaderChange?.width ?: header.width, room.roomHeaderChange?.height ?: header.height)
+            room.roomId to initialScrollSource.resources(room, room.effectiveHeaderChange?.width ?: header.width, room.effectiveHeaderChange?.height ?: header.height)
         }
         val enemyRooms = project.rooms.values.filter { it.asmEnemySourceVersion != 0 }
         val sourceEnemies = if (enemyRooms.isEmpty()) emptyMap() else {
@@ -347,7 +353,7 @@ internal object ProjectFileService {
         }
         val sourcePlmSets = managedRooms.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
-            room.roomId to managedSource.resources(room, (room.roomHeaderChange?.width ?: header.width) * (room.roomHeaderChange?.height ?: header.height))
+            room.roomId to managedSource.resources(room, (room.effectiveHeaderChange?.width ?: header.width) * (room.effectiveHeaderChange?.height ?: header.height))
         }
         val sourceScrolls = sourcePlmSets.values.flatMap { states -> states.values.flatMap { it.scrollReferences.values } }
             .groupBy { it.identity }.mapValues { (name, resources) ->
@@ -364,7 +370,7 @@ internal object ProjectFileService {
         val originalScrollInputs = linkedMapOf<Int, List<ScrollCommand>>()
         for (room in managedRooms) {
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
-            val screens = (room.roomHeaderChange?.width ?: header.width) * (room.roomHeaderChange?.height ?: header.height)
+            val screens = (room.effectiveHeaderChange?.width ?: header.width) * (room.effectiveHeaderChange?.height ?: header.height)
             for (resource in sourcePlmSets.getValue(room.roomId).values) resource.entries.forEachIndexed { index, entry ->
                 if (entry.id == 0xB703 && index !in resource.scrollReferences) {
                     val commands = AsmScrollCommandSource.original(linkedSource, linkedCatalog.symbols,
@@ -428,17 +434,34 @@ internal object ProjectFileService {
             sourceFx = sourceFx,
             sourceEnemies = sourceEnemies,
             sourceLayouts = sourceLayouts,
+            sourceRoomProperties = sourceRoomProperties,
+            sourceSelectors = sourceSelectors,
         ).build() ?: throw AsmCompilationException(
             planningLog.lastOrNull { it.startsWith("ERROR:") }
                 ?.removePrefix("ERROR: ")
                 ?: "Could not validate editor data against the compiled ASM source"
         )
+        // Pointer discovery must use the same source branch order as the private ROM encoder,
+        // including on a headless build with no GUI preview caches. Never reorder persisted identities.
+        val placementProject = project.copy(rooms = project.rooms.mapValuesTo(linkedMapOf()) { (_, room) ->
+            val selectors = sourceSelectors[room.roomId]
+            if (selectors == null) room else room.copy(
+                states = selectors.order.map { id -> room.states.single { it.id == id }.copy(
+                    condition = selectors.conditions.getValue(id), conditionChanged = true, asmConditionProjection = null,
+                ) }.toMutableList(),
+                stateGraphChanged = true, asmStateSelectorsSourceVersion = 0, asmSelectorOrderProjection = null,
+            )
+        })
         val roomMaterialization = AsmSourceRoomMaterializer().materialize(
-            project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves, sourceInitialScrolls, sourceFx, sourceEnemies,
+            placementProject, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves, sourceInitialScrolls, sourceFx, sourceEnemies,
         )
         require(sourceLayouts.keys.all { project.roomKey(it) in roomMaterialization.roomIds }) {
             "Authored layouts could not be included atomically in the ASM build; no ROM was produced."
         }
+        require(sourceRoomProperties.keys.all { project.roomKey(it) in roomMaterialization.roomIds }) {
+            "Authored room properties could not be included atomically in the ASM build; no ROM was produced."
+        }
+        require(sourceSelectors.keys.all { project.roomKey(it) in roomMaterialization.roomIds }) { "Selectors could not be included atomically; no ROM was produced." }
         val enemyIdentities = sourceEnemies.values.flatMap { it.values }.flatMap { listOf(it.population.identity, it.graphics.identity) }.toSet()
         require(roomMaterialization.enemyTables.map { it.identity }.toSet() == enemyIdentities &&
             roomMaterialization.enemyTables.sumOf { it.pointerOffsets.size } == sourceEnemies.values.sumOf { it.size * 2 }) {

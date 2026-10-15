@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -669,6 +670,18 @@ class AsmProjectWorkspaceTest {
         assertEquals(4, (state.locationSnapshot() as AsmWorkspaceLocation.Source).columnIndex)
         assertTrue(state.isProjectSourceEditable)
         assertFalse(state.sourceBuildRequired)
+        val bufferRevision = state.sourceBufferRevision
+        val inspected = AsmRoomSourceInspection(0x9879, "Layout ASM", "dw \$0200\n", stateId = "state-1", fileId = "bank_80.asm", startEditing = {})
+        state.openRoomSourceInspection(inspected)
+        assertFalse(state.isProjectSourceEditable)
+        assertFalse(state.sourceBuildRequired, "Inspection must retain a successful build without writing source")
+        assertFalse(state.hasProjectSourceChanges)
+        assertEquals(bufferRevision, state.sourceBufferRevision)
+        assertEquals(inspected, (state.locationSnapshot() as AsmWorkspaceLocation.RoomSourceInspection).snapshot)
+        state.updateSourceEditText("bank_80.asm", "must not replace the real bank")
+        assertFalse(state.sourceBuildRequired)
+        state.openSource("bank_80.asm", lineIndex = 3)
+        assertNull(state.roomSourceInspection)
         val original = state.sourceEditText("bank_80.asm")
         state.updateSourceEditText("bank_80.asm", "$original\n; project edit")
 

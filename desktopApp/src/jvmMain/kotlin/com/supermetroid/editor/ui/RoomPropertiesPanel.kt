@@ -102,6 +102,8 @@ fun RoomPropertiesPanel(
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
     onNavigateToLayoutSource: (() -> Unit)? = null,
+    onNavigateToRoomProperties: ((String?) -> Unit)? = null,
+    onNavigateToSelectors: ((String?) -> Unit)? = null,
     onNavigateToFx: ((String, Int?) -> Unit)? = null,
     onNavigateToEnemies: ((String, Boolean) -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
@@ -110,6 +112,8 @@ fun RoomPropertiesPanel(
     val asmLinkCallback = editorState.projectAsmNavigation(onNavigateToAsm)
     val initialScrollsLink = editorState.projectAsmNavigation(onNavigateToInitialScrolls)
     val layoutSourceLink = editorState.projectAsmNavigation(onNavigateToLayoutSource)
+    val propertiesSourceLink = editorState.projectAsmNavigation(onNavigateToRoomProperties)
+    val selectorsSourceLink = editorState.projectAsmNavigation(onNavigateToSelectors)
     val fxLink = editorState.projectAsmNavigation(onNavigateToFx)
     val enemiesLink = editorState.projectAsmNavigation(onNavigateToEnemies)
     val stateInspection = remember(room.roomId, romParser) { romParser.inspectRoomStates(room.roomId) }
@@ -155,11 +159,11 @@ fun RoomPropertiesPanel(
             .sortedWith(compareBy<ItemPickupConditionOption>({ !it.label.startsWith("Missile ") }, { it.id }))
     }
     val states = if (roomEdits?.states?.isNotEmpty() == true) {
-        roomEdits.states.map { state ->
+        roomEdits.effectiveStates.map { state ->
             RoomStateUiItem(
                 id = state.id,
                 baseSourceStateIndex = state.baseSourceStateIndex(),
-                condition = state.condition,
+                condition = state.effectiveCondition,
                 edits = state,
             )
         }
@@ -208,8 +212,8 @@ fun RoomPropertiesPanel(
             change?.musicTrack?.let { data["musicTrack"] = it }
             change?.bgScrolling?.let { data["bgScrolling"] = it }
         }
-        apply(roomEdits?.stateDataChange)
-        apply(state.edits?.stateDataChange)
+        apply(roomEdits?.effectiveStateDataChange)
+        apply(state.edits?.effectiveStateDataChange)
         data
     }
     val stateData = allStateData.getOrNull(selectedStateIdx).orEmpty()
@@ -257,8 +261,8 @@ fun RoomPropertiesPanel(
             paletteBlend = stateFx?.paletteBlend ?: commonFx?.paletteBlend,
         )
     } else null
-    val commonState = roomEdits?.stateDataChange
-    val stateState = selectedStateEdits?.stateDataChange
+    val commonState = roomEdits?.effectiveStateDataChange
+    val stateState = selectedStateEdits?.effectiveStateDataChange
     val savedState = if (stateState != null || commonState != null) {
         StateDataChange(
             tileset = stateState?.tileset ?: commonState?.tileset,
@@ -283,14 +287,15 @@ fun RoomPropertiesPanel(
     var editingDoorFx by remember(room.roomId, selectedStateItem?.id) { mutableStateOf<Int?>(null) }
 
     // State data edit state — keyed by (roomId, stateIdx) so fields reset on state switch
-    val origTileset = stateData["tileset"] ?: room.tileset
-    val origMusicData = stateData["musicData"] ?: room.musicData
-    val origMusicTrack = stateData["musicTrack"] ?: room.musicTrack
-    val origBgScrolling = stateData["bgScrolling"] ?: room.bgScrolling
-    var editTileset by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedState?.tileset ?: origTileset) }
-    var editMusicData by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedState?.musicData ?: origMusicData) }
-    var editMusicTrack by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedState?.musicTrack ?: origMusicTrack) }
-    var editBgScrolling by remember(room.roomId, selectedStateItem?.id) { mutableStateOf(savedState?.bgScrolling ?: origBgScrolling) }
+    val originalStateData = currentState?.stateDataPcOffset?.let(romParser::readStateData).orEmpty()
+    val origTileset = originalStateData["tileset"] ?: room.tileset
+    val origMusicData = originalStateData["musicData"] ?: room.musicData
+    val origMusicTrack = originalStateData["musicTrack"] ?: room.musicTrack
+    val origBgScrolling = originalStateData["bgScrolling"] ?: room.bgScrolling
+    var editTileset by remember(room.roomId, selectedStateItem?.id, savedState) { mutableStateOf(savedState?.tileset ?: origTileset) }
+    var editMusicData by remember(room.roomId, selectedStateItem?.id, savedState) { mutableStateOf(savedState?.musicData ?: origMusicData) }
+    var editMusicTrack by remember(room.roomId, selectedStateItem?.id, savedState) { mutableStateOf(savedState?.musicTrack ?: origMusicTrack) }
+    var editBgScrolling by remember(room.roomId, selectedStateItem?.id, savedState) { mutableStateOf(savedState?.bgScrolling ?: origBgScrolling) }
 
     fun syncFxToState() {
         val change = FxChange(
@@ -330,13 +335,13 @@ fun RoomPropertiesPanel(
     }
 
     // Room header edit state — all 11 bytes
-    val savedHeader = roomEdits?.roomHeaderChange
+    val savedHeader = roomEdits?.effectiveHeaderChange
     val effectiveArea = savedHeader?.area ?: room.area
     val displayMapX = savedHeader?.mapX ?: room.mapX
     val displayMapY = savedHeader?.mapY ?: room.mapY
-    var editUpScroller by remember(room.roomId) { mutableStateOf(savedHeader?.upScroller ?: room.upScroller) }
-    var editDownScroller by remember(room.roomId) { mutableStateOf(savedHeader?.downScroller ?: room.downScroller) }
-    var editCreBitflag by remember(room.roomId) { mutableStateOf(savedHeader?.creBitflag ?: room.creBitflag) }
+    var editUpScroller by remember(room.roomId, savedHeader) { mutableStateOf(savedHeader?.upScroller ?: room.upScroller) }
+    var editDownScroller by remember(room.roomId, savedHeader) { mutableStateOf(savedHeader?.downScroller ?: room.downScroller) }
+    var editCreBitflag by remember(room.roomId, savedHeader) { mutableStateOf(savedHeader?.creBitflag ?: room.creBitflag) }
 
     fun syncHeaderToState() {
         val change = (savedHeader ?: RoomHeaderChange()).copy(
@@ -344,7 +349,7 @@ fun RoomPropertiesPanel(
             downScroller = editDownScroller.takeIf { it != room.downScroller },
             creBitflag = editCreBitflag.takeIf { it != room.creBitflag },
         )
-        if (change == RoomHeaderChange()) {
+        if (change == RoomHeaderChange() && !editorState.hasManagedRoomProperties()) {
             editorState.project.getOrCreateRoom(room.roomId).roomHeaderChange = null
         } else {
             editorState.setRoomHeaderChange(change)
@@ -358,6 +363,11 @@ fun RoomPropertiesPanel(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        PropertyRow("Header", "Room scalars", propertiesSourceLink?.let { open -> { open(null) } })
+        PropertyRow("State fields", "Tileset, music, BG scrolling", propertiesSourceLink?.let { open -> { open(selectedStateItem?.id) } })
+        PropertyRow("Selectors", "Conditions / branch order", selectorsSourceLink?.let { open -> { open(selectedStateItem?.id) } })
+        editorState.selectorPreviewProblem?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = ROOM_INFO_BODY_FONT_SIZE) }
+        editorState.roomPropertiesPreviewProblem?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = ROOM_INFO_BODY_FONT_SIZE) }
         // ── Room Header (all 11 bytes editable) ──
         SectionHeader("Room Header")
         PropertyRow(
@@ -365,7 +375,7 @@ fun RoomPropertiesPanel(
             "0x${room.roomId.toString(16).uppercase().padStart(4, '0')}",
             asmLinkCallback?.let { navigate -> { navigate(RomConstants.BANK_ROOM_DATA or room.roomId) } },
         )
-        PropertyRow("Room Index", "0x${room.index.toString(16).uppercase().padStart(2, '0')}")
+        PropertyRow("Room Index", "0x${(savedHeader?.index ?: room.index).toString(16).uppercase().padStart(2, '0')}")
         AreaDropdown(effectiveArea) { targetArea ->
             editorState.reassignRoomArea(room.roomId, targetArea, romParser)
         }
@@ -544,6 +554,7 @@ fun RoomPropertiesPanel(
                         duplicateSelectedCondition = false
                         showAddStateDialog = true
                     },
+                    enabled = !editorState.hasManagedSelectors(),
                     contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
                     modifier = Modifier.height(26.dp),
                 ) { Text("+ Add", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
@@ -552,6 +563,7 @@ fun RoomPropertiesPanel(
                         duplicateSelectedCondition = true
                         showAddStateDialog = true
                     },
+                    enabled = !editorState.hasManagedSelectors(),
                     contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
                     modifier = Modifier.height(26.dp),
                 ) { Text("Duplicate", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
@@ -572,7 +584,7 @@ fun RoomPropertiesPanel(
                     modifier = Modifier.height(26.dp),
                 ) { Text("↓", fontSize = ROOM_INFO_BODY_FONT_SIZE) }
                 TextButton(
-                    enabled = !selectedIsDefault,
+                    enabled = !selectedIsDefault && !editorState.hasManagedSelectors(),
                     onClick = { showDeleteStateDialog = true },
                     contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
                     modifier = Modifier.height(26.dp),
@@ -583,6 +595,7 @@ fun RoomPropertiesPanel(
                     modifier = Modifier.height(26.dp),
                 ) { Text("Simulate", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
             }
+            if (editorState.hasManagedSelectors()) Text("Source-owned selectors: condition edits and reordering are supported; adding/deleting states is not yet source-aware.", fontSize = ROOM_INFO_CAPTION_FONT_SIZE)
         }
 
         if (showStateSimulator) {
@@ -1189,10 +1202,10 @@ private fun RoomResizeRow(room: Room, editorState: EditorState) {
     var newHeight by remember(room.roomId) { mutableStateOf(room.height) }
     val currentWidth = editorState.project.rooms[
         room.roomId.toString(16).uppercase().padStart(4, '0')
-    ]?.roomHeaderChange?.width ?: room.width
+    ]?.effectiveHeaderChange?.width ?: room.width
     val currentHeight = editorState.project.rooms[
         room.roomId.toString(16).uppercase().padStart(4, '0')
-    ]?.roomHeaderChange?.height ?: room.height
+    ]?.effectiveHeaderChange?.height ?: room.height
 
     if (!editingSize) {
         Row(

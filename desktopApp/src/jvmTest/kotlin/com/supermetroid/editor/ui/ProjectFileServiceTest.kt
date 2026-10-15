@@ -23,6 +23,16 @@ class ProjectFileServiceTest {
     lateinit var tempDir: File
 
     @Test
+    fun `saving omits empty rooms on disk without removing live undo identities`() {
+        val projectFile = File(tempDir, "empty-room.smedit")
+        val project = SmEditProject("base.smc")
+        val liveRoom = project.getOrCreateRoom(0x91F8)
+        assertTrue(ProjectFileService.saveProject(project, projectFile.path, null, false) {})
+        org.junit.jupiter.api.Assertions.assertSame(liveRoom, project.rooms["91F8"])
+        assertTrue(ProjectFileService.loadProject(projectFile).rooms.isEmpty())
+    }
+
+    @Test
     fun `source project save uses an immutable snapshot and does not clear newer GUI edits`() = runBlocking {
         val file = File(tempDir, "Async Source.smedit").apply { writeText("{}") }
         val project = SmEditProject("base.smc").apply { buildName = "before" }

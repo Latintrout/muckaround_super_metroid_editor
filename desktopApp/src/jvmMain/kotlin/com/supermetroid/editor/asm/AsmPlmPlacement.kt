@@ -4,7 +4,7 @@ import com.supermetroid.editor.rom.RomParser
 
 /** Navigation evidence, not another authoring model or a generated source file. */
 internal sealed interface AsmPlmPlacementTarget {
-    data class Source(val lineIndex: Int, val columnIndex: Int) : AsmPlmPlacementTarget
+    data class Source(val lineIndex: Int, val columnIndex: Int = 0) : AsmPlmPlacementTarget
     data class Unavailable(val reason: String) : AsmPlmPlacementTarget
 }
 

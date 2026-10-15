@@ -8,7 +8,14 @@ import kotlinx.serialization.json.Json
 
 /** Private transaction snapshots, never an additional persisted copy of authored values. */
 internal fun snapshotRoomForResize(room: RoomEdits): RoomEdits =
-    Json.decodeFromString(RoomEdits.serializer(), Json.encodeToString(RoomEdits.serializer(), room))
+    Json.decodeFromString(RoomEdits.serializer(), Json.encodeToString(RoomEdits.serializer(), room)).also { copy ->
+        copy.asmHeaderPropertiesProjection = room.asmHeaderPropertiesProjection
+        copy.asmSelectorOrderProjection = room.asmSelectorOrderProjection
+        copy.states.zip(room.states).forEach { (target, source) ->
+            target.asmStatePropertiesProjection = source.asmStatePropertiesProjection
+            target.asmConditionProjection = source.asmConditionProjection
+        }
+    }
 
 internal data class AsmRoomResizePlan(
     val owner: SmEditProject,
@@ -35,6 +42,7 @@ internal fun resizeScrollCommands(commands: List<ScrollCommand>, oldWidth: Int, 
 internal fun applyRoomResizeModel(room: RoomEdits, snapshot: RoomEdits) {
     AsmRoomBank8FMetadata.capture(snapshot).applyTo(room)
     room.roomHeaderChange = snapshot.roomHeaderChange
+    room.asmHeaderPropertiesProjection = snapshot.asmHeaderPropertiesProjection
     room.operations.clear(); room.operations.addAll(snapshot.operations)
     room.levelResourceOperations.clear()
     snapshot.levelResourceOperations.forEach { (id, operations) -> room.levelResourceOperations[id] = operations.toMutableList() }

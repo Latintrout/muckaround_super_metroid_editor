@@ -176,6 +176,8 @@ import com.supermetroid.editor.asm.AsmRomPreview
 import com.supermetroid.editor.asm.AsmRomPreviewView
 import com.supermetroid.editor.asm.AsmSemanticBridge
 import com.supermetroid.editor.asm.AsmSemanticIndex
+import com.supermetroid.editor.asm.AsmRoomSourceLink
+import com.supermetroid.editor.asm.asmRoomSourceLinksAt
 import com.supermetroid.editor.asm.AsmSourceFile
 import com.supermetroid.editor.asm.AsmSourcePaneState
 import com.supermetroid.editor.asm.AsmSourceReplacementPreview
@@ -1798,6 +1800,7 @@ internal fun AsmWorkspaceCanvas(
     state: AsmWorkspaceState,
     romParser: RomParser? = null,
     onOpenInEditor: (AsmEditorTarget) -> Unit = {},
+    onOpenRoomSource: ((AsmRoomSourceLink) -> Unit)? = null,
     onSaveProject: suspend () -> Boolean = { true },
     onBuildProject: (() -> Unit)? = null,
     onRunInEmulator: (() -> Unit)? = null,
@@ -1807,7 +1810,7 @@ internal fun AsmWorkspaceCanvas(
 ) {
     Box(modifier.asmHistoryShortcuts(state)) {
         AsmWorkspaceCanvasContent(
-            state, romParser, onOpenInEditor, onSaveProject, onBuildProject, onRunInEmulator,
+            state, romParser, onOpenInEditor, onOpenRoomSource, onSaveProject, onBuildProject, onRunInEmulator,
             problemsPaneHeightDp, onProblemsPaneHeightChange, Modifier.fillMaxSize(),
         )
     }
@@ -1818,6 +1821,7 @@ private fun AsmWorkspaceCanvasContent(
     state: AsmWorkspaceState,
     romParser: RomParser?,
     onOpenInEditor: (AsmEditorTarget) -> Unit,
+    onOpenRoomSource: ((AsmRoomSourceLink) -> Unit)?,
     onSaveProject: suspend () -> Boolean,
     onBuildProject: (() -> Unit)?,
     onRunInEmulator: (() -> Unit)?,
@@ -1827,6 +1831,21 @@ private fun AsmWorkspaceCanvasContent(
 ) {
     val workspace = state.workspace
     val semanticIndex = remember(romParser) { romParser?.let(AsmSemanticBridge::buildIndex) }
+    state.roomSourceInspection?.let { preview ->
+        Column(modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("${preview.title} — read-only preview", fontWeight = FontWeight.SemiBold)
+            Text("Inspecting does not change the project. Create editable source to adopt this data into project ASM; that step requires a build.")
+            Row {
+                TextButton(onClick = preview.startEditing) { Text("Create editable source") }
+                TextButton(onClick = { onOpenInEditor(AsmEditorTarget.Room(preview.roomId, stateId = preview.stateId)) }) { Text("Edit room") }
+            }
+            androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f).fillMaxWidth()
+                .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())) {
+                Text(preview.text, fontFamily = FontFamily.Monospace, fontSize = LocalEditorTheme.current.fontSize.value.detail)
+            }
+        }
+        return
+    }
     if (state.browserMode == AsmBrowserMode.PLM_PLACEMENT) {
         state.plmPlacementSnapshot?.let { snapshot ->
             AsmPlmPlacementPane(snapshot, { state.openAddress(it) }, modifier)
@@ -1860,7 +1879,7 @@ private fun AsmWorkspaceCanvasContent(
     var sourceSplitRatio by remember(state) { mutableStateOf(0.5f) }
     val asset = workspace.index.asset(state.selectedAssetPath)
     if (asset != null) {
-        AsmAssetCanvas(state, asset, workspace.metadata.romName, semanticIndex, onOpenInEditor, modifier)
+        AsmAssetCanvas(state, asset, workspace.metadata.romName, semanticIndex, onOpenInEditor, onOpenRoomSource, modifier)
     } else {
         val panes = state.sourcePanes.mapNotNull { pane ->
             workspace.index.file(pane.fileId)?.let { pane to it }
@@ -1896,6 +1915,7 @@ private fun AsmWorkspaceCanvasContent(
                                     source = source,
                                     semanticIndex = semanticIndex,
                                     onOpenInEditor = onOpenInEditor,
+                                    onOpenRoomSource = onOpenRoomSource,
                                     onSaveProject = onSaveProject,
                                     onBuildProject = onBuildProject,
                                     onRunInEmulator = onRunInEmulator,
@@ -2680,6 +2700,7 @@ private fun AsmSourceCanvas(
     source: AsmSourceFile,
     semanticIndex: AsmSemanticIndex?,
     onOpenInEditor: (AsmEditorTarget) -> Unit,
+    onOpenRoomSource: ((AsmRoomSourceLink) -> Unit)?,
     onSaveProject: suspend () -> Boolean,
     onBuildProject: (() -> Unit)?,
     onRunInEmulator: (() -> Unit)?,
@@ -2728,10 +2749,16 @@ private fun AsmSourceCanvas(
     val editorLinks = remember(semanticIndex, exactSnesAddress, source, pane.lineIndex) {
         val address = exactSnesAddress
         val layoutTarget = com.supermetroid.editor.asm.AsmRoomLayoutSource.targetAt(source.lines, pane.lineIndex)
-        if (layoutTarget != null) listOf(com.supermetroid.editor.asm.AsmEditorLink(
-            "Edit room", "Decoded layout · tile/BTS source", layoutTarget))
+        val propertiesTarget = com.supermetroid.editor.asm.AsmRoomPropertiesSource.targetAt(source.lines, pane.lineIndex)
+        val selectorsTarget = com.supermetroid.editor.asm.AsmRoomSelectorsSource.targetAt(source.lines, pane.lineIndex)
+        if (layoutTarget != null || propertiesTarget != null || selectorsTarget != null) listOf(com.supermetroid.editor.asm.AsmEditorLink(
+            "Edit room", if (layoutTarget != null) "Decoded layout · tile/BTS source" else if (propertiesTarget != null) "Room header / state fields" else "State selectors / branch order", layoutTarget ?: propertiesTarget ?: selectorsTarget!!))
         else if (semanticIndex == null || address == null) emptyList()
         else semanticIndex.linksFor(address)
+    }
+    val roomSourceLinks = remember(index, semanticIndex, source, pane.lineIndex, state.workspaceKind, state.sourceBufferRevision) {
+        asmRoomSourceLinksAt(index, source, pane.lineIndex, semanticIndex,
+            if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditText(source.id) else null)
     }
     val referenceLabel = remember(index, source.id, pane.lineIndex, pane.referenceSymbol) {
         index.label(pane.referenceSymbol)
@@ -2890,6 +2917,7 @@ private fun AsmSourceCanvas(
         }, closeFind)
         if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
             AsmEditorLinkBar(editorLinks, onOpenInEditor)
+            AsmRoomSourceActions(roomSourceLinks, onOpenRoomSource)
             when {
                 referenceLabel != null -> AsmReferencesBar(state, index, referenceLabel, labelUsages)
                 referenceMacro != null -> AsmMacroReferencesBar(state, index, referenceMacro, macroUsages)
@@ -2909,6 +2937,7 @@ private fun AsmSourceCanvas(
                 AsmReadOnlySourceNotice(onOpenProjectSource = state::showProjectWorkspace)
             }
             AsmEditorLinkBar(editorLinks, onOpenInEditor)
+            AsmRoomSourceActions(roomSourceLinks, onOpenRoomSource)
             when {
                 referenceLabel != null -> AsmReferencesBar(state, index, referenceLabel, labelUsages)
                 referenceMacro != null -> AsmMacroReferencesBar(state, index, referenceMacro, macroUsages)
@@ -4805,6 +4834,7 @@ private fun AsmAssetCanvas(
     romName: String,
     semanticIndex: AsmSemanticIndex?,
     onOpenInEditor: (AsmEditorTarget) -> Unit,
+    onOpenRoomSource: ((AsmRoomSourceLink) -> Unit)?,
     modifier: Modifier,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
@@ -4829,6 +4859,7 @@ private fun AsmAssetCanvas(
     Column(modifier.fillMaxSize()) {
         AsmNavigationHeader(state, asset.range.path, asset.category, "${asset.range.length} bytes · read-only")
         AsmEditorLinkBar(editorLinks, onOpenInEditor)
+        AsmRoomSourceActions(semanticIndex?.roomSourcesFor(asset.range.snesAddress).orEmpty(), onOpenRoomSource)
         Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -4881,6 +4912,37 @@ private fun AsmAssetCanvas(
                         color = codeForeground(),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp),
                     )
+                }
+            }
+        }
+    }
+}
+
+/** Same entry point in Source and Assets; shared consumers are explicit choices, never guessed. */
+@Composable
+internal fun AsmRoomSourceActions(links: List<AsmRoomSourceLink>, onOpen: ((AsmRoomSourceLink) -> Unit)?) {
+    if (links.isEmpty() || onOpen == null) return
+    val fs = LocalEditorTheme.current.fontSize.value
+    var expanded by remember(links) { mutableStateOf(false) }
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (links.size == 1) links.single().title else "Room data · ${links.size} resource/state choices",
+                    fontSize = fs.detail, modifier = Modifier.weight(1f))
+                TextButton(onClick = { if (links.size == 1) onOpen(links.single()) else expanded = !expanded }) {
+                    Text("Preview / make editable…", fontSize = fs.detail)
+                }
+            }
+            if (expanded) {
+                Column(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                    links.forEach { link ->
+                        TextButton(onClick = { expanded = false; onOpen(link) }, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(link.title, fontSize = fs.detail)
+                                Text(link.detail, fontSize = fs.statusBar, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                 }
             }
         }

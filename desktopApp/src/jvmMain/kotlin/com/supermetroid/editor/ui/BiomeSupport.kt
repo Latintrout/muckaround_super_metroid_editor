@@ -42,7 +42,7 @@ internal fun stripGeneratedBiomeEdits(roomEdits: RoomEdits?): Boolean {
         if (generatedStateOps.isEmpty()) continue
         state.operations.removeAll(generatedStateOps.toSet())
         for (op in generatedStateOps) {
-            if (op.stateDataBefore != op.stateDataAfter && state.stateDataChange == op.stateDataAfter) {
+            if (op.stateDataBefore != op.stateDataAfter && state.effectiveStateDataChange == op.stateDataAfter) {
                 state.stateDataChange = op.stateDataBefore
             }
             if (op.fxBefore != op.fxAfter && state.fxChange == op.fxAfter) state.fxChange = op.fxBefore
@@ -59,7 +59,7 @@ internal fun stripGeneratedBiomeEdits(roomEdits: RoomEdits?): Boolean {
     if (generatedOps.isEmpty()) return stripped
     roomEdits.operations.removeAll(generatedOps.toSet())
     for (op in generatedOps) {
-        if (op.stateDataBefore != op.stateDataAfter && roomEdits.stateDataChange == op.stateDataAfter) {
+        if (op.stateDataBefore != op.stateDataAfter && roomEdits.effectiveStateDataChange == op.stateDataAfter) {
             roomEdits.stateDataChange = op.stateDataBefore
         }
         if (op.fxBefore != op.fxAfter && roomEdits.fxChange == op.fxAfter) {
@@ -92,7 +92,7 @@ internal fun hasManualBiomeBlockingEdits(roomEdits: RoomEdits?): Boolean {
                 state.conditionChanged || state.resourcesChanged ||
                 state.operations.isEmpty() && (
                     state.plmChanges.isNotEmpty() || state.scrollChanges.isNotEmpty() ||
-                        state.stateDataChange != null || state.fxChange != null
+                        state.effectiveStateDataChange != null || state.fxChange != null
                     )
         }
     ) return true
@@ -100,7 +100,7 @@ internal fun hasManualBiomeBlockingEdits(roomEdits: RoomEdits?): Boolean {
     if (roomEdits.operations.any { !isGeneratedBiomeOperation(it) }) return true
     if (roomEdits.doorChanges.isNotEmpty() ||
         roomEdits.enemyChanges.isNotEmpty() ||
-        roomEdits.roomHeaderChange != null ||
+        roomEdits.effectiveHeaderChange != null ||
         roomEdits.customScrollCommands.isNotEmpty() ||
         roomEdits.saveStationSpawns.isNotEmpty()
     ) return true
@@ -112,7 +112,7 @@ internal fun hasManualBiomeBlockingEdits(roomEdits: RoomEdits?): Boolean {
     if (roomEdits.plmChanges.any { it !in generatedPlmChanges }) return true
 
     val generatedStateChanges = generatedOps.mapNotNull { it.stateDataAfter }
-    if (roomEdits.stateDataChange != null && roomEdits.stateDataChange !in generatedStateChanges) return true
+    if (roomEdits.effectiveStateDataChange != null && roomEdits.effectiveStateDataChange !in generatedStateChanges) return true
 
     val generatedFxChanges = generatedOps.mapNotNull { it.fxAfter }
     if (roomEdits.fxChange != null && roomEdits.fxChange !in generatedFxChanges) return true
@@ -131,7 +131,7 @@ internal fun applyBulkBiomeThemeToRoom(
 ) {
     val targetTileset = theme.tilesetId
     if (targetTileset != null) {
-        val existing = roomEdits.stateDataChange ?: StateDataChange()
+        val existing = roomEdits.effectiveStateDataChange ?: StateDataChange()
         val change = existing.copy(tileset = targetTileset.takeIf { it != romRoom.tileset })
         roomEdits.stateDataChange = change.takeIf { it != StateDataChange() }
     }

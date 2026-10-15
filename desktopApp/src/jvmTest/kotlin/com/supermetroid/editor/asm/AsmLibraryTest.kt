@@ -63,14 +63,14 @@ class AsmLibraryTest {
     }
 
     @Test
-    fun `clicking a sized opcode selects its instruction page and preserves suffix context`() {
+    fun `clicking a sized opcode preserves search and suffix context when navigating library pages`() {
         val state = AsmWorkspaceState()
         state.query = "old source search"
 
         state.showInstruction("lda.w")
 
         assertEquals(AsmBrowserMode.LIBRARY, state.browserMode)
-        assertEquals("", state.query)
+        assertEquals("old source search", state.query)
         assertEquals("LDA", state.selectedInstruction)
         assertEquals("LDA.W", state.selectedInstructionToken)
         assertEquals("instruction:LDA", state.selectedLibraryPageId)
@@ -79,6 +79,12 @@ class AsmLibraryTest {
         assertEquals("widths-and-suffixes", state.selectedLibraryPageId)
         assertEquals(null, state.selectedInstruction)
         assertEquals(null, state.selectedInstructionToken)
+        assertEquals("old source search", state.query)
+
+        state.openLibraryInstruction("sta.l")
+        assertEquals("instruction:STA", state.selectedLibraryPageId)
+        assertEquals("STA.L", state.selectedInstructionToken)
+        assertEquals("old source search", state.query)
     }
 
     private companion object {

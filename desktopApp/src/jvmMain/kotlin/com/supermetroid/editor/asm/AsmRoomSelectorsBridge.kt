@@ -1,0 +1,88 @@
+package com.supermetroid.editor.asm
+
+import com.supermetroid.editor.data.*
+import com.supermetroid.editor.rom.*
+
+internal data class AsmRoomSelectorsView(val resource: SourceRoomSelectors?, val problem: String?)
+internal fun SourceRoomSelectors.projectInto(room: RoomEdits) {
+    room.asmSelectorOrderProjection = order
+    room.states.forEach { it.asmConditionProjection = conditions[it.id] }
+}
+
+internal class AsmRoomSelectorsBridge(private val catalog: AsmPlmSourceCatalog, private val workspace: AsmWorkspaceState,
+                                      private val project: () -> SmEditProject, private val changed: () -> Unit) {
+    private var revision: Pair<String, AsmRoomSelectorsSource>? = null
+    private val lastGood = mutableMapOf<Int, SourceRoomSelectors>()
+    private fun source(): AsmRoomSelectorsSource {
+        val text = workspace.projectSourceText(PLM_SOURCE_FILE)
+        return revision?.takeIf { it.first == text }?.second ?: AsmRoomSelectorsSource(text).also { revision = text to it }
+    }
+    fun isManaged(roomId: Int) = (project().rooms[project().roomKey(roomId)]?.asmStateSelectorsSourceVersion ?: 0) != 0
+    fun view(roomId: Int): AsmRoomSelectorsView = try {
+        val value = source().resource(project().rooms.getValue(project().roomKey(roomId)))
+        lastGood[roomId] = value
+        AsmRoomSelectorsView(value, null)
+    } catch (error: Exception) { AsmRoomSelectorsView(lastGood[roomId], error.message ?: "Invalid selectors.") }
+    fun refreshAll() {
+        project().rooms.values.forEach { room ->
+            if (isManaged(room.roomId)) view(room.roomId).resource?.projectInto(room)
+            else { room.asmSelectorOrderProjection = null; room.states.forEach { it.asmConditionProjection = null } }
+        }
+    }
+    fun preview(room: RoomEdits, name: String) = AsmRoomSelectorsSource.render(room.roomId, name,
+        SourceRoomSelectors(room.effectiveStates.map { it.id }, room.states.associate { it.id to it.effectiveCondition }))
+    fun migrate(roomId: Int, name: String) {
+        if (isManaged(roomId)) return
+        val owner = project()
+        require(owner.asmWorkspace.enabled && owner.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE && owner.newRooms.isEmpty()) { "Selector source requires existing-room ASM source mode." }
+        val room = owner.rooms.getValue(owner.roomKey(roomId))
+        require(catalog.parser.readRoomHeader(roomId)?.area in 0..6) { "The debug/unused area is not writable." }
+        val beforeModel = snapshotRoomForResize(room)
+        val staged = snapshotRoomForResize(room)
+        val resource = SourceRoomSelectors(room.effectiveStates.map { it.id }, room.states.associate { it.id to it.effectiveCondition })
+        staged.states.forEach { it.condition = AsmRoomSelectorsSource.baseline(it); it.conditionChanged = false }
+        staged.asmStateSelectorsSourceVersion = 1
+        resource.projectInto(staged)
+        val before = source().text
+        require(!Regex("(?m)^macro ${AsmRoomSelectorsSource.prefix(roomId)}").containsMatchIn(before)) { "Existing selector declarations need review before adoption." }
+        val after = before.trimEnd() + "\n\n" + AsmRoomSelectorsSource.render(roomId, name, resource)
+        AsmRoomSelectorsSource(after).resource(staged)
+        fun transition(expected: RoomEdits, target: RoomEdits) {
+            require(project() === owner && owner.rooms[owner.roomKey(roomId)] === room && room == expected) { "Undo newer room/state changes before restoring selector ownership." }
+            room.asmStateSelectorsSourceVersion = target.asmStateSelectorsSourceVersion
+            room.asmSelectorOrderProjection = target.asmSelectorOrderProjection
+            room.states.zip(target.states).forEach { (state, saved) ->
+                state.condition = saved.condition; state.conditionChanged = saved.conditionChanged
+                state.asmConditionProjection = saved.asmConditionProjection
+            }
+            owner.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
+            changed()
+        }
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, before, after,
+            beforeUndo = { transition(staged, beforeModel) }, beforeRedo = { transition(beforeModel, staged) })
+        transition(beforeModel, staged)
+    }
+    fun editCondition(roomId: Int, id: String, condition: ProjectRoomStateCondition) {
+        val room = project().rooms.getValue(project().roomKey(roomId))
+        require(view(roomId).problem == null) { view(roomId).problem ?: "Invalid selectors." }
+        val current = source()
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, current.text, current.editCondition(room, id, condition))
+        refreshAll()
+    }
+    fun move(roomId: Int, id: String, direction: Int): Boolean {
+        require(direction == -1 || direction == 1)
+        val room = project().rooms.getValue(project().roomKey(roomId))
+        val view = view(roomId)
+        require(view.problem == null) { view.problem ?: "Invalid selectors." }
+        val order = requireNotNull(view.resource).order.toMutableList()
+        val index = order.indexOf(id)
+        val target = index + direction
+        if (index !in 0 until order.lastIndex || target !in 0 until order.lastIndex) return false
+        val other = order[target]; order[target] = id; order[index] = other
+        val current = source()
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, current.text, current.editOrder(room, order))
+        refreshAll()
+        return true
+    }
+    fun line(roomId: Int, stateId: String? = null) = source().line(roomId, stateId)
+}

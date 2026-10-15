@@ -1671,8 +1671,11 @@ ordinary ROM patches and base-ROM immutability.
 
 ## Reciprocal room layouts
 
-**Room Info → Layout → ASM** adopts an existing room's effective layouts and
-opens their editable decoded declarations in project `bank_8F.asm`. This is
+**Room Info → Layout → ASM** first opens a read-only decoded preview without
+changing project data, source buffers, undo history or a matching build. Choose
+**Create editable source** to explicitly adopt the effective layouts into
+project `bank_8F.asm`; that step writes source and legitimately requires a build.
+An already-adopted layout opens directly without further mutation. This is
 different from the read-only, last-build **Room Data** catalog. Navigation does
 not require a build first. The source pane's **Edit room** link returns to a
 state using that exact shared/private layout, including after the canvas reloads.
@@ -1706,7 +1709,8 @@ application remain guarded; copy/share complete layouts instead.
 
 Manual round trip:
 
-1. Generate Flyway, then open **Room Info → Layout → ASM**.
+1. Generate Flyway, then open **Room Info → Layout → ASM** and choose
+   **Create editable source** if this is its first source adoption.
 2. Find an `L1 tiles` row. Copy a visibly different nearby tile's word into one
    ordinary wall cell to see an appearance change. Changing only `$8xxx` to
    `$0xxx` changes collision to air but keeps the same graphic. Do not change
@@ -1720,6 +1724,166 @@ invalid drafts, reopen, typed export, generation/themes, patterns, resize/reset,
 retained allocation bytes and reverse navigation. The real-Asar integration
 `authored layout code round trips` builds Flyway after raw edits, undo, a private
 fork and restored sharing, checking decoded bytes and state-specific resources.
+
+## Reciprocal room header/state fields
+
+In ASM source mode, **Room Info → Header → ASM** previews the existing room's
+ordinary header/state fields without changing the project. **Create editable
+source** explicitly adopts them into project `bank_8F.asm`. **State fields → ASM**
+opens the selected state's declaration. This is a general room-editing workflow;
+generation is not required. The source pane's **Edit room** returns to the exact
+state without needing a build.
+
+`SmeditRoomInfo_<room>_Header()` contains seven labeled `db` scalars: room index,
+area, map X/Y, up/down scrollers and CRE flags. Each
+`SmeditRoomInfo_<room>_State_<identity>()` contains tileset, music data, music
+track (`db`) and background scrolling (`dw`). GUI edits and raw source edits
+share these literal declarations and preserve unrelated comments. Like decoded
+layouts, these are typed input macros: the build validates them and uses the room
+encoder's checked placement plan, rather than invoking them at an arbitrary `org`.
+
+Project schema 15 records source ownership, not duplicate scalar values. Adoption
+preserves earlier GUI overrides in the source, retires the JSON overrides and
+supports reciprocal undo. Invalid drafts remain saveable, retain a last-valid
+preview, and block GUI writes and builds. Fresh loads without a valid source
+projection show an unavailable-source warning instead of presenting native room
+data as the authored preview. The engine's debug/unused area 7 remains outside
+the existing writable-room contract. Clone-state, themes, resize and reset preserve the
+source ownership boundary.
+
+Header/scalar ownership does **not** include dimensions or door pointers; selector
+ownership is a separate layer described below. Use **Resize** for dimensions. Joint minimap
+room moves and area reassignment are guarded after scalar adoption until they
+can commit map/door/source changes together; changing raw map/area scalars alone
+does not relocate minimap tiles or migrate area-specific records. Added-room
+projects remain guarded pending stable new-room source identities.
+
+Manual round trip:
+
+1. Open an existing room such as Flyway, select a state in **Room Info**, and
+   open **State fields → ASM**, then **Create editable source** on first adoption.
+2. Change its music-track `db` literal, for example `$05` to `$07`. Use
+   **Edit room** and confirm that state's Music Track control changed.
+3. Change Music Track back using the GUI, then reopen **State fields → ASM**
+   and inspect the same literal. The other state's fields should stay unchanged.
+4. Open **Header → ASM**, change the CRE-flags byte to `$01`, and return to
+   Room Info to inspect the flags. Check Undo/Redo, save/reopen and Build.
+
+`AsmRoomPropertiesSourceTest` covers adoption, literal preservation, raw/GUI
+edits, invalid drafts, reopen/export, navigation, clone-state, resize/themes/reset
+and structural-edit guards. The real-Asar `room header and state source fields`
+integration builds Flyway after raw edits and undo, checking all eleven scalar
+fields and retaining state geometry, PLMs, enemies, FX and scripts.
+The literal-format test also round-trips the native fields of every writable
+vanilla catalog room.
+
+## Room/source workflow safety contracts
+
+Room source links share the production `RoomAsmNavigation` router. Layout,
+header/state fields, selectors, initial scrolls, FX, enemies/GFX and object-source
+adoption all follow the same rule: inspection is read-only; **Create editable
+source** is an explicit ownership/edit boundary. A verified native PLM placement
+opens its existing code directly without creating wrapper declarations. Save-spawn
+links preview before authoring a missing declaration or retiring legacy spawn
+metadata. Scroll-command links already refer to existing owned source.
+
+ASM-first authoring is available directly in **Source** and **Assets** through
+**Preview / make editable…**, in either Original (read-only) or Project views when
+project ASM authoring is enabled. Native room/state headers offer the supported
+room-wide resource families; native resource addresses offer their matching family.
+Whole-file layout `incbin` declarations resolve through the asset manifest, so
+searching `LevelData_Flyway` in Source or `LevelData_Flyway.bin` in Assets leads to
+the same preview/adoption workflow. Shared addresses list their room/state consumers
+explicitly. Opening a preview never adopts data or dirties the build; Create editable
+source performs the conversion, and already-owned resources open directly.
+
+No visual room needs to have been loaded. Preview/adoption of another room leaves
+the active canvas, selected state and GUI history untouched; the source document
+holds that adoption's undo step. The preview names its target room, and failed
+adoption rolls back provisional identity metadata. Source actions are hidden while
+displayed text differs from its indexed snapshot, and are never inferred from an
+unrelated nearby label or asset filename. Raw graphics/unknown payloads are not
+advertised as supported room resources. Station-specific save-spawn actions still
+require a selected station rather than guessing ownership from a global save table.
+
+Inspection must leave project JSON, ownership, source revisions, undo stacks,
+dirty/build state and project files unchanged. Previews use private room snapshots
+and the adoption planners, not a second preview format. Explicit adoption stages
+one GUI/source undo boundary in the appropriate bank; reopening owned source is
+idempotent. Preview callbacks reject changes to the room, selected state, source
+revision, project/workspace, build mode or loaded ROM. Invalid actor/object/state
+or door selections are rejected before migration.
+
+Returning to the same room/parser/ROM preserves the active state and GUI history,
+including from an unadopted preview. A different room, ROM or parser still reloads.
+Read-only ASM shortcuts cannot undo hidden source, but semantic room-editor undo
+remains usable after returning from a preview. Source-only ownership undo/redo
+notifies the live editor; plain source edits need no redundant JSON dirty flag.
+Project save prunes empty rooms only in its serialized snapshot, preserving live
+room identities held by undo/redo.
+
+`RoomAsmNavigationTest` exercises these contracts across all source families using
+the same router and bridge wiring as Main, including mixed-resource undo, stale
+callbacks, navigation history, actual file immutability and save/undo/save/redo.
+Resource-specific suites retain the detailed raw/GUI edit, invalid-draft,
+sharing/detachment, transaction and reopen tests. The real-Asar selector integration
+also uses production navigation/adoption before combining all resource families,
+changing conditions/order and verifying headless builds without GUI projections.
+These contracts cover supported resources; the structural/added-room guards and
+remaining integrations below still apply.
+
+## Reciprocal conditions and selector order
+
+**Room Info → Selectors → ASM** previews an existing room's branch conditions
+and order without setting `BUILD*`. **Create editable source** adopts them into
+`bank_8F.asm`. Existing owned selectors open directly. An ordinary GUI condition
+edit/reorder also adopts source when necessary because that is an explicit edit.
+The source pane's **Edit room** returns to the condition's exact state.
+
+`SmeditSelectors_<room>_Order()` lists references to stable condition macros in
+engine selection order. Reorder those references, or use the GUI arrows. Every
+state must appear exactly once and the original mandatory default must remain
+last. Resource identities are not reordered or merged: PLMs, actors, geometry,
+FX and ordinary state fields remain attached to their own state IDs. Encoder
+and symbolic pointer discovery use the same private source-order projection,
+including on headless builds with no GUI preview caches.
+
+Each `SmeditSelectors_<room>_Condition_<identity>()` is a prefix tree:
+
+```asm
+    db $04, $00, $00 ; EVENT_SET: stable kind ID, NOT (0/1), child count
+    dw $0007         ; argument (event 7)
+```
+
+The declaration header lists the fixed kind-ID dictionary. No-argument and
+compound nodes use argument zero. Compound nodes are followed by their children
+in order; ALL/ANY, negation, the native predicates and existing extended typed
+predicates use the same validated build encoders as the GUI. Arbitrary expressions,
+unknown IDs, malformed trees, invalid argument widths and default replacement are
+rejected. These are typed input macros, not tables to invoke at an arbitrary `org`.
+
+Schema 16 records `asmStateSelectorsSourceVersion = 1`; current predicate values
+and branch order are authored only in source. JSON retains native conditions as
+baseline provenance, not competing overrides. Invalid drafts remain saveable,
+retain last-good previews and block selector writes/builds. Adoption, raw/GUI
+edits, reordering, source undo and GUI undo preserve their shared history.
+Resize, themes and whole-room reset retain this ownership; reset retires the
+owned declarations and undo restores them. Add/duplicate/delete state commands
+are guarded after selector adoption pending an atomic cross-resource graph-edit
+transaction. Existing pre-adoption added states can be adopted with stable IDs.
+
+Manual check: open Flyway's conditional state in **Selectors → ASM**. After
+explicit adoption, set the node's first row to `db $04, $00, $00` and its argument
+to `dw $0007`. **Edit room** should show “Event is set” with event 7. Change it to
+event 8 in the GUI and inspect `dw $0008` in the same macro. Try Undo/Redo and
+Build. For order testing, choose a room with multiple non-default branches.
+
+`AsmRoomSelectorsSourceTest` covers raw/GUI edits, retirement/reopen, compiled
+compound predicates, order/resource identity, invalid drafts, resize/reset,
+navigation and every writable vanilla selector graph. The real-Asar selector
+test combines source-owned layouts, headers, PLMs, initial scrolls, FX and enemy
+tables, then builds reordered compound conditions and their undo states from a
+serialized/headless project model while checking all state-specific resources.
 
 ## Next layers
 
@@ -1744,10 +1908,13 @@ Follow-up work can now be incremental:
    now use the same authority contract, including paired enemy populations/GFX.
    Tile/PLM pattern strokes, room generation, themes, resizing and reset now have atomic source/model undo boundaries.
    Decoded room layouts/BTS/L2 now have a reciprocal typed source asset as well.
-   Next add one asset-owned graphics example. Then extend full
-   authoring to rewritten state graphs, doors, headers, and state selectors;
-   then give project-created rooms stable source
-   identities. Graphics, map, text, and sound encoders should follow the same
+   Ordinary header/state scalars now have reciprocal source declarations too.
+   Conditions and selector order now have reciprocal source ownership too.
+   Next extend graph authoring to atomic add/duplicate/delete across source
+   resources, then doors/connections and associated door ASM, including joint map/area
+   transactions. Asset-owned tileset/palette/separate-background authoring and
+   stable project-created room source identities follow those room workflows.
+   Graphics, map, text, and sound encoders should follow the same
    project-owned `data/`/source boundary before Asar.
 3. Extend the reverse semantic bridge to remaining specialized title/menu,
    cinematic, and generated-runtime assets as those editors gain stable semantic

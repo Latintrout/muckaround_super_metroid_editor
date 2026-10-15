@@ -24,6 +24,13 @@ internal class AsmFxBridge(private val catalog: AsmPlmSourceCatalog, private val
         lastGood[roomId to stateId] = resource
         AsmFxView(resource, null)
     } catch (error: Exception) { AsmFxView(lastGood[roomId to stateId], error.message ?: "Invalid FX source.") }
+    fun preview(room: RoomEdits, name: String): String {
+        room.ensureStateManifest(catalog.parser)
+        requireDoorRoutedFxOwnership(room, catalog.parser)
+        val before = sourceText()
+        return roomSourceAddition(before, planFxMigration(before, room, catalog.parser, name))
+    }
+
     fun migrate(roomId: Int, roomName: String) {
         if (isManaged(roomId)) return
         val owner = project()

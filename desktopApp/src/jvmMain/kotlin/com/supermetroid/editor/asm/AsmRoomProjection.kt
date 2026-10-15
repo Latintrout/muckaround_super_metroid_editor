@@ -23,7 +23,7 @@ internal fun roomObjectIdentity(room: RoomEdits): String {
     require(room.customScrollCommands.isEmpty() && room.states.all { it.customScrollCommands.isEmpty() }) {
         "Custom scroll commands cannot be mixed with authored object lists yet"
     }
-    return "${room.roomId}:${room.asmPlmSourceVersion}:${room.roomHeaderChange?.width}:${room.roomHeaderChange?.height}:${room.roomHeaderChange?.area}:${room.saveStationSpawns}:" +
+    return "${room.roomId}:${room.asmPlmSourceVersion}:${room.effectiveHeaderChange?.width}:${room.effectiveHeaderChange?.height}:${room.effectiveHeaderChange?.area}:${room.saveStationSpawns}:" +
         room.states.map { it.id }.sorted().joinToString { "${it.length}:$it" }
 }
 
@@ -51,7 +51,7 @@ internal class AsmRoomProjectionRepository(
             for (room in rooms) runCatching {
                 val identity = roomObjectIdentity(room)
                 val header = requireNotNull(catalog.parser.readRoomHeader(room.roomId))
-                val screens = (room.roomHeaderChange?.width ?: header.width) * (room.roomHeaderChange?.height ?: header.height)
+                val screens = (room.effectiveHeaderChange?.width ?: header.width) * (room.effectiveHeaderChange?.height ?: header.height)
                 fun Snapshot.documents(): Map<String, AsmPlmDocument> {
                     require(roomId == room.roomId && this.identity == identity)
                     require(tables.map { it.stateId }.toSet() == room.states.map { it.id }.toSet() && tables.size == room.states.size)
@@ -62,7 +62,7 @@ internal class AsmRoomProjectionRepository(
                     val saves = names.map { name ->
                         val body = authoredMacroBody(text, name)
                         val save = AsmSaveStationSource.parse(name, body, catalog.symbols)
-                        require(save.area == (room.roomHeaderChange?.area ?: header.area))
+                        require(save.area == (room.effectiveHeaderChange?.area ?: header.area))
                         require(room.saveStationSpawns.none { it.area == save.area && it.saveIndex == save.slot })
                         com.supermetroid.editor.rom.validateSourceSaveOwnership(save, catalog.parser)
                         save
@@ -88,7 +88,7 @@ internal class AsmRoomProjectionRepository(
                             }
                             AsmPlmDocument.Record(entry, fields, row.scrollResource)
                         }
-                        com.supermetroid.editor.rom.validateSourceSaveLinks(roomId, room.roomHeaderChange?.area ?: header.area,
+                        com.supermetroid.editor.rom.validateSourceSaveLinks(roomId, room.effectiveHeaderChange?.area ?: header.area,
                             records.map { it.entry }, saves, room.saveStationSpawns, catalog.parser)
                         records.mapNotNull { it.scrollResource }.distinct().forEach { name ->
                             require(name.startsWith(AsmRoomObjectSource.prefix(roomId) + "Scroll_"))

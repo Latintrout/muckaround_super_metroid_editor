@@ -16,6 +16,8 @@ internal data class AsmRoomBank8FMetadata(
     val objectsVersion: Int,
     val scrollsVersion: Int,
     val layoutsVersion: Int,
+    val propertiesVersion: Int,
+    val selectorsVersion: Int,
     val objects: List<PlmChange>,
     val scrolls: List<ScrollChange>,
     val commands: Map<String, List<ScrollCommand>>,
@@ -29,6 +31,8 @@ internal data class AsmRoomBank8FMetadata(
         room.asmPlmSourceVersion = objectsVersion
         room.asmInitialScrollSourceVersion = scrollsVersion
         room.asmLayoutSourceVersion = layoutsVersion
+        room.asmRoomPropertiesSourceVersion = propertiesVersion
+        room.asmStateSelectorsSourceVersion = selectorsVersion
         room.plmChanges.clear(); room.plmChanges.addAll(objects)
         room.scrollChanges.clear(); room.scrollChanges.addAll(scrolls)
         room.customScrollCommands.clear(); room.customScrollCommands.putAll(commands.mapValues { it.value.toMutableList() })
@@ -40,7 +44,7 @@ internal data class AsmRoomBank8FMetadata(
         }
     }
     companion object {
-        fun capture(room: RoomEdits) = AsmRoomBank8FMetadata(room.asmPlmSourceVersion, room.asmInitialScrollSourceVersion, room.asmLayoutSourceVersion,
+        fun capture(room: RoomEdits) = AsmRoomBank8FMetadata(room.asmPlmSourceVersion, room.asmInitialScrollSourceVersion, room.asmLayoutSourceVersion, room.asmRoomPropertiesSourceVersion, room.asmStateSelectorsSourceVersion,
             room.plmChanges.toList(), room.scrollChanges.toList(), room.customScrollCommands.mapValues { it.value.toList() },
             room.saveStationSpawns.toList(), room.states.map { State(it.id, it.sourceStateIndex, it.templateSourceStateIndex, it.condition,
                 it.resources, it.plmChanges.toList(), it.scrollChanges.toList(), it.customScrollCommands.mapValues { (_, v) -> v.toList() }) })

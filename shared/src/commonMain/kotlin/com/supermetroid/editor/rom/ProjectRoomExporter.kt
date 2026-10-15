@@ -44,7 +44,7 @@ class ProjectRoomExporter(
     private val extraItemPlmIds: Set<Int> = emptySet(),
     private val roomAreaOverrides: Map<Int, Int> = project.rooms.mapNotNull { (roomKey, edits) ->
         val roomId = roomKey.toIntOrNull(16) ?: return@mapNotNull null
-        edits.roomHeaderChange?.area?.let { roomId to it }
+        edits.effectiveHeaderChange?.area?.let { roomId to it }
     }.toMap(),
     freeSpaceAllocator: RomFreeSpaceAllocator? = null,
     private val onLog: (String) -> Unit = {},
@@ -53,6 +53,8 @@ class ProjectRoomExporter(
     private val sourceFx: Map<Int, Map<String, SourceFxResource>> = emptyMap(),
     private val sourceEnemies: Map<Int, Map<String, SourceEnemyResources>> = emptyMap(),
     private val sourceLayouts: Map<Int, Map<String, SourceRoomLayoutResource>> = emptyMap(),
+    private val sourceRoomProperties: Map<Int, SourceRoomProperties> = emptyMap(),
+    private val sourceSelectors: Map<Int, SourceRoomSelectors> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -81,7 +83,9 @@ class ProjectRoomExporter(
     private val levelDataAllocator = allocationSession
     private val enemyAllocator = allocationSession
     private val enemyGfxAllocator = allocationSession
-    private val effectiveRoomAreaOverrides = roomAreaOverrides.toMutableMap()
+    private val effectiveRoomAreaOverrides = roomAreaOverrides.toMutableMap().apply {
+        sourceRoomProperties.forEach { (id, properties) -> put(id, requireNotNull(properties.header.area)) }
+    }
 
     private val vanillaEnemyGfxDestinationsBySpecies by lazy {
         collectVanillaEnemyGfxDestinations(romParser)
@@ -130,6 +134,22 @@ class ProjectRoomExporter(
             val storedId = storedKey.toIntOrNull(16)
                 ?: failExport("Project room key '$storedKey' is not a hexadecimal room ID")
             val physicalId = previewToPhysical[storedId] ?: storedId
+            val selectors = if (storedEdits.asmStateSelectorsSourceVersion == 0) null else {
+                require(storedEdits.asmStateSelectorsSourceVersion == 1 && storedEdits.states.all { !it.conditionChanged }) { "Unsupported or competing selector ownership." }
+                requireNotNull(sourceSelectors[storedId]) { "Room $storedKey requires its validated selector source." }.also {
+                    require(it.conditions.keys == storedEdits.states.map { state -> state.id }.toSet()) { "Selector state coverage changed." }
+                    require(it.order.last() == storedEdits.states.single { state -> state.sourceCondition?.kind == com.supermetroid.editor.data.ProjectRoomStateConditionKind.DEFAULT }.id) { "Default state identity changed." }
+                    require(storedEdits.states.all { state -> state.condition == (state.sourceCondition ?: projectRoomStateCondition(com.supermetroid.editor.data.ProjectRoomStateConditionKind.NEVER)) }) { "Selectors have both source and GUI conditions." }
+                }
+            }
+            val properties = if (storedEdits.asmRoomPropertiesSourceVersion == 0) null else {
+                require(storedEdits.asmRoomPropertiesSourceVersion == 1) { "Unsupported room-property source version." }
+                require(storedEdits.roomHeaderChange?.copy(width = null, height = null, doorOut = null).let { it == null || it == com.supermetroid.editor.data.RoomHeaderChange() } &&
+                    storedEdits.stateDataChange == null && storedEdits.states.all { it.stateDataChange == null }) { "Room properties have both authored source and GUI overrides." }
+                requireNotNull(sourceRoomProperties[storedId]) { "Room $storedKey requires its decoded header/state source." }.also {
+                    require(it.states.keys == storedEdits.states.map { state -> state.id }.toSet()) { "Room-property state coverage changed." }
+                }
+            }
             val resolvedDoors = storedEdits.doorChanges.mapTo(mutableListOf()) { change ->
                 change.copy(destRoomPtr = previewToPhysical[change.destRoomPtr] ?: change.destRoomPtr)
             }
@@ -139,9 +159,14 @@ class ProjectRoomExporter(
                     doorPtr = previewDoorToPhysical[spawn.doorPtr] ?: spawn.doorPtr,
                 )
             }
-            val resolvedStates = storedEdits.states.mapTo(mutableListOf()) { state ->
+            val orderedStates = selectors?.order?.map { id -> storedEdits.states.single { it.id == id } } ?: storedEdits.states
+            val resolvedStates = orderedStates.mapTo(mutableListOf()) { state ->
                 state.copy(
-                    condition = remapCondition(state.condition),
+                    stateDataChange = properties?.states?.getValue(state.id) ?: state.stateDataChange,
+                    asmStatePropertiesProjection = null,
+                    condition = remapCondition(selectors?.conditions?.getValue(state.id) ?: state.condition),
+                    conditionChanged = selectors != null || state.conditionChanged,
+                    asmConditionProjection = null,
                     doorFxChanges = state.doorFxChanges.entries.associateTo(linkedMapOf()) { (key, value) ->
                         val oldPointer = key.toIntOrNull(16)
                         val newPointer = oldPointer?.let { previewDoorToPhysical[it] ?: it }
@@ -151,6 +176,14 @@ class ProjectRoomExporter(
             }
             physicalId.toString(16).uppercase().padStart(4, '0') to storedEdits.copy(
                 roomId = physicalId,
+                roomHeaderChange = properties?.header?.copy(width = storedEdits.roomHeaderChange?.width,
+                    height = storedEdits.roomHeaderChange?.height, doorOut = storedEdits.roomHeaderChange?.doorOut) ?: storedEdits.roomHeaderChange,
+                stateDataChange = if (properties == null) storedEdits.stateDataChange else null,
+                asmRoomPropertiesSourceVersion = 0,
+                asmHeaderPropertiesProjection = null,
+                asmStateSelectorsSourceVersion = 0,
+                asmSelectorOrderProjection = null,
+                stateGraphChanged = selectors != null || storedEdits.stateGraphChanged,
                 states = resolvedStates,
                 doorChanges = resolvedDoors,
                 saveStationSpawns = resolvedSpawns,
@@ -199,7 +232,7 @@ class ProjectRoomExporter(
             val room = romParser.readRoomHeader(roomId)
                 ?: failExport("Room 0x$roomKey has edits but its room header could not be read")
 
-            val headerChange = roomEdits.roomHeaderChange
+            val headerChange = roomEdits.effectiveHeaderChange
             val effectiveWidth = headerChange?.width ?: room.width
             val effectiveHeight = headerChange?.height ?: room.height
             val isResized = effectiveWidth != room.width || effectiveHeight != room.height
@@ -273,7 +306,7 @@ class ProjectRoomExporter(
                 roomsPatched.add(roomKey)
             }
 
-            if (roomEdits.stateDataChange != null) {
+            if (roomEdits.effectiveStateDataChange != null) {
                 applyStateDataChange(roomKey, roomId, roomEdits)
                 roomsPatched.add(roomKey)
             }
@@ -336,7 +369,7 @@ class ProjectRoomExporter(
             }
             if (roomEdits.asmPlmSourceVersion != 0) {
                 for (save in sourcePlmSets.getValue(roomId).values.flatMap(SourcePlmResource::saves).distinct()) {
-                    require(save.ownerRoomId == roomId && save.area == (roomEdits.roomHeaderChange?.area ?: room.area)) {
+                    require(save.ownerRoomId == roomId && save.area == (roomEdits.effectiveHeaderChange?.area ?: room.area)) {
                         "Save source area/room ownership changed; cross-area save migration needs a compound source operation."
                     }
                     require(roomEdits.saveStationSpawns.none { it.area == save.area && it.saveIndex == save.slot }) {
@@ -354,8 +387,8 @@ class ProjectRoomExporter(
         // not replace an already remapped routine or introduce an unprocessed entrance.
         for ((roomKey, edits) in project.rooms) {
             val room = romParser.readRoomHeader(edits.roomId) ?: continue
-            val width = edits.roomHeaderChange?.width ?: room.width
-            val height = edits.roomHeaderChange?.height ?: room.height
+            val width = edits.effectiveHeaderChange?.width ?: room.width
+            val height = edits.effectiveHeaderChange?.height ?: room.height
             if (width != room.width) applyResizedDoorAsmRemap(roomKey, edits.roomId, room, width, height)
         }
 
@@ -377,11 +410,11 @@ class ProjectRoomExporter(
         for (state in edits.states) {
             val resource = inputs.getValue(state.id)
             val room = requireNotNull(romParser.readRoomHeader(roomId))
-            val screenCount = (edits.roomHeaderChange?.width ?: room.width) * (edits.roomHeaderChange?.height ?: room.height)
+            val screenCount = (edits.effectiveHeaderChange?.width ?: room.width) * (edits.effectiveHeaderChange?.height ?: room.height)
             for (entry in resource.entries.filter { it.id == 0xB76F }) {
                 val slot = entry.param and 0xFF
                 require(slot in 0..7) { "Save PLM slot is outside 0–7 (runtime masks indices with \$0007)." }
-                val area = edits.roomHeaderChange?.area ?: room.area
+                val area = edits.effectiveHeaderChange?.area ?: room.area
                 val owned = resource.saves.singleOrNull { it.area == area && it.slot == slot }
                 require(owned?.cleared != true) { "Save PLM references a released spawn slot." }
                 if (owned == null && edits.saveStationSpawns.none { it.area == area && it.saveIndex == slot && !it.clearSlot }) {
@@ -1834,7 +1867,7 @@ class ProjectRoomExporter(
         roomId: Int,
         roomEdits: RoomEdits,
     ) {
-        val stateChange = roomEdits.stateDataChange ?: return
+        val stateChange = roomEdits.effectiveStateDataChange ?: return
         if (stateChange.tileset != null && stateChange.tileset !in 0 until TileGraphics.NUM_TILESETS) {
             failExport(
                 "Room 0x$roomKey tileset ${stateChange.tileset} is invalid; expected 0-${TileGraphics.NUM_TILESETS - 1}"
@@ -2284,8 +2317,8 @@ class ProjectRoomExporter(
         val inspectedStates = if (graphWasRewritten) emptyList() else romParser.inspectRoomStates(roomId).states
         val room = romParser.readRoomHeader(roomId)
             ?: failExport("Room 0x$roomKey state edits have no readable room header")
-        val effectiveWidth = roomEdits.roomHeaderChange?.width ?: room.width
-        val effectiveHeight = roomEdits.roomHeaderChange?.height ?: room.height
+        val effectiveWidth = roomEdits.effectiveHeaderChange?.width ?: room.width
+        val effectiveHeight = roomEdits.effectiveHeaderChange?.height ?: room.height
         for (stateEdits in roomEdits.states.filter { it.hasEdits }) {
             val inspected = if (graphWasRewritten) {
                 null
@@ -2327,7 +2360,7 @@ class ProjectRoomExporter(
                     stateEdits.condition,
                 )
             }
-            stateEdits.stateDataChange?.let {
+            stateEdits.effectiveStateDataChange?.let {
                 applyStateDataChangeAtOffset(roomKey, stateEdits.id, stateOffset, it)
             }
             val scopedRoomEdits = RoomEdits(

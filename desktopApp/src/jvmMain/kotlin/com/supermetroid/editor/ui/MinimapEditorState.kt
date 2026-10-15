@@ -124,7 +124,7 @@ class MinimapEditorState {
             val named = RoomInfo.fromRoomInfo(info, room)
             val roomKey = roomId.toString(16).uppercase().padStart(4, '0')
             val roomEdits = editorState.project.rooms[roomKey]
-            val hc = roomEdits?.roomHeaderChange
+            val hc = roomEdits?.effectiveHeaderChange
             if (hc != null) {
                 named.copy(
                     mapX = hc.mapX ?: named.mapX,
@@ -245,6 +245,10 @@ class MinimapEditorState {
             editorState.postStatus("${baseRoom.name} was left at its original map position.")
             return true
         }
+        if (editorState.hasManagedRoomProperties(buf.roomId)) {
+            editorState.postStatus("Map moves for source-owned headers need a joint map/source transaction; cancel this move and edit Map X/Y in ASM for now.")
+            return false
+        }
         if (!canPlaceMoveBuffer(buf)) {
             editorState.postStatus("Cannot apply this move: the target overlaps another room or existing map tiles.")
             return false
@@ -259,7 +263,7 @@ class MinimapEditorState {
 
         // Update room header mapX/mapY
         val key = roomHexKey(buf.roomId)
-        val existing = editorState.project.rooms[key]?.roomHeaderChange
+        val existing = editorState.project.rooms[key]?.effectiveHeaderChange
         val change = (existing ?: RoomHeaderChange()).copy(
             mapX = buf.currentX.takeIf { it != baseRoom.mapX },
             mapY = buf.currentY.takeIf { it != baseRoom.mapY },
@@ -440,6 +444,7 @@ class MinimapEditorState {
         if (moveBuffer != null) { cancelMove(editorState); return }
         if (undoStack.isEmpty()) return
         val parser = loadedParser ?: return
+        if (!canRestoreHeaders(undoStack.last(), editorState)) return
         redoStack.add(captureSnapshot(editorState))
         restoreSnapshot(undoStack.removeLast(), editorState, parser)
     }
@@ -447,6 +452,7 @@ class MinimapEditorState {
     fun redo(editorState: EditorState) {
         if (redoStack.isEmpty()) return
         val parser = loadedParser ?: return
+        if (!canRestoreHeaders(redoStack.last(), editorState)) return
         undoStack.add(captureSnapshot(editorState))
         restoreSnapshot(redoStack.removeLast(), editorState, parser)
     }
@@ -618,13 +624,23 @@ class MinimapEditorState {
         selectedRoomId = selectedRoom?.roomId,
         minimapEdits = editorState.project.minimapEdits.mapValues { (_, edits) -> edits.map { it.copy() } },
         mapStationEdits = editorState.project.mapStationEdits.mapValues { (_, edits) -> edits.map { it.copy() } },
-        roomHeaders = editorState.project.rooms.mapValues { (_, edits) -> edits.roomHeaderChange?.copy() },
+        roomHeaders = editorState.project.rooms.mapValues { (_, edits) -> edits.effectiveHeaderChange?.copy() },
         doorChanges = editorState.project.rooms.mapValues { (_, edits) -> edits.doorChanges.map { it.copy() } },
         plmChanges = editorState.project.rooms.mapValues { (_, edits) -> edits.plmChanges.map { it.copy() } },
         saveStationSpawns = editorState.project.rooms.mapValues { (_, edits) ->
             edits.saveStationSpawns.map { it.copy() }
         },
     )
+
+    private fun canRestoreHeaders(snapshot: MinimapProjectSnapshot, editorState: EditorState): Boolean {
+        if (editorState.project.rooms.any { (key, room) ->
+                room.asmRoomPropertiesSourceVersion != 0 && snapshot.roomHeaders[key] != room.effectiveHeaderChange
+            }) {
+            editorState.postStatus("Undo newer room-header source changes before restoring this map edit.")
+            return false
+        }
+        return true
+    }
 
     private fun restoreSnapshot(snapshot: MinimapProjectSnapshot, editorState: EditorState, parser: RomParser) {
         editorState.project.minimapEdits.clear()
@@ -640,7 +656,7 @@ class MinimapEditorState {
         for (key in roomKeys) {
             val roomId = key.toIntOrNull(16) ?: continue
             val edits = editorState.project.getOrCreateRoom(roomId)
-            edits.roomHeaderChange = snapshot.roomHeaders[key]?.copy()
+            if (edits.asmRoomPropertiesSourceVersion == 0) edits.roomHeaderChange = snapshot.roomHeaders[key]?.copy()
             edits.doorChanges.clear()
             edits.doorChanges.addAll(snapshot.doorChanges[key].orEmpty().map { it.copy() })
             edits.plmChanges.clear()

@@ -490,8 +490,8 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             val resources = linkedMapOf<Pair<Int, List<String>>, String>()
             val scrollResources = linkedMapOf<Pair<String, List<ScrollCommand>>, String>()
             val header = requireNotNull(parser.readRoomHeader(room.roomId))
-            val width = room.roomHeaderChange?.width ?: header.width
-            val height = room.roomHeaderChange?.height ?: header.height
+            val width = room.effectiveHeaderChange?.width ?: header.width
+            val height = room.effectiveHeaderChange?.height ?: header.height
             val expectedReferences = linkedMapOf<String, Map<Int, SourceScrollResource>>()
             val body = StringBuilder("\n; SMEDIT authored objects · ${name.replace('\n', ' ').replace('\r', ' ')}\n")
             body.appendLine(VALUES_HEADER)

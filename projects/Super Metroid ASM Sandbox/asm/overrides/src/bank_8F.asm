@@ -15697,8 +15697,8 @@ macro SmeditObjects_ACB3_List_1()
     %PLMPopEntry($EEDB, $14, $3C, $0040) ; PLM: Missile (Visible)
     %PLMPopEntry($EEE7, $1A, $0A, $005A) ; PLM: Bomb (Visible)
     %PLMPopEntry($EEE3, $06, $29, $005D) ; PLM: Power Bomb (Visible)
-    %PLMPopEntry($EF23, $1C, $09, $0053) ; PLM: Morph Ball (Visible)
     %PLMPopEntry($B6DF, $0D, $11, $0000) ; PLM: Energy Refill
+    %PLMPopEntry($EF23, $1C, $09, $0052) ; PLM: Morph Ball (Visible)
     dw $0000 ; End of PLM list
 endmacro
 
@@ -15817,3 +15817,1774 @@ macro SmeditScrolls_91F8_Table_2()
     db $01 ; Screen (8,5) · Blue
     db $01 ; Screen (9,5) · Blue
 endmacro
+
+; SMEDIT initial screen scrolls · Bubble Mountain
+; Row-major db bytes: 00 Red, 01 Blue, 02 Green. No terminator.
+; State wrappers share tables; visual edits detach only the selected state.
+macro SmeditScrolls_ACB3_Table_1()
+    db $02 ; Screen (1,1) · Green
+    db $02 ; Screen (2,1) · Green
+    db $02 ; Screen (1,2) · Green
+    db $02 ; Screen (2,2) · Green
+    db $02 ; Screen (1,3) · Green
+    db $02 ; Screen (2,3) · Green
+    db $02 ; Screen (1,4) · Green
+    db $02 ; Screen (2,4) · Green
+endmacro
+
+macro SmeditScrolls_ACB3_State_73746174652d31()
+    %SmeditScrolls_ACB3_Table_1()
+endmacro
+
+; SMEDIT room layout · Spiky Acid Snakes Room · 64×16 blocks
+; Editable decoded level asset. Build validates and LZ5-compresses it; do not invoke at a ROM org.
+macro SmeditLayout_AFFB_Data_6c6576656c2d31()
+    dw $0800 ; Layer 1 byte count (keep allocation size)
+    ; L1 tiles (type/flip/metatile) · row-major · coordinates are zero-based
+    dw $810D, $810D, $810D, $810D, $810D, $810D, $810D, $8D16, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913 ; L1 tiles (type/flip/metatile) y=0, x=0
+    dw $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913, $8913 ; L1 tiles (type/flip/metatile) y=0, x=16
+    dw $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13 ; L1 tiles (type/flip/metatile) y=0, x=32
+    dw $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8D13, $8916, $810D, $810D, $810D, $810D, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=0, x=48
+    dw $810D, $810D, $810D, $810D, $810D, $810D, $8D16, $8D1A, $8108, $810C, $810C, $810C, $810C, $810C, $810C, $810C ; L1 tiles (type/flip/metatile) y=1, x=0
+    dw $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C ; L1 tiles (type/flip/metatile) y=1, x=16
+    dw $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C, $810C ; L1 tiles (type/flip/metatile) y=1, x=32
+    dw $810C, $810C, $810C, $810C, $810C, $810C, $810C, $8508, $891A, $8916, $810D, $810D, $810D, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=1, x=48
+    dw $810D, $810D, $810D, $8D16, $8913, $8913, $8D1A, $8108, $8102, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B ; L1 tiles (type/flip/metatile) y=2, x=0
+    dw $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B ; L1 tiles (type/flip/metatile) y=2, x=16
+    dw $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B ; L1 tiles (type/flip/metatile) y=2, x=32
+    dw $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $E89B, $8502, $8508, $891A, $8D13, $8D13, $8916, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=2, x=48
+    dw $810D, $8D16, $8913, $8D1A, $8108, $110C, $1523, $1522, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=3, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=3, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=3, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $1122, $1123, $110C, $8508, $891A, $8D13, $8916, $810D ; L1 tiles (type/flip/metatile) y=3, x=48
+    dw $8913, $8D1A, $1108, $1523, $1522, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=4, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=4, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=4, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $1122, $1123, $1508, $891A, $8D13 ; L1 tiles (type/flip/metatile) y=4, x=48
+    dw $8108, $8102, $1104, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=5, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=5, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=5, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $1504, $8502, $810C ; L1 tiles (type/flip/metatile) y=5, x=48
+    dw $9440, $C40C, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=6, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=6, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=6, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $C00C, $9040 ; L1 tiles (type/flip/metatile) y=6, x=48
+    dw $9460, $D42C, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=7, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=7, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=7, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $D02C, $9060 ; L1 tiles (type/flip/metatile) y=7, x=48
+    dw $9C60, $DC2C, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=8, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=8, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=8, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $D82C, $9860 ; L1 tiles (type/flip/metatile) y=8, x=48
+    dw $9C40, $DC0C, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=9, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=9, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=9, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $D80C, $9840 ; L1 tiles (type/flip/metatile) y=9, x=48
+    dw $811C, $811D, $811C, $811D, $8106, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=10, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=10, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=10, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8506, $851D, $851C, $851D, $851C ; L1 tiles (type/flip/metatile) y=10, x=48
+    dw $8113, $8113, $8113, $851A, $8105, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=11, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=11, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=11, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8505, $811A, $8513, $8513, $8513 ; L1 tiles (type/flip/metatile) y=11, x=48
+    dw $810D, $810D, $810D, $8514, $8107, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=12, x=0
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=12, x=16
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=12, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8507, $8114, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=12, x=48
+    dw $810D, $810D, $810D, $8514, $8105, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056 ; L1 tiles (type/flip/metatile) y=13, x=0
+    dw $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056 ; L1 tiles (type/flip/metatile) y=13, x=16
+    dw $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056 ; L1 tiles (type/flip/metatile) y=13, x=32
+    dw $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $A056, $8505, $8114, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=13, x=48
+    dw $810D, $810D, $810D, $8514, $8908, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144 ; L1 tiles (type/flip/metatile) y=14, x=0
+    dw $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144 ; L1 tiles (type/flip/metatile) y=14, x=16
+    dw $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144 ; L1 tiles (type/flip/metatile) y=14, x=32
+    dw $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8144, $8D08, $8114, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=14, x=48
+    dw $810D, $810D, $810D, $8516, $851A, $811C, $811C, $811C, $811D, $811C, $811D, $811C, $811D, $811C, $811D, $811C ; L1 tiles (type/flip/metatile) y=15, x=0
+    dw $811D, $811C, $811D, $811C, $811D, $811C, $811D, $811C, $811D, $811C, $811D, $811C, $811D, $811C, $811D, $811C ; L1 tiles (type/flip/metatile) y=15, x=16
+    dw $851D, $851C, $851D, $851C, $851D, $851C, $851D, $851C, $851D, $851C, $851D, $851C, $851C, $851D, $851C, $851D ; L1 tiles (type/flip/metatile) y=15, x=32
+    dw $851C, $851D, $851C, $851D, $851C, $851D, $851C, $851D, $851C, $851D, $851C, $811A, $8116, $810D, $810D, $810D ; L1 tiles (type/flip/metatile) y=15, x=48
+    ; BTS · row-major · coordinates are zero-based
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=48
+    db $00, $00, $00, $00, $00, $93, $D7, $D6, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $96, $97, $93, $00, $00, $00, $00, $00 ; BTS y=3, x=48
+    db $00, $00, $93, $D7, $D6, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $96, $97, $93, $00, $00 ; BTS y=4, x=48
+    db $00, $00, $D6, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $96, $00, $00 ; BTS y=5, x=48
+    db $00, $41, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $40, $01 ; BTS y=6, x=48
+    db $00, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $01 ; BTS y=7, x=48
+    db $00, $FE, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FE, $01 ; BTS y=8, x=48
+    db $00, $FD, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FD, $01 ; BTS y=9, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=48
+endmacro
+
+macro SmeditLayout_AFFB_State_73746174652d31()
+    %SmeditLayout_AFFB_Data_6c6576656c2d31()
+endmacro
+
+; SMEDIT room layout · Big Pink · 80×160 blocks
+; Editable decoded level asset. Build validates and LZ5-compresses it; do not invoke at a ROM org.
+macro SmeditLayout_9D19_Data_6c6576656c2d31()
+    dw $6400 ; Layer 1 byte count (keep allocation size)
+    ; L1 tiles (type/flip/metatile) · row-major · coordinates are zero-based
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=0, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=0, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=0, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=0, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=0, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=1, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=1, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=1, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=1, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=1, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=2, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=2, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=2, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=2, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=2, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=3, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=3, x=16
+    dw $8081, $8081, $8B26, $8F28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28 ; L1 tiles (type/flip/metatile) y=3, x=32
+    dw $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B28, $8F26 ; L1 tiles (type/flip/metatile) y=3, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=3, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=4, x=0
+    dw $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B28, $8B28, $8B28, $8F45, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=4, x=16
+    dw $8081, $8081, $8306, $8F07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07 ; L1 tiles (type/flip/metatile) y=4, x=32
+    dw $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8B07, $8706 ; L1 tiles (type/flip/metatile) y=4, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=4, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=5, x=0
+    dw $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B08, $8B08, $8B08, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=5, x=16
+    dw $8081, $8081, $8306, $8350, $0B41, $0B24, $00FF, $00FF, $0B02, $0B05, $00FF, $00FF, $00FF, $00FF, $0B02, $0F02 ; L1 tiles (type/flip/metatile) y=5, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $0B05, $00FF, $0B01, $0F41, $0B24, $00FF, $00FF, $0B05, $00FF, $0B24, $8F09, $8706 ; L1 tiles (type/flip/metatile) y=5, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=5, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=6, x=0
+    dw $9440, $C40C, $00FF, $0B24, $00FF, $00FF, $00FF, $0B02, $834E, $8F29, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28 ; L1 tiles (type/flip/metatile) y=6, x=16
+    dw $8B28, $8B28, $8B29, $8350, $0B00, $0B25, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=6, x=32
+    dw $00FF, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $0F21, $0B05, $00FF, $00FF, $00FF, $00FF, $0B05, $C00C, $9040 ; L1 tiles (type/flip/metatile) y=6, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=6, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=7, x=0
+    dw $9460, $D42C, $00FF, $0B05, $00FF, $00FF, $0305, $00FF, $8F17, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07 ; L1 tiles (type/flip/metatile) y=7, x=16
+    dw $8B07, $8B07, $8B08, $8B17, $00FF, $0B05, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=7, x=32
+    dw $00FF, $0320, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $D02C, $9060 ; L1 tiles (type/flip/metatile) y=7, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=7, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=8, x=0
+    dw $9C60, $DC2C, $00FF, $00FF, $00FF, $00FF, $0324, $00FF, $00FF, $00FF, $00FF, $0302, $00FF, $0301, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=8, x=16
+    dw $F350, $00FF, $0301, $0302, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0303, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=8, x=32
+    dw $00FF, $0320, $0325, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0721, $0305, $00FF, $00FF, $00FF, $D82C, $9860 ; L1 tiles (type/flip/metatile) y=8, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=8, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=9, x=0
+    dw $9C40, $DC0C, $00FF, $0346, $0301, $1709, $1307, $1308, $8307, $8307, $8308, $8307, $8308, $8307, $8308, $8307 ; L1 tiles (type/flip/metatile) y=9, x=16
+    dw $8308, $834E, $82BD, $82BD, $82BE, $00FF, $00FF, $00FF, $00FF, $0301, $00FF, $8198, $8598, $0323, $0301, $0346 ; L1 tiles (type/flip/metatile) y=9, x=32
+    dw $0302, $0341, $0324, $00FF, $0302, $00FF, $0302, $0346, $00FF, $0741, $0324, $00FF, $00FF, $00FF, $D80C, $9840 ; L1 tiles (type/flip/metatile) y=9, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=9, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=10, x=0
+    dw $8307, $8308, $8307, $8308, $8307, $8308, $8729, $8327, $8328, $8328, $8327, $8328, $8327, $8328, $8327, $8328 ; L1 tiles (type/flip/metatile) y=10, x=16
+    dw $8329, $8350, $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $8EFB, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB ; L1 tiles (type/flip/metatile) y=10, x=32
+    dw $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DB, $82DC, $82DB, $82DC, $82DB, $8EF8 ; L1 tiles (type/flip/metatile) y=10, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=10, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=11, x=0
+    dw $8327, $8328, $8327, $8328, $8327, $8328, $8745, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=11, x=16
+    dw $8306, $8350, $00FF, $0325, $00FF, $00FF, $00FF, $0700, $86A9, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=11, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=11, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=11, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=12, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=12, x=16
+    dw $8B06, $8350, $0346, $0324, $0301, $00FF, $00FF, $00FF, $86A9, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=12, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=12, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=12, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=13, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=13, x=16
+    dw $8AF8, $82DC, $82DC, $82DC, $82DC, $8AFB, $00FF, $00FF, $86FB, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB ; L1 tiles (type/flip/metatile) y=13, x=32
+    dw $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $86F8 ; L1 tiles (type/flip/metatile) y=13, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=13, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=14, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=14, x=16
+    dw $82F8, $8ADC, $8ADC, $8ADC, $8ADC, $82FB, $0B05, $00FF, $00FF, $0B46, $0B41, $00FF, $00FF, $0B02, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=14, x=32
+    dw $0B02, $0B47, $0B48, $0B24, $00FF, $00FF, $00FF, $0B02, $00FF, $00FF, $0B24, $0B02, $1F09, $134E, $834E, $8706 ; L1 tiles (type/flip/metatile) y=14, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=14, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=15, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=15, x=16
+    dw $8306, $8350, $00FF, $0B02, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B21, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=15, x=32
+    dw $00FF, $00FF, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B05, $00FF, $00FF, $1F09, $834E, $8F06 ; L1 tiles (type/flip/metatile) y=15, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=15, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=16, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=16, x=16
+    dw $8B06, $8350, $0721, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=16, x=32
+    dw $00FF, $00FF, $00FF, $0B05, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=16, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=16, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=17, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=17, x=16
+    dw $8306, $8350, $0720, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0300, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=17, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=17, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=17, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=18, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=18, x=16
+    dw $8B06, $8350, $0720, $00FF, $00FF, $00FF, $0303, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0320, $0300, $00FF ; L1 tiles (type/flip/metatile) y=18, x=32
+    dw $00FF, $00FF, $00FF, $0321, $00FF, $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=18, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=18, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=19, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=19, x=16
+    dw $8306, $8350, $0740, $0301, $0302, $0346, $0323, $0303, $0322, $0346, $00FF, $00FF, $0302, $0340, $0340, $0302 ; L1 tiles (type/flip/metatile) y=19, x=32
+    dw $0346, $00FF, $00FF, $0341, $00FF, $0302, $0324, $0302, $00FF, $0346, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=19, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=19, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=20, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=20, x=16
+    dw $8AF8, $82DC, $82DC, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC ; L1 tiles (type/flip/metatile) y=20, x=32
+    dw $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $8AFB, $00FF, $00FF, $0F05, $8750, $8706 ; L1 tiles (type/flip/metatile) y=20, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=20, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=21, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=21, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8318, $8ADB, $8ADB, $8ADC, $8ADC, $8ADB, $8ADC, $8ADC ; L1 tiles (type/flip/metatile) y=21, x=32
+    dw $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $82FB, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=21, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=21, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=22, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=22, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $1318, $1717, $1B09, $0B47, $0B48, $00FF, $00FF, $00FF, $0B02 ; L1 tiles (type/flip/metatile) y=22, x=32
+    dw $0B24, $0B02, $0B24, $0B02, $00FF, $0B46, $0B41, $00FF, $0B02, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=22, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=22, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=23, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=23, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $1318, $1717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=23, x=32
+    dw $0B05, $00FF, $0B05, $00FF, $00FF, $00FF, $0B21, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=23, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=23, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=24, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=24, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $1318, $1717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=24, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0321, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=24, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=24, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=25, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=25, x=16
+    dw $8081, $8081, $8081, $8081, $1318, $1717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=25, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0346, $0341, $8750, $8706 ; L1 tiles (type/flip/metatile) y=25, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=25, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=26, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=26, x=16
+    dw $8081, $8081, $8081, $1318, $1717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=26, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8EFB, $82DC, $82DC, $8737 ; L1 tiles (type/flip/metatile) y=26, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=26, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=27, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=27, x=16
+    dw $8081, $8081, $1318, $1717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=27, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $86A9, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=27, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=27, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=28, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=28, x=16
+    dw $8081, $8318, $1717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=28, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0302, $86A9, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=28, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=28, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=29, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=29, x=16
+    dw $8306, $8717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=29, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8EFB, $8F18, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=29, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=29, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=30, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=30, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=30, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $86A9, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=30, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=30, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=31, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=31, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=31, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $86A9, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=31, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=31, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=32, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=32, x=16
+    dw $8306, $8350, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=32, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0321, $00FF, $0302, $86A9, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=32, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=32, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=33, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=33, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $00FF, $00FF, $0300 ; L1 tiles (type/flip/metatile) y=33, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $00FF, $0341, $8EFB, $82DC, $8F18, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=33, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=33, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=34, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=34, x=16
+    dw $8306, $8350, $0305, $00FF, $00FF, $00FF, $00FF, $0346, $0302, $0301, $8198, $8598, $0324, $00FF, $00FF, $0320 ; L1 tiles (type/flip/metatile) y=34, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0324, $8EFB, $82DC, $8F18, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=34, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=34, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=35, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=35, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $8EFB, $82DC, $82DC, $82DC, $82DC, $86DC, $8AFB, $0321, $0305, $0320 ; L1 tiles (type/flip/metatile) y=35, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $0302, $8EFB, $82DC, $8F18, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=35, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=35, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=36, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=36, x=16
+    dw $8306, $8350, $0300, $00FF, $00FF, $00FF, $86FB, $8ADB, $8ADB, $8ADB, $8718, $8081, $82BB, $0341, $0324, $0340 ; L1 tiles (type/flip/metatile) y=36, x=32
+    dw $0303, $0346, $0302, $8EFB, $82DC, $8F18, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=36, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=36, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=37, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=37, x=16
+    dw $8B06, $8B17, $00FF, $00FF, $00FF, $00FF, $0F02, $00FF, $0B22, $0B46, $86FB, $8ADC, $82DD, $82BD, $82BD, $82BD ; L1 tiles (type/flip/metatile) y=37, x=32
+    dw $82BD, $82BD, $82BD, $86DD, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $86F8 ; L1 tiles (type/flip/metatile) y=37, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=37, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=38, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=38, x=16
+    dw $9440, $C40C, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B04, $00FF, $00FF, $0B02, $00FF ; L1 tiles (type/flip/metatile) y=38, x=32
+    dw $00FF, $00FF, $0B25, $00FF, $00FF, $0B46, $00FF, $0B41, $00FF, $0B22, $00FF, $0B47, $0B48, $1F09, $8F4E, $8706 ; L1 tiles (type/flip/metatile) y=38, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=38, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=39, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=39, x=16
+    dw $9460, $D42C, $00FF, $00FF, $00FF, $00FF, $0303, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=39, x=32
+    dw $0300, $00FF, $0B05, $00FF, $00FF, $00FF, $00FF, $0B21, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=39, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=39, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=40, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=40, x=16
+    dw $9C60, $DC2C, $00FF, $00FF, $00FF, $0305, $0323, $00FF, $0303, $00FF, $0321, $00FF, $0305, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=40, x=32
+    dw $0320, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=40, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=40, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=41, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=41, x=16
+    dw $9C40, $DC0C, $0302, $0347, $0348, $0324, $0323, $00FF, $0323, $00FF, $0341, $0302, $0324, $00FF, $0346, $00FF ; L1 tiles (type/flip/metatile) y=41, x=32
+    dw $0340, $0347, $0348, $0302, $00FF, $0302, $00FF, $00FF, $0322, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=41, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=41, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=42, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=42, x=16
+    dw $82DC, $82DC, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DC ; L1 tiles (type/flip/metatile) y=42, x=32
+    dw $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DB, $82DC, $8AFB, $00FF, $00FF, $00FF, $0705, $8750, $8706 ; L1 tiles (type/flip/metatile) y=42, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=42, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=43, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=43, x=16
+    dw $8081, $8081, $8081, $8318, $8ADB, $8ADB, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $8ADC, $E09B, $E09B, $E09B ; L1 tiles (type/flip/metatile) y=43, x=32
+    dw $E09B, $E09B, $E09B, $E09B, $E09B, $E09B, $8ADC, $8ADC, $8ADC, $82FB, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=43, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=43, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=44, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=44, x=16
+    dw $8081, $8081, $1318, $1717, $1B09, $0B46, $0B41, $00FF, $00FF, $0B24, $00FF, $0B41, $0B22, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=44, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B22, $0B41, $0B46, $0B02, $00FF, $00FF, $00FF, $0305, $8750, $8706 ; L1 tiles (type/flip/metatile) y=44, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=44, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=45, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=45, x=16
+    dw $8081, $8318, $1717, $1B09, $00FF, $00FF, $0B21, $00FF, $00FF, $0325, $00FF, $0B21, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=45, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B21, $00FF, $00FF, $00FF, $00FF, $00FF, $0325, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=45, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=45, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=46, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=46, x=16
+    dw $8B06, $8717, $1B09, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B05, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=46, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0324, $8750, $8706 ; L1 tiles (type/flip/metatile) y=46, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=46, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=47, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=47, x=16
+    dw $8306, $8350, $0B00, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=47, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $8EFB, $82DC, $8EF8 ; L1 tiles (type/flip/metatile) y=47, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=47, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=48, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=48, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=48, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $86FB, $8ADB, $86F8 ; L1 tiles (type/flip/metatile) y=48, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=48, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=49, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=49, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0324, $0302, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=49, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0722, $0302, $00FF, $00FF, $00FF, $8F50, $8F06 ; L1 tiles (type/flip/metatile) y=49, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=49, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=50, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=50, x=16
+    dw $8B06, $8350, $00FF, $0321, $00FF, $00FF, $0705, $8EFB, $86DB, $8AFB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=50, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $86BE, $82BE, $00FF, $00FF, $0705, $8F50, $8706 ; L1 tiles (type/flip/metatile) y=50, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=50, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=51, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=51, x=16
+    dw $8306, $8350, $0346, $0341, $805D, $00FF, $0700, $8357, $8081, $8757, $0B00, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=51, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8F50, $8F06 ; L1 tiles (type/flip/metatile) y=51, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=51, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=52, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=52, x=16
+    dw $8AF8, $86DC, $86DC, $86DC, $8AFB, $00FF, $00FF, $86FB, $8EDB, $82FB, $0B05, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=52, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8F50, $8706 ; L1 tiles (type/flip/metatile) y=52, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=52, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=53, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=53, x=16
+    dw $82F8, $8EDB, $8EDB, $8EDB, $82FB, $00FF, $00FF, $8EFB, $8AFB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=53, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0705, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=53, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=53, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=54, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=54, x=16
+    dw $9326, $0AFB, $00FF, $CEFB, $CAFB, $00FF, $00FF, $86FB, $82FB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=54, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=54, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=54, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=55, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=55, x=16
+    dw $9081, $0757, $00FF, $C357, $C757, $00FF, $00FF, $86BE, $82BE, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=55, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $0303, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=55, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=55, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=56, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=56, x=16
+    dw $9081, $0F57, $00FF, $C357, $C757, $0305, $00FF, $8EFB, $8AFB, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=56, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0324, $0323, $8750, $8706 ; L1 tiles (type/flip/metatile) y=56, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=56, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=57, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=57, x=16
+    dw $9B26, $02FB, $00FF, $C6FB, $C2FB, $0324, $0302, $86FB, $82FB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=57, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $82F7, $00FF, $00FF, $8EFB, $82DC, $82DC, $82DC, $8EF8 ; L1 tiles (type/flip/metatile) y=57, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=57, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=58, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=58, x=16
+    dw $8B06, $8317, $00FF, $8EFB, $86DC, $86DC, $86DC, $86DC, $8AFB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=58, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8316, $0305, $00FF, $86FB, $8ADB, $8ADB, $8ADB, $86F8 ; L1 tiles (type/flip/metatile) y=58, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=58, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=59, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=59, x=16
+    dw $8B06, $8350, $00FF, $86FB, $8EDB, $8EDB, $8EDB, $8EDB, $82FB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=59, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8316, $00FF, $00FF, $00FF, $00FF, $0B46, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=59, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=59, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=60, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=60, x=16
+    dw $8AF8, $8350, $B6BE, $52BE, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=60, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8316, $00FF, $00FF, $00FF, $00FF, $0700, $8750, $8706 ; L1 tiles (type/flip/metatile) y=60, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=60, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=61, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=61, x=16
+    dw $82F8, $8350, $8EFB, $82DC, $82DC, $8AFB, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=61, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8316, $0722, $0342, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=61, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=61, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=62, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=62, x=16
+    dw $8306, $8350, $86FB, $8ADB, $8ADB, $82FB, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=62, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0705, $8F50, $82BD, $82BE, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=62, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=62, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=63, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=63, x=16
+    dw $8B06, $8350, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=63, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8316, $00FF, $00FF, $00FF, $00FF, $0705, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=63, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=63, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=64, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=64, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=64, x=32
+    dw $00FF, $0300, $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $8316, $0300, $00FF, $00FF, $00FF, $0F05, $8750, $8706 ; L1 tiles (type/flip/metatile) y=64, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=64, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=65, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=65, x=16
+    dw $8B06, $8350, $0321, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=65, x=32
+    dw $00FF, $0320, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $8316, $0305, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=65, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=65, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=66, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=66, x=16
+    dw $8306, $8350, $0341, $00FF, $0347, $0348, $00FF, $0302, $00FF, $0324, $00FF, $00FF, $00FF, $00FF, $0346, $00FF ; L1 tiles (type/flip/metatile) y=66, x=32
+    dw $0302, $0341, $0301, $0325, $0347, $0348, $00FF, $0301, $8316, $00FF, $00FF, $00FF, $0322, $0302, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=66, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=66, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=67, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=67, x=16
+    dw $8337, $82DC, $82DB, $82DC, $82DB, $82DC, $B2DB, $52DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC ; L1 tiles (type/flip/metatile) y=67, x=32
+    dw $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82FA, $0305, $00FF, $00FF, $86BE, $82BD, $82BD, $86F8 ; L1 tiles (type/flip/metatile) y=67, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=67, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=68, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=68, x=16
+    dw $8B37, $8ADB, $8ADB, $8ADC, $8718, $8318, $DADB, $DADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC ; L1 tiles (type/flip/metatile) y=68, x=32
+    dw $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $8ADB, $8ADC, $82FB, $00FF, $00FF, $00FF, $00FF, $1F09, $834E, $8F06 ; L1 tiles (type/flip/metatile) y=68, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=68, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=69, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=69, x=16
+    dw $8B06, $8B17, $00FF, $0B41, $8EA9, $82A9, $00FF, $00FF, $0B46, $0B23, $00FF, $00FF, $00FF, $00FF, $00FF, $0B02 ; L1 tiles (type/flip/metatile) y=69, x=32
+    dw $0B01, $00FF, $0B01, $0B23, $00FF, $00FF, $0B01, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8EE6, $8F06 ; L1 tiles (type/flip/metatile) y=69, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=69, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=70, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=70, x=16
+    dw $9440, $C40C, $00FF, $0B21, $86A9, $8AA9, $0300, $00FF, $00FF, $0B23, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=70, x=32
+    dw $00FF, $00FF, $0305, $0B23, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $C00C, $9040 ; L1 tiles (type/flip/metatile) y=70, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=70, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=71, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=71, x=16
+    dw $9460, $D42C, $00FF, $0705, $8EA9, $82A9, $00FF, $00FF, $00FF, $0B03, $00FF, $00FF, $0300, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=71, x=32
+    dw $00FF, $00FF, $0325, $0B03, $00FF, $00FF, $00FF, $00FF, $00FF, $0721, $00FF, $00FF, $00FF, $00FF, $D02C, $9060 ; L1 tiles (type/flip/metatile) y=71, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=71, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=72, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=72, x=16
+    dw $9C60, $DC2C, $00FF, $00FF, $86A9, $8AA9, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0320, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=72, x=32
+    dw $00FF, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0741, $0322, $00FF, $00FF, $00FF, $D82C, $9860 ; L1 tiles (type/flip/metatile) y=72, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=72, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=73, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=73, x=16
+    dw $9C40, $DC0C, $00FF, $0F00, $8EA9, $82A9, $00FF, $00FF, $0321, $00FF, $00FF, $00FF, $0320, $0342, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=73, x=32
+    dw $00FF, $00FF, $0325, $00FF, $00FF, $00FF, $0321, $00FF, $00FF, $86BE, $82BE, $00FF, $00FF, $00FF, $D80C, $9840 ; L1 tiles (type/flip/metatile) y=73, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=73, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=74, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=74, x=16
+    dw $8306, $8317, $B6BE, $52BE, $86A9, $82A9, $0343, $0344, $0341, $0302, $0342, $0305, $0340, $0323, $0302, $0346 ; L1 tiles (type/flip/metatile) y=74, x=32
+    dw $0305, $0301, $0324, $0302, $0305, $0305, $0341, $0346, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $8717, $8706 ; L1 tiles (type/flip/metatile) y=74, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=74, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=75, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=75, x=16
+    dw $8B06, $8350, $0300, $00FF, $86A9, $82BC, $8308, $8308, $8308, $8308, $8308, $8308, $8308, $8308, $8308, $8308 ; L1 tiles (type/flip/metatile) y=75, x=32
+    dw $8308, $8308, $8308, $8308, $8308, $8308, $8308, $8308, $8317, $0300, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=75, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=75, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=76, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=76, x=16
+    dw $8306, $8350, $00FF, $0705, $86A9, $8327, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328 ; L1 tiles (type/flip/metatile) y=76, x=32
+    dw $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8329, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=76, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=76, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=77, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=77, x=16
+    dw $8B06, $8350, $0305, $00FF, $8EA9, $8B27, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28 ; L1 tiles (type/flip/metatile) y=77, x=32
+    dw $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B29, $8350, $00FF, $00FF, $00FF, $00FF, $0321, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=77, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=77, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=78, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=78, x=16
+    dw $8306, $8350, $00FF, $00FF, $86A9, $8ABC, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08 ; L1 tiles (type/flip/metatile) y=78, x=32
+    dw $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B17, $00FF, $00FF, $00FF, $0705, $0341, $8750, $8706 ; L1 tiles (type/flip/metatile) y=78, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=78, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=79, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=79, x=16
+    dw $8B06, $8350, $0300, $0705, $8EA9, $82BB, $134E, $1B09, $0B46, $0B05, $0B41, $0B02, $0B23, $0B05, $0B40, $0B02 ; L1 tiles (type/flip/metatile) y=79, x=32
+    dw $0B47, $0B48, $0B24, $0B05, $0B02, $00FF, $0B02, $0B01, $00FF, $00FF, $00FF, $00FF, $86BE, $82BD, $82BD, $8EF8 ; L1 tiles (type/flip/metatile) y=79, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=79, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=80, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=80, x=16
+    dw $8306, $8350, $00FF, $00FF, $86A9, $82BB, $1B09, $00FF, $00FF, $00FF, $0B21, $00FF, $0B23, $00FF, $0B20, $00FF ; L1 tiles (type/flip/metatile) y=80, x=32
+    dw $00FF, $00FF, $0B25, $00FF, $00FF, $00FF, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $1F09, $834E, $8EF8 ; L1 tiles (type/flip/metatile) y=80, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=80, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=81, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=81, x=16
+    dw $8B06, $8350, $00FF, $00FF, $86A9, $82A9, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B03, $00FF, $0B20, $00FF ; L1 tiles (type/flip/metatile) y=81, x=32
+    dw $00FF, $00FF, $0B05, $00FF, $00FF, $00FF, $0320, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0705, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=81, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=81, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=82, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=82, x=16
+    dw $8306, $8350, $00FF, $00FF, $8EE6, $8AE6, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B00, $00FF ; L1 tiles (type/flip/metatile) y=82, x=32
+    dw $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $0320, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=82, x=48
+    dw $8081, $8081, $8081, $8081, $8B26, $8F27, $8B27, $8B27, $8B28, $8B27, $8B28, $8B27, $8F27, $8F45, $8081, $8081 ; L1 tiles (type/flip/metatile) y=82, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=83, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=83, x=16
+    dw $8B06, $8350, $0305, $00FF, $0F25, $0B02, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=83, x=32
+    dw $0325, $00FF, $00FF, $00FF, $0721, $00FF, $0320, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=83, x=48
+    dw $8081, $8081, $8081, $8081, $8B06, $8B08, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8F07, $8F29, $8F45, $8081 ; L1 tiles (type/flip/metatile) y=83, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=84, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=84, x=16
+    dw $8306, $8350, $00FF, $00FF, $0F05, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $0346, $0322, $0305, $00FF ; L1 tiles (type/flip/metatile) y=84, x=32
+    dw $0324, $8198, $8598, $0322, $0741, $0322, $0340, $0347, $0348, $00FF, $00FF, $00FF, $00FF, $0705, $8750, $8706 ; L1 tiles (type/flip/metatile) y=84, x=48
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0B46, $0B22, $0B46, $0B22, $0F41, $0B20, $1F09, $1F07, $1F29, $8F27 ; L1 tiles (type/flip/metatile) y=84, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=85, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=85, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0705, $82F9, $82DB, $82DC, $86DB, $86DC ; L1 tiles (type/flip/metatile) y=85, x=32
+    dw $82DB, $82DC, $86DB, $82DC, $82DB, $86DC, $86DB, $82DC, $82DC, $82DC, $86F9, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=85, x=48
+    dw $8B26, $8B27, $8B28, $8B27, $8B29, $8350, $00FF, $00FF, $00FF, $00FF, $0F21, $0B20, $00FF, $1F09, $1F08, $8F07 ; L1 tiles (type/flip/metatile) y=85, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=86, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=86, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8AF9, $8ADB, $8ADC, $8EDB, $8EDC ; L1 tiles (type/flip/metatile) y=86, x=32
+    dw $8ADB, $8ADC, $8EDB, $8ADC, $8ADB, $8EDC, $8EDB, $8ADC, $8ADC, $8ADC, $8EF9, $00FF, $00FF, $0700, $8750, $8706 ; L1 tiles (type/flip/metatile) y=86, x=48
+    dw $8B06, $8B07, $8B08, $8B07, $8B08, $834E, $00FF, $00FF, $00FF, $00FF, $00FF, $0B20, $00FF, $00FF, $C00C, $9040 ; L1 tiles (type/flip/metatile) y=86, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=87, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=87, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0300, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=87, x=32
+    dw $00FF, $0B46, $00FF, $00FF, $00FF, $0F02, $00FF, $0B24, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $F750, $FF06 ; L1 tiles (type/flip/metatile) y=87, x=48
+    dw $0044, $0044, $0044, $0044, $0044, $C757, $0302, $00FF, $00FF, $00FF, $00FF, $0B20, $00FF, $00FF, $D02C, $9060 ; L1 tiles (type/flip/metatile) y=87, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=88, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=88, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0320, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=88, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B05, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=88, x=48
+    dw $8306, $8307, $8308, $8307, $8307, $8307, $8308, $8317, $0321, $00FF, $00FF, $0B00, $00FF, $00FF, $D82C, $9860 ; L1 tiles (type/flip/metatile) y=88, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=89, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=89, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $00FF, $00FF, $0320, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=89, x=32
+    dw $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $0700, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=89, x=48
+    dw $8326, $8327, $8328, $8327, $8327, $8327, $8329, $8350, $0341, $0346, $00FF, $00FF, $0302, $0322, $D80C, $9840 ; L1 tiles (type/flip/metatile) y=89, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=90, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=90, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0325, $00FF, $0721, $0320, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=90, x=32
+    dw $00FF, $0305, $00FF, $00FF, $00FF, $00FF, $0321, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=90, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8306, $8307, $8308, $8308, $8708, $8708, $8308, $8308, $8708, $8707 ; L1 tiles (type/flip/metatile) y=90, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=91, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=91, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $0346, $0302, $0705, $0324, $0302, $0741, $0341, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=91, x=32
+    dw $0302, $0325, $0302, $0347, $0348, $0722, $0341, $0346, $0324, $00FF, $00FF, $0722, $0347, $0348, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=91, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8326, $8327, $8727, $8727, $8727, $8727, $8727, $8727, $8727, $8727 ; L1 tiles (type/flip/metatile) y=91, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=92, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=92, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $82F9, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB ; L1 tiles (type/flip/metatile) y=92, x=32
+    dw $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DC, $82DB, $82DB, $82DC, $82DB, $82DC, $86DC, $8737 ; L1 tiles (type/flip/metatile) y=92, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=92, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=93, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=93, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $8AF9, $8ADB, $86F8, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=93, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=93, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=93, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=94, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=94, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $0F05, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=94, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=94, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=94, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=95, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=95, x=16
+    dw $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=95, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=95, x=48
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=95, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=96, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=96, x=16
+    dw $8B06, $8350, $0305, $00FF, $00FF, $00FF, $0705, $8750, $8F29, $8B28, $8B27, $8B28, $8B27, $8B28, $8B28, $8B28 ; L1 tiles (type/flip/metatile) y=96, x=32
+    dw $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8B28, $8F26 ; L1 tiles (type/flip/metatile) y=96, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=96, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=97, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=97, x=16
+    dw $8B06, $8350, $0324, $0301, $00FF, $00FF, $00FF, $8F17, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B08, $8B08 ; L1 tiles (type/flip/metatile) y=97, x=32
+    dw $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8B08, $8F06 ; L1 tiles (type/flip/metatile) y=97, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=97, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=98, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=98, x=16
+    dw $8AF8, $86DC, $86DB, $86F9, $00FF, $00FF, $00FF, $0B02, $00FF, $0B24, $0B46, $0B02, $00FF, $8750, $834E, $8350 ; L1 tiles (type/flip/metatile) y=98, x=32
+    dw $0B02, $00FF, $0323, $0B46, $00FF, $0B41, $00FF, $00FF, $0B47, $0B48, $0B02, $86E4, $834E, $8B4E, $8F4E, $8706 ; L1 tiles (type/flip/metatile) y=98, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=98, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=99, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=99, x=16
+    dw $82F8, $8EDC, $8EDB, $8EF9, $00FF, $00FF, $00FF, $00FF, $00FF, $0B05, $00FF, $00FF, $00FF, $8F17, $834E, $8B17 ; L1 tiles (type/flip/metatile) y=99, x=32
+    dw $00FF, $00FF, $0323, $00FF, $00FF, $0B21, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B24, $86E4, $834E, $8F06 ; L1 tiles (type/flip/metatile) y=99, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=99, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=100, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=100, x=16
+    dw $8306, $8350, $0B46, $0B01, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0303, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=100, x=32
+    dw $0305, $00FF, $0B03, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0325, $0F02, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=100, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=100, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=101, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=101, x=16
+    dw $8B06, $8350, $0B05, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0323, $8717, $834E, $8317 ; L1 tiles (type/flip/metatile) y=101, x=32
+    dw $0324, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0B05, $00FF, $8F17, $86F8 ; L1 tiles (type/flip/metatile) y=101, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=101, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=102, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=102, x=16
+    dw $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8717, $834E, $834E, $834E, $834E ; L1 tiles (type/flip/metatile) y=102, x=32
+    dw $834E, $8317, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0300, $00FF, $00FF, $00FF, $00FF, $C00C, $9040 ; L1 tiles (type/flip/metatile) y=102, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=102, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=103, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=103, x=16
+    dw $8B06, $8350, $00FF, $00FF, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $034E, $034E, $0B4E, $874E ; L1 tiles (type/flip/metatile) y=103, x=32
+    dw $874E, $8350, $00FF, $00FF, $00FF, $00FF, $0303, $00FF, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $D02C, $9060 ; L1 tiles (type/flip/metatile) y=103, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=103, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=104, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=104, x=16
+    dw $8306, $8350, $805D, $0702, $0341, $00FF, $0305, $00FF, $030F, $00FF, $00FF, $8708, $0708, $034E, $034E, $8B4E ; L1 tiles (type/flip/metatile) y=104, x=32
+    dw $8B4E, $8350, $00FF, $00FF, $00FF, $00FF, $0323, $00FF, $00FF, $0325, $00FF, $00FF, $00FF, $00FF, $D82C, $9860 ; L1 tiles (type/flip/metatile) y=104, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=104, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=105, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=105, x=16
+    dw $8B06, $8308, $8308, $8308, $8308, $8317, $0324, $030F, $032F, $0346, $0305, $F17C, $517C, $0708, $0708, $834E ; L1 tiles (type/flip/metatile) y=105, x=32
+    dw $834E, $8350, $0346, $0301, $030F, $0301, $0323, $0347, $0348, $0324, $0302, $0346, $0301, $00FF, $D80C, $9840 ; L1 tiles (type/flip/metatile) y=105, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=105, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=106, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=106, x=16
+    dw $8326, $8327, $8328, $8327, $8329, $8308, $8308, $832F, $834F, $834C, $8308, $8307, $8308, $8308, $0308, $8307 ; L1 tiles (type/flip/metatile) y=106, x=32
+    dw $8307, $8308, $8307, $8308, $832F, $834C, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8707, $8706 ; L1 tiles (type/flip/metatile) y=106, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=106, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=107, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=107, x=16
+    dw $8081, $8081, $8081, $8081, $8326, $8727, $8328, $834F, $8081, $834F, $8328, $8327, $0328, $0328, $0328, $8327 ; L1 tiles (type/flip/metatile) y=107, x=32
+    dw $8327, $8328, $8327, $8328, $834F, $834F, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8726 ; L1 tiles (type/flip/metatile) y=107, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=107, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=108, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=108, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $0081, $0081, $0081, $8081 ; L1 tiles (type/flip/metatile) y=108, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=108, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=108, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=109, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=109, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8B26, $8B27, $0B27, $0B27, $0B27, $8F27 ; L1 tiles (type/flip/metatile) y=109, x=32
+    dw $8F26, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=109, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=109, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=110, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=110, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8B06, $8B08, $0300, $00FF, $00FF, $8F08 ; L1 tiles (type/flip/metatile) y=110, x=32
+    dw $8F06, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=110, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=110, x=64
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=111, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=111, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8B26, $8B29, $8350, $0305, $00FF, $8717, $8307 ; L1 tiles (type/flip/metatile) y=111, x=32
+    dw $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=111, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=111, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=112, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=112, x=16
+    dw $8B26, $8B28, $8B28, $8B27, $8B27, $8B28, $8B28, $8B27, $8B28, $8B29, $874E, $8B17, $00FF, $0700, $8750, $8729 ; L1 tiles (type/flip/metatile) y=112, x=32
+    dw $8726, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=112, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=112, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=113, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=113, x=16
+    dw $8B06, $8B08, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8B17, $0B05, $00FF, $0705, $8750, $8706 ; L1 tiles (type/flip/metatile) y=113, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=113, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=113, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=114, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=114, x=16
+    dw $8306, $8350, $807A, $807B, $807B, $807B, $807B, $807B, $807B, $807C, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=114, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=114, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=114, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=115, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=115, x=16
+    dw $8B06, $8350, $80BD, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0322, $8750, $8706 ; L1 tiles (type/flip/metatile) y=115, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=115, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=115, x=64
+    dw $8081, $8081, $8081, $8081, $8B26, $8B28, $8B28, $8B28, $8B28, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28 ; L1 tiles (type/flip/metatile) y=116, x=0
+    dw $8B27, $8F28, $8F26, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=116, x=16
+    dw $8306, $8350, $80BE, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8717, $8307, $8706 ; L1 tiles (type/flip/metatile) y=116, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=116, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=116, x=64
+    dw $8081, $8081, $8081, $8081, $8B06, $8B07, $8B08, $8B07, $8B08, $8B07, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08 ; L1 tiles (type/flip/metatile) y=117, x=0
+    dw $8B07, $8F07, $8F06, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=117, x=16
+    dw $8B06, $8350, $80BE, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8729, $8726 ; L1 tiles (type/flip/metatile) y=117, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=117, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=117, x=64
+    dw $8081, $8081, $8081, $8081, $8B06, $8350, $0B43, $0B44, $0B01, $0B46, $00FF, $0B40, $0B02, $00FF, $0B24, $00FF ; L1 tiles (type/flip/metatile) y=118, x=0
+    dw $0B41, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=118, x=16
+    dw $8306, $8350, $80BE, $8446, $8445, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081 ; L1 tiles (type/flip/metatile) y=118, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=118, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=118, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0305, $00FF, $00FF, $00FF, $00FF, $0320, $00FF, $00FF, $0B05, $00FF ; L1 tiles (type/flip/metatile) y=119, x=0
+    dw $0B21, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=119, x=16
+    dw $8306, $8350, $80BE, $8466, $8465, $8464, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0301, $8750, $8F06, $8081 ; L1 tiles (type/flip/metatile) y=119, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=119, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=119, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $0320, $00FF, $00FF, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=120, x=0
+    dw $00FF, $8750, $8F29, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8B28, $8B27, $8F26 ; L1 tiles (type/flip/metatile) y=120, x=16
+    dw $8B06, $8350, $88BD, $8449, $8448, $8447, $00FF, $00FF, $00FF, $00FF, $00FF, $0705, $8717, $8307, $8706, $8081 ; L1 tiles (type/flip/metatile) y=120, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=120, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=120, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $0B00, $00FF, $00FF, $0303, $00FF ; L1 tiles (type/flip/metatile) y=121, x=0
+    dw $00FF, $8F17, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8B08, $8B07, $8706 ; L1 tiles (type/flip/metatile) y=121, x=16
+    dw $8306, $8350, $807D, $807E, $807E, $807E, $807E, $807F, $00FF, $00FF, $00FF, $0700, $8750, $8729, $8726, $8081 ; L1 tiles (type/flip/metatile) y=121, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=121, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=121, x=64
+    dw $8081, $8081, $8081, $8081, $8B06, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0323, $0346 ; L1 tiles (type/flip/metatile) y=122, x=0
+    dw $0302, $00FF, $00FF, $00FF, $0B02, $0301, $00FF, $00FF, $0322, $0303, $00FF, $00FF, $0305, $0301, $00FF, $00FF ; L1 tiles (type/flip/metatile) y=122, x=16
+    dw $0306, $0350, $009D, $009E, $009E, $009E, $009E, $009E, $C49D, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=122, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=122, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=122, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8717, $8308 ; L1 tiles (type/flip/metatile) y=123, x=0
+    dw $8307, $8308, $8307, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8706 ; L1 tiles (type/flip/metatile) y=123, x=16
+    dw $8B06, $8350, $807A, $807B, $807B, $807B, $807B, $807B, $807B, $807B, $807B, $807C, $8750, $8F06, $8081, $8081 ; L1 tiles (type/flip/metatile) y=123, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=123, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=123, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0700, $8750, $8729 ; L1 tiles (type/flip/metatile) y=124, x=0
+    dw $8327, $8328, $8327, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328, $8726 ; L1 tiles (type/flip/metatile) y=124, x=16
+    dw $8306, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8308, $8307, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=124, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=124, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=124, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=125, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=125, x=16
+    dw $8326, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8328, $8327, $8327, $8327, $8328, $8726, $8081, $8081 ; L1 tiles (type/flip/metatile) y=125, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=125, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=125, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0F05, $8750, $8706 ; L1 tiles (type/flip/metatile) y=126, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=126, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=126, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=126, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=126, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=127, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=127, x=16
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=127, x=32
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=127, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=127, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0705, $00FF, $8750, $8706 ; L1 tiles (type/flip/metatile) y=128, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=128, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=128, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=128, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=128, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $0725, $0346, $8750, $8F06 ; L1 tiles (type/flip/metatile) y=129, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=129, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=129, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=129, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=129, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8717, $8308, $8308, $8706 ; L1 tiles (type/flip/metatile) y=130, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=130, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=130, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=130, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=130, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0300, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8729, $8328, $8726 ; L1 tiles (type/flip/metatile) y=131, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=131, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=131, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=131, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=131, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=132, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=132, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=132, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=132, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=132, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0305, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=133, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=133, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=133, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=133, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=133, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=134, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=134, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=134, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=134, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=134, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $00FF, $0321, $8750, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=135, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=135, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=135, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=135, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=135, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $0702, $0341, $8750, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=136, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=136, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=136, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=136, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=136, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $8717, $8308, $8308, $8706, $8081, $8081 ; L1 tiles (type/flip/metatile) y=137, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=137, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=137, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=137, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=137, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0300, $00FF, $00FF, $00FF, $8750, $8729, $8328, $8726, $8081, $8081 ; L1 tiles (type/flip/metatile) y=138, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=138, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=138, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=138, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=138, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0305, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=139, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=139, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=139, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=139, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=139, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=140, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=140, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=140, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=140, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=140, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=141, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=141, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=141, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=141, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=141, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $0300, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=142, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=142, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=142, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=142, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=142, x=64
+    dw $8081, $8081, $8081, $8081, $8306, $8350, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=143, x=0
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=143, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=143, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=143, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=143, x=64
+    dw $8081, $8081, $8B26, $8B27, $8B29, $8350, $00FF, $00FF, $86E6, $8308, $8308, $8706, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=144, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=144, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=144, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=144, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=144, x=64
+    dw $8081, $8081, $8B06, $8B07, $8B08, $8AE6, $00FF, $00FF, $8750, $8729, $8328, $8726, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=145, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=145, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=145, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=145, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=145, x=64
+    dw $8081, $8081, $8306, $8350, $0B46, $0B24, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=146, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=146, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=146, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=146, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=146, x=64
+    dw $8081, $8081, $8306, $8350, $00FF, $0325, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=147, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=147, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=147, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=147, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=147, x=64
+    dw $8B26, $8B27, $8B29, $8350, $00FF, $0B05, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=148, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=148, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=148, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=148, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=148, x=64
+    dw $8B06, $8B07, $8B08, $8AE6, $00FF, $00FF, $00FF, $00FF, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=149, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=149, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=149, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=149, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=149, x=64
+    dw $9440, $C40C, $00FF, $00FF, $00FF, $00FF, $00FF, $0301, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=150, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=150, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=150, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=150, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=150, x=64
+    dw $9460, $D42C, $00FF, $00FF, $00FF, $00FF, $00FF, $86E6, $8308, $8706, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=151, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=151, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=151, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=151, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=151, x=64
+    dw $9C60, $DC2C, $00FF, $0305, $00FF, $0321, $00FF, $8750, $8729, $8726, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=152, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=152, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=152, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=152, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=152, x=64
+    dw $9C40, $DC0C, $00FF, $0324, $0301, $0341, $0346, $8750, $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=153, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=153, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=153, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=153, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=153, x=64
+    dw $8306, $8307, $8308, $8307, $8308, $8307, $8308, $8308, $8706, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=154, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=154, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=154, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=154, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=154, x=64
+    dw $8326, $8327, $8328, $8327, $8328, $8327, $8328, $8328, $8726, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=155, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=155, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=155, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=155, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=155, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=156, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=156, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=156, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=156, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=156, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=157, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=157, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=157, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=157, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=157, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=158, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=158, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=158, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=158, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=158, x=64
+    dw $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081, $8081 ; L1 tiles (type/flip/metatile) y=159, x=0
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=159, x=16
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=159, x=32
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=159, x=48
+    dw $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF, $83FF ; L1 tiles (type/flip/metatile) y=159, x=64
+    ; BTS · row-major · coordinates are zero-based
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=0, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=1, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=2, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=3, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=4, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=5, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=0
+    db $04, $41, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $40, $00 ; BTS y=6, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=6, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=0
+    db $04, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $00 ; BTS y=7, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=7, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=0
+    db $04, $FE, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=16
+    db $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FE, $00 ; BTS y=8, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=8, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=0
+    db $04, $FD, $00, $00, $00, $12, $13, $13, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FD, $00 ; BTS y=9, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=9, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=10, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=11, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=12, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=13, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $93, $00, $00 ; BTS y=14, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=14, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $00, $00 ; BTS y=15, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=15, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=16, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=16, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=16, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=16, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=16, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=17, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=17, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=17, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=17, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=17, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=18, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=18, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=18, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=18, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=18, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=19, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=19, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=19, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=19, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=19, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=20, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=20, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=20, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=20, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=20, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=21, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=21, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=21, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=21, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=21, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=22, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=22, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $D3, $D3, $D2, $00, $00, $00, $00, $00, $00 ; BTS y=22, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=22, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=22, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=23, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=23, x=16
+    db $00, $00, $00, $00, $00, $00, $D3, $D3, $D2, $00, $00, $00, $00, $00, $00, $00 ; BTS y=23, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=23, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=23, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=24, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=24, x=16
+    db $00, $00, $00, $00, $00, $D3, $D3, $D2, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=24, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=24, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=24, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=25, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=25, x=16
+    db $00, $00, $00, $00, $D3, $D3, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=25, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=25, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=25, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=26, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=26, x=16
+    db $00, $00, $00, $D3, $D3, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=26, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=26, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=26, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=27, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=27, x=16
+    db $00, $00, $D3, $D3, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=27, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=27, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=27, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=28, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=28, x=16
+    db $00, $00, $D3, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=28, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=28, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=28, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=29, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=29, x=16
+    db $00, $00, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=29, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=29, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=29, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=30, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=30, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=30, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=30, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=30, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=31, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=31, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=31, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=31, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=31, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=32, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=32, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=32, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=32, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=32, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=33, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=33, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=33, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=33, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=33, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=34, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=34, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=34, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=34, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=34, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=35, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=35, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=35, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=35, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=35, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=36, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=36, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=36, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=36, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=36, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=37, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=37, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=37, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=37, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=37, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=38, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=38, x=16
+    db $01, $41, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=38, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $00, $00 ; BTS y=38, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=38, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=39, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=39, x=16
+    db $01, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=39, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=39, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=39, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=40, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=40, x=16
+    db $01, $FE, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=40, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=40, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=40, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=41, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=41, x=16
+    db $01, $FD, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=41, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=41, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=41, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=42, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=42, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=42, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=42, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=42, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=43, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=43, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=43, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=43, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=43, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=44, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=44, x=16
+    db $00, $00, $93, $93, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=44, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=44, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=44, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=45, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=45, x=16
+    db $00, $00, $93, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=45, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=45, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=45, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=46, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=46, x=16
+    db $00, $00, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=46, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=46, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=46, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=47, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=47, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=47, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=47, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=47, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=48, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=48, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=48, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=48, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=48, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=49, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=49, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=49, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=49, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=49, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=50, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=50, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=50, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=50, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=50, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=51, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=51, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=51, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=51, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=51, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=52, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=52, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=52, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=52, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=52, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=53, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=53, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=53, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=53, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=53, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=54, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=54, x=16
+    db $05, $00, $00, $09, $09, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=54, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=54, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=54, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=55, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=55, x=16
+    db $05, $00, $00, $09, $09, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=55, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=55, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=55, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=56, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=56, x=16
+    db $05, $00, $00, $09, $09, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=56, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=56, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=56, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=57, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=57, x=16
+    db $05, $00, $00, $09, $09, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=57, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=57, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=57, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=58, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=58, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=58, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=58, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=58, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=59, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=59, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=59, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=59, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=59, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=60, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=60, x=16
+    db $00, $00, $05, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=60, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=60, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=60, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=61, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=61, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=61, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=61, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=61, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=62, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=62, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=62, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=62, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=62, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=63, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=63, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=63, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=63, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=63, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=64, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=64, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=64, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=64, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=64, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=65, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=65, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=65, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=65, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=65, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=66, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=66, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=66, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=66, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=66, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=67, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=67, x=16
+    db $00, $00, $00, $00, $00, $00, $03, $FF, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=67, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=67, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=67, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=68, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=68, x=16
+    db $00, $00, $00, $00, $00, $00, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=68, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $00, $00 ; BTS y=68, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=68, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=69, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=69, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=69, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=69, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=69, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=70, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=70, x=16
+    db $02, $41, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=70, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $40, $07 ; BTS y=70, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=70, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=71, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=71, x=16
+    db $02, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=71, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $07 ; BTS y=71, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=71, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=72, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=72, x=16
+    db $02, $FE, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=72, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FE, $07 ; BTS y=72, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=72, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=73, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=73, x=16
+    db $02, $FD, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=73, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FD, $07 ; BTS y=73, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=73, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=74, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=74, x=16
+    db $00, $00, $01, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=74, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=74, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=74, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=75, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=75, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=75, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=75, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=75, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=76, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=76, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=76, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=76, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=76, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=77, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=77, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=77, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=77, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=77, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=78, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=78, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=78, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=78, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=78, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=79, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=79, x=16
+    db $00, $00, $00, $00, $00, $00, $93, $D2, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=79, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=79, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=79, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=80, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=80, x=16
+    db $00, $00, $00, $00, $00, $00, $D2, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=80, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $00, $00 ; BTS y=80, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=80, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=81, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=81, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=81, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=81, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=81, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=82, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=82, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=82, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=82, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=82, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=83, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=83, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=83, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=83, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=83, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=84, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=84, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=84, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=84, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $D3, $93, $00 ; BTS y=84, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=85, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=85, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=85, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=85, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $92, $D3, $00 ; BTS y=85, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=86, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=86, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=86, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=86, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $40, $08 ; BTS y=86, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=87, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=87, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=87, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $04, $04 ; BTS y=87, x=48
+    db $00, $00, $00, $00, $00, $0B, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $08 ; BTS y=87, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=88, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=88, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=88, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=88, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FE, $08 ; BTS y=88, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=89, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=89, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=89, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=89, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FD, $08 ; BTS y=89, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=90, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=90, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=90, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=90, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=90, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=91, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=91, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=91, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=91, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=91, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=92, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=92, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=92, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=92, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=92, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=93, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=93, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=93, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=93, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=93, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=94, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=94, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=94, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=94, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=94, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=95, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=95, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=95, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=95, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=95, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=96, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=96, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=96, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=96, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=96, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=97, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=97, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=97, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=97, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=97, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=98, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=98, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=98, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=98, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=98, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=99, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=99, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=99, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=99, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=99, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=100, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=100, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=100, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=100, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=100, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=101, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=101, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=101, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=101, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=101, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=102, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=102, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=102, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $40, $03 ; BTS y=102, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=102, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=103, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=103, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=103, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $03 ; BTS y=103, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=103, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=104, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=104, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=104, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FE, $03 ; BTS y=104, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=104, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=105, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=105, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $05, $FF, $00, $00, $00 ; BTS y=105, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FD, $03 ; BTS y=105, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=105, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=106, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=106, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=106, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=106, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=106, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=107, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=107, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=107, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=107, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=107, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=108, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=108, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=108, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=108, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=108, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=109, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=109, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=109, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=109, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=109, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=110, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=110, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=110, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=110, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=110, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=111, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=111, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=111, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=111, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=111, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=112, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=112, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=112, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=112, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=112, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=113, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=113, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=113, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=113, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=113, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=114, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=114, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=114, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=114, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=114, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=115, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=115, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=115, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=115, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=115, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=116, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=116, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=116, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=116, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=116, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=117, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=117, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=117, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=117, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=117, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=118, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=118, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=118, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=118, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=118, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=119, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=119, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=119, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=119, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=119, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=120, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=120, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=120, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=120, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=120, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=121, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=121, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=121, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=121, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=121, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=122, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=122, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $09, $00, $00, $00, $00, $00, $00, $00 ; BTS y=122, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=122, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=122, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=123, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=123, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=123, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=123, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=123, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=124, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=124, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=124, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=124, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=124, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=125, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=125, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=125, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=125, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=125, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=126, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=126, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=126, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=126, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=126, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=127, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=127, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=127, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=127, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=127, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=128, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=128, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=128, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=128, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=128, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=129, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=129, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=129, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=129, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=129, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=130, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=130, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=130, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=130, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=130, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=131, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=131, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=131, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=131, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=131, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=132, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=132, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=132, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=132, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=132, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=133, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=133, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=133, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=133, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=133, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=134, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=134, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=134, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=134, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=134, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=135, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=135, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=135, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=135, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=135, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=136, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=136, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=136, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=136, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=136, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=137, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=137, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=137, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=137, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=137, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=138, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=138, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=138, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=138, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=138, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=139, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=139, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=139, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=139, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=139, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=140, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=140, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=140, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=140, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=140, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=141, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=141, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=141, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=141, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=141, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=142, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=142, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=142, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=142, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=142, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=143, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=143, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=143, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=143, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=143, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=144, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=144, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=144, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=144, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=144, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=145, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=145, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=145, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=145, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=145, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=146, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=146, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=146, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=146, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=146, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=147, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=147, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=147, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=147, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=147, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=148, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=148, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=148, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=148, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=148, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=149, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=149, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=149, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=149, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=149, x=64
+    db $06, $41, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=150, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=150, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=150, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=150, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=150, x=64
+    db $06, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=151, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=151, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=151, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=151, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=151, x=64
+    db $06, $FE, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=152, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=152, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=152, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=152, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=152, x=64
+    db $06, $FD, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=153, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=153, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=153, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=153, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=153, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=154, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=154, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=154, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=154, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=154, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=155, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=155, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=155, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=155, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=155, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=156, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=156, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=156, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=156, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=156, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=157, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=157, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=157, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=157, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=157, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=158, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=158, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=158, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=158, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=158, x=64
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=159, x=0
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=159, x=16
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=159, x=32
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=159, x=48
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00 ; BTS y=159, x=64
+endmacro
+
+macro SmeditLayout_9D19_State_73746174652d31()
+    %SmeditLayout_9D19_Data_6c6576656c2d31()
+endmacro
+

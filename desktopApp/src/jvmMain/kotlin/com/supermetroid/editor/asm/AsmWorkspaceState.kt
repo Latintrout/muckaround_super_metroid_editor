@@ -16,6 +16,9 @@ import java.time.Instant
 
 internal enum class AsmBrowserMode { SOURCE, GENERATED_ROOMS, PLM_PLACEMENT, ASSETS, LIBRARY, ROM }
 
+internal data class AsmRoomSourceInspection(val roomId: Int, val title: String, val text: String, val stateId: String? = null,
+                                          val fileId: String = PLM_SOURCE_FILE, val startEditing: () -> Unit)
+
 /** Capture on the caller thread; perform bounded source normalization away from the UI. */
 internal interface AsmSourceSaveParticipant {
     val sourceFileIds: Set<String>
@@ -40,6 +43,7 @@ internal sealed interface AsmWorkspaceLocation {
     data class Rom(val view: AsmRomPreviewView) : AsmWorkspaceLocation
     data class GeneratedRooms(val lineIndex: Int, val buildWrites: Boolean = false) : AsmWorkspaceLocation
     data class PlmPlacement(val snapshot: AsmPlmPlacementSnapshot) : AsmWorkspaceLocation
+    data class RoomSourceInspection(val snapshot: AsmRoomSourceInspection) : AsmWorkspaceLocation
 }
 
 internal sealed interface AsmReferenceExpansionTarget {
@@ -134,6 +138,7 @@ internal class AsmWorkspaceState(
         private set
     var plmPlacementSnapshot by mutableStateOf<AsmPlmPlacementSnapshot?>(null)
         private set
+    /** One sidebar search shared across browser modes, independent of navigation history. */
     var query by mutableStateOf("")
     private var selectedFileIdValue by mutableStateOf<String?>(null)
     var selectedFileId: String?
@@ -264,6 +269,8 @@ internal class AsmWorkspaceState(
     private val sourceUndoStacks = mutableMapOf<String, MutableList<AsmSourceTextChange>>()
     private val sourceRedoStacks = mutableMapOf<String, MutableList<AsmSourceTextChange>>()
     var sourceSaveParticipant: AsmSourceSaveParticipant? = null
+    var roomSourceInspection by mutableStateOf<AsmRoomSourceInspection?>(null)
+        private set
     var sourceIndexingInProgress by mutableStateOf(false)
         private set
     var sourceIndexingStatus by mutableStateOf("")
@@ -298,6 +305,7 @@ internal class AsmWorkspaceState(
         get() = projectModifiedFileIds.isNotEmpty() || activeUnsavedSourceFileIds.isNotEmpty()
     val isProjectSourceEditable: Boolean
         get() = workspaceKind == AsmWorkspaceKind.PROJECT &&
+            roomSourceInspection == null &&
             browserMode == AsmBrowserMode.SOURCE &&
             selectedFileId != null
     val sourceBuildRequired: Boolean
@@ -305,6 +313,7 @@ internal class AsmWorkspaceState(
             (activeUnsavedSourceFileIds.isNotEmpty() || buildReport?.succeeded != true)
     val sourceStatusSummary: String
         get() {
+            if (roomSourceInspection != null) return "Room source · read-only preview · not adopted"
             if (browserMode == AsmBrowserMode.GENERATED_ROOMS) {
                 return if (showRoomBuildWrites) "Room Data · build writes · last compilation" else "Room Data · last successful build"
             }
@@ -542,6 +551,7 @@ internal class AsmWorkspaceState(
     }
 
     fun showReferenceWorkspace() {
+        roomSourceInspection = null
         val reference = referenceWorkspace ?: return
         workspace = reference
         workspaceKind = AsmWorkspaceKind.REFERENCE
@@ -569,14 +579,15 @@ internal class AsmWorkspaceState(
     }
 
     fun showSourceBrowser() {
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.SOURCE
-        query = ""
         selectedAssetPath = null
         navigationSerial++
     }
 
     fun openPlmPlacement(snapshot: AsmPlmPlacementSnapshot, addToHistory: Boolean = true) {
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         plmPlacementSnapshot = snapshot
         browserMode = AsmBrowserMode.PLM_PLACEMENT
         if (addToHistory) forwardStack.clear()
@@ -585,6 +596,7 @@ internal class AsmWorkspaceState(
     fun openGeneratedRooms(lineIndex: Int = 0, addToHistory: Boolean = true, buildWrites: Boolean = showRoomBuildWrites) {
         if (!hasProjectWorkspace) return
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         restoreWorkspaceKind(AsmWorkspaceKind.PROJECT)
         browserMode = AsmBrowserMode.GENERATED_ROOMS
         showRoomBuildWrites = buildWrites
@@ -599,8 +611,8 @@ internal class AsmWorkspaceState(
     }
 
     fun showAssetBrowser() {
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.ASSETS
-        query = ""
         if (selectedAssetPath == null) {
             selectedAssetPath = workspace?.index?.assets?.firstOrNull()?.range?.path
         }
@@ -608,24 +620,24 @@ internal class AsmWorkspaceState(
     }
 
     fun showLibraryBrowser() {
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.LIBRARY
-        query = ""
         selectedAssetPath = null
         navigationSerial++
     }
 
     fun showRomBrowser() {
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.ROM
-        query = ""
         selectedAssetPath = null
         navigationSerial++
     }
 
     fun selectRomPreviewView(view: AsmRomPreviewView, addToHistory: Boolean = true) {
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.ROM
         romPreviewView = view
-        query = ""
         navigationSerial++
         if (addToHistory) forwardStack.clear()
     }
@@ -725,6 +737,7 @@ internal class AsmWorkspaceState(
             liveDiagnostics = emptyList()
         }
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         if (!preserveReferences) {
             activeReferenceSymbol = null
             activeReferenceMacro = null
@@ -743,6 +756,16 @@ internal class AsmWorkspaceState(
         selectedInstruction = null
         selectedInstructionToken = null
         navigationSerial++
+        if (addToHistory) forwardStack.clear()
+    }
+
+    fun openRoomSourceInspection(snapshot: AsmRoomSourceInspection, addToHistory: Boolean = true) {
+        val project = projectWorkspace ?: return
+        if (project.referenceWorkspace.index.file(snapshot.fileId) == null) return
+        if (addToHistory) rememberCurrentLocation()
+        activateProjectWorkspace(project)
+        openSource(snapshot.fileId, addToHistory = false)
+        roomSourceInspection = snapshot
         if (addToHistory) forwardStack.clear()
     }
 
@@ -805,6 +828,7 @@ internal class AsmWorkspaceState(
     }
 
     fun updateSourceEditText(fileId: String, text: String, undoChange: AsmSourceTextChange? = null) {
+        if (roomSourceInspection != null) return
         if (workspaceKind != AsmWorkspaceKind.PROJECT || workspace?.index?.file(fileId) == null) return
         val previous = sourceEditText(fileId)
         if (previous == text) return
@@ -855,7 +879,8 @@ internal class AsmWorkspaceState(
     internal fun sourceUndoHead(fileId: String): AsmSourceTextChange? = sourceUndoStacks[fileId]?.lastOrNull()
     internal fun sourceRedoHead(fileId: String): AsmSourceTextChange? = sourceRedoStacks[fileId]?.lastOrNull()
 
-    fun undoSourceEdit(fileId: String? = selectedFileId): Boolean {
+    fun undoSourceEdit(fileId: String? = selectedFileId, fromRoomEditor: Boolean = false): Boolean {
+        if (roomSourceInspection != null && !fromRoomEditor) return false
         val selectedId = fileId ?: return false
         val undo = sourceUndoStacks[selectedId] ?: return false
         val change = undo.lastOrNull() ?: return false
@@ -873,7 +898,8 @@ internal class AsmWorkspaceState(
         return true
     }
 
-    fun redoSourceEdit(fileId: String? = selectedFileId): Boolean {
+    fun redoSourceEdit(fileId: String? = selectedFileId, fromRoomEditor: Boolean = false): Boolean {
+        if (roomSourceInspection != null && !fromRoomEditor) return false
         val selectedId = fileId ?: return false
         val redo = sourceRedoStacks[selectedId] ?: return false
         val change = redo.lastOrNull() ?: return false
@@ -1374,6 +1400,7 @@ internal class AsmWorkspaceState(
     fun openAsset(path: String, addToHistory: Boolean = true) {
         val asset = workspace?.index?.asset(path) ?: return
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.ASSETS
         selectedAssetPath = asset.range.path
         selectedAssetCategory = asset.category
@@ -1526,7 +1553,6 @@ internal class AsmWorkspaceState(
         if (AsmInstructionReference.find(normalized) == null) return
         rememberCurrentLocation()
         browserMode = AsmBrowserMode.LIBRARY
-        query = ""
         selectedInstruction = normalized
         selectedInstructionToken = token
         selectedLibraryPageId = AsmLibrary.instructionPageId(normalized)
@@ -1538,8 +1564,8 @@ internal class AsmWorkspaceState(
     fun openLibraryGuide(pageId: String, addToHistory: Boolean = true) {
         val guide = AsmLibrary.guide(pageId) ?: return
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.LIBRARY
-        query = ""
         selectedInstruction = null
         selectedInstructionToken = null
         selectedLibraryPageId = guide.id
@@ -1552,8 +1578,8 @@ internal class AsmWorkspaceState(
         val token = mnemonic.uppercase()
         val instruction = AsmInstructionReference.find(token.substringBefore('.')) ?: return
         if (addToHistory) rememberCurrentLocation()
+        roomSourceInspection = null
         browserMode = AsmBrowserMode.LIBRARY
-        query = ""
         selectedInstruction = instruction.mnemonic
         selectedInstructionToken = token
         selectedLibraryPageId = AsmLibrary.instructionPageId(instruction.mnemonic)
@@ -1638,6 +1664,7 @@ internal class AsmWorkspaceState(
     }
 
     private fun clearEditSessions() {
+        roomSourceInspection = null
         cancelSourceIndexing()
         sourceSaveParticipant = null
         sourceBuffers.clear()
@@ -1680,7 +1707,7 @@ internal class AsmWorkspaceState(
         pendingSnesAddress?.let(::openAddress)
     }
 
-    internal fun locationSnapshot(): AsmWorkspaceLocation? = when (browserMode) {
+    internal fun locationSnapshot(): AsmWorkspaceLocation? = roomSourceInspection?.let(AsmWorkspaceLocation::RoomSourceInspection) ?: when (browserMode) {
         AsmBrowserMode.SOURCE -> selectedFileId?.let {
             AsmWorkspaceLocation.Source(
                 fileId = it,
@@ -1730,6 +1757,7 @@ internal class AsmWorkspaceState(
             is AsmWorkspaceLocation.Rom -> selectRomPreviewView(location.view, addToHistory = false)
             is AsmWorkspaceLocation.GeneratedRooms -> openGeneratedRooms(location.lineIndex, addToHistory = false, buildWrites = location.buildWrites)
             is AsmWorkspaceLocation.PlmPlacement -> openPlmPlacement(location.snapshot, addToHistory = false)
+            is AsmWorkspaceLocation.RoomSourceInspection -> openRoomSourceInspection(location.snapshot, addToHistory = false)
         }
     }
 

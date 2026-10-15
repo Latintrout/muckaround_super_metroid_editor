@@ -54,6 +54,26 @@ class AsmRoomLayoutSourceTest {
     private fun Fixture.adopt() { assertTrue(editor.ensureLayoutSource("Landing Site"), editor.statusMessage) }
     private fun Fixture.inputs() = AsmRoomLayoutSource(bridge.sourceText()).resources(project.rooms.getValue("91F8"), editor.workingBlocksWide, editor.workingBlocksTall)
 
+    @Test fun `inspecting layout and property source leaves project buffers ownership and undo untouched`() = runBlocking {
+        val f = fixture()
+        val model = Json.encodeToString(SmEditProject.serializer(), f.project)
+        val source = f.bridge.sourceText()
+        val revision = f.workspace.sourceBufferRevision
+        val history = f.editor.undoStack.toList()
+        val dirty = f.editor.dirty
+        assertContains(f.editor.inspectRoomSource("Landing Site"), "macro SmeditLayout_")
+        assertContains(f.editor.inspectRoomSource("Landing Site", properties = true), "macro SmeditRoomInfo_")
+        assertContains(f.editor.inspectRoomSource("Landing Site", selectors = true), "macro SmeditSelectors_")
+        assertEquals(model, Json.encodeToString(SmEditProject.serializer(), f.project))
+        assertEquals(source, f.bridge.sourceText()); assertEquals(revision, f.workspace.sourceBufferRevision)
+        assertEquals(history, f.editor.undoStack); assertEquals(dirty, f.editor.dirty)
+        f.adopt()
+        val adopted = f.bridge.sourceText()
+        val ownedRevision = f.workspace.sourceBufferRevision
+        f.adopt()
+        assertEquals(adopted, f.bridge.sourceText()); assertEquals(ownedRevision, f.workspace.sourceBufferRevision)
+    }
+
     @Test fun `adoption retains edited geometry retires JSON tile deltas and undoes as one source boundary`() = runBlocking {
         val f = fixture(layer2 = true)
         f.editor.applyBulkEdits("Legacy geometry", listOf(TileEdit(8, 8, 0, 0x8123, 0, 7), TileEdit(9, 9, 0, 0x123, layer = TILE_EDIT_LAYER_2)))

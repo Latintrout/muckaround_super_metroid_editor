@@ -444,12 +444,15 @@ fun MapCanvas(
                         val romHeader = romParser.readRoomHeader(roomId)
                         if (romHeader != null) {
                             // Apply any project header changes (e.g. resize) before loading/rendering
-                            val roomHeader = editorState?.applyHeaderChanges(romHeader) ?: romHeader
                             // Load working level data for editing
                             editorState?.loadRoomForCanvas(roomId, romParser, romHeader)
+                            val roomHeader = editorState?.applyHeaderChanges(romHeader) ?: romHeader
                             // Render using effective dimensions and resized level data
                             val es = editorState
-                            renderData = if (es?.hasManagedLayouts() == true && es.workingLevelData == null) {
+                            renderData = if (es?.roomPropertiesPreviewAvailable() == false) {
+                                errorMessage = es.roomPropertiesPreviewProblem ?: es.selectorPreviewProblem ?: "Wait for the room header/state source."
+                                null
+                            } else if (es?.hasManagedLayouts() == true && es.workingLevelData == null) {
                                 errorMessage = es.layoutPreviewProblem ?: "Wait for the room layout source."
                                 null
                             } else if (es?.workingLevelData != null) {
@@ -471,7 +474,8 @@ fun MapCanvas(
                 }
 
                 val editVersion = editorState?.editVersion ?: 0
-                val sourceLayoutReady = editorState?.hasManagedLayouts() == true && editorState.workingLevelData != null
+                val sourceLayoutReady = editorState != null && (editorState.hasManagedLayouts() || editorState.hasManagedRoomProperties() || editorState.hasManagedSelectors()) &&
+                    editorState.workingLevelData != null && editorState.roomPropertiesPreviewAvailable()
                 LaunchedEffect(room.id, romParser, isLoading, sourceLayoutReady) {
                     // A saved authored layout can arrive after its asynchronous workspace bridge.
                     // Recover the initial source-only loading/error view without loading native data.

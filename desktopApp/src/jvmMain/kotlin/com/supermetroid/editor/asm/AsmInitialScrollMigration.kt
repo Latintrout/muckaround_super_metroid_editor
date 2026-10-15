@@ -16,8 +16,8 @@ internal fun planInitialScrollMigration(text: String, room: RoomEdits, parser: R
     val staged = room.copy(states = room.states.toMutableList())
     staged.ensureStateManifest(parser)
     val header = requireNotNull(parser.readRoomHeader(room.roomId))
-    val width = room.roomHeaderChange?.width ?: header.width
-    val height = room.roomHeaderChange?.height ?: header.height
+    val width = room.effectiveHeaderChange?.width ?: header.width
+    val height = room.effectiveHeaderChange?.height ?: header.height
     val inspected = parser.inspectRoomStates(room.roomId).states
     val tables = linkedMapOf<Pair<Int, List<Int>>, SourceInitialScrollResource>()
     val prefix = AsmInitialScrollSource.prefix(room.roomId)

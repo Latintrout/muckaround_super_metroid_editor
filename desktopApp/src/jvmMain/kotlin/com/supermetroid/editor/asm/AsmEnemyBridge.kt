@@ -47,32 +47,7 @@ internal class AsmEnemyBridge(private val catalog: AsmPlmSourceCatalog, private 
         val staged = room.copy(states = room.states.toMutableList())
         staged.ensureStateManifest(catalog.parser)
         val before = sourceText()
-        val prefix = AsmEnemySource.prefix(roomId)
-        require(!Regex("(?m)^macro $prefix").containsMatchIn(before)) { "Existing enemy declarations need review before adoption." }
-        val populations = linkedMapOf<Pair<String?, SourceEnemyPopulation>, SourceEnemyPopulation>()
-        val graphics = linkedMapOf<Pair<String?, SourceEnemyGraphics>, SourceEnemyGraphics>()
-        val addition = buildString {
-            appendLine("; SMEDIT room actors · ${roomName.replace('\n', ' ').replace('\r', ' ')}")
-            appendLine("; dw species, pixel X, pixel Y, init, properties, extra properties, parameter 1, parameter 2.")
-            appendLine("; GFX: dw species, VRAM destination. Checked placement emits population in A1 and GFX in B4.")
-            appendLine("; State wrappers share each list independently; GUI changes detach only the selected state.")
-            appendLine("; State wrappers are planner recipes, not records to emit inline; placement invokes each table in its bank.")
-            for (state in staged.states) {
-                val baseline = original(roomId, state)
-                val pc = requireNotNull(catalog.parser.inspectRoomStates(roomId).states[requireNotNull(state.baseSourceStateIndex())].stateDataPcOffset)
-                val pointers = catalog.parser.readStateData(pc)
-                val entries = applyEnemyChanges(baseline.population.entries, room.enemyChanges + state.enemyChanges)
-                val population = populations.getOrPut(pointers["enemySetPtr"].toString() to baseline.population.copy(entries = entries)) {
-                    baseline.population.copy(identity = prefix + "Population_${populations.size + 1}", entries = entries).also { appendLine(AsmEnemySource.renderPopulation(it)) }
-                }
-                val completed = completeEnemyGraphics(catalog.parser, entries, baseline.population.entries, baseline.graphics, baseline.graphics)
-                val gfx = graphics.getOrPut(pointers["enemyGfxPtr"].toString() to completed) {
-                    completed.copy(identity = prefix + "Graphics_${graphics.size + 1}").also { appendLine(AsmEnemySource.renderGraphics(it)) }
-                }
-                appendLine(AsmEnemySource.renderState(roomId, state.id, population.identity, gfx.identity))
-            }
-        }
-        val after = before + (if (before.endsWith('\n')) "\n" else "\n\n") + addition
+        val after = migrationText(before, staged, roomName)
         val oldStates = room.states.toList()
         val common = room.enemyChanges.toList()
         val scoped = staged.states.associate { it.id to it.enemyChanges.toList() }
@@ -94,10 +69,49 @@ internal class AsmEnemyBridge(private val catalog: AsmPlmSourceCatalog, private 
             if (oldStates.isEmpty()) room.states.clear()
             metadataChanged()
         }
-        AsmEnemySource(after, catalog.symbols).resources(staged.copy(asmEnemySourceVersion = 1, enemyChanges = mutableListOf(),
-            states = staged.states.map { it.copy(enemyChanges = mutableListOf()) }.toMutableList()))
         workspace.replaceProjectSource(ENEMY_SOURCE_FILE, before, after, ::restore, ::adopt)
         adopt()
+    }
+
+    fun preview(room: RoomEdits, name: String): String {
+        catalog.requireStandardEnemyMacros(workspace.projectSourceText("macros.asm"))
+        room.ensureStateManifest(catalog.parser)
+        val before = sourceText()
+        return roomSourceAddition(before, migrationText(before, room, name))
+    }
+
+    /** The preview and adoption deliberately run the same planner and validation. */
+    private fun migrationText(before: String, staged: RoomEdits, roomName: String): String {
+        val roomId = staged.roomId
+        val prefix = AsmEnemySource.prefix(roomId)
+        require(!Regex("(?m)^macro $prefix").containsMatchIn(before)) { "Existing enemy declarations need review before adoption." }
+        val populations = linkedMapOf<Pair<String?, SourceEnemyPopulation>, SourceEnemyPopulation>()
+        val graphics = linkedMapOf<Pair<String?, SourceEnemyGraphics>, SourceEnemyGraphics>()
+        val addition = buildString {
+            appendLine("; SMEDIT room actors · ${roomName.replace('\n', ' ').replace('\r', ' ')}")
+            appendLine("; dw species, pixel X, pixel Y, init, properties, extra properties, parameter 1, parameter 2.")
+            appendLine("; GFX: dw species, VRAM destination. Checked placement emits population in A1 and GFX in B4.")
+            appendLine("; State wrappers share each list independently; GUI changes detach only the selected state.")
+            appendLine("; State wrappers are planner recipes, not records to emit inline; placement invokes each table in its bank.")
+            for (state in staged.states) {
+                val baseline = original(roomId, state)
+                val pc = requireNotNull(catalog.parser.inspectRoomStates(roomId).states[requireNotNull(state.baseSourceStateIndex())].stateDataPcOffset)
+                val pointers = catalog.parser.readStateData(pc)
+                val entries = applyEnemyChanges(baseline.population.entries, staged.enemyChanges + state.enemyChanges)
+                val population = populations.getOrPut(pointers["enemySetPtr"].toString() to baseline.population.copy(entries = entries)) {
+                    baseline.population.copy(identity = prefix + "Population_${populations.size + 1}", entries = entries).also { appendLine(AsmEnemySource.renderPopulation(it)) }
+                }
+                val completed = completeEnemyGraphics(catalog.parser, entries, baseline.population.entries, baseline.graphics, baseline.graphics)
+                val gfx = graphics.getOrPut(pointers["enemyGfxPtr"].toString() to completed) {
+                    completed.copy(identity = prefix + "Graphics_${graphics.size + 1}").also { appendLine(AsmEnemySource.renderGraphics(it)) }
+                }
+                appendLine(AsmEnemySource.renderState(roomId, state.id, population.identity, gfx.identity))
+            }
+        }
+        val after = before + (if (before.endsWith('\n')) "\n" else "\n\n") + addition
+        AsmEnemySource(after, catalog.symbols).resources(staged.copy(asmEnemySourceVersion = 1, enemyChanges = mutableListOf(),
+            states = staged.states.map { it.copy(enemyChanges = mutableListOf()) }.toMutableList()))
+        return after
     }
     fun edit(roomId: Int, stateId: String, transform: (List<RomParser.EnemyEntry>) -> List<RomParser.EnemyEntry>) {
         val current = view(roomId, stateId)

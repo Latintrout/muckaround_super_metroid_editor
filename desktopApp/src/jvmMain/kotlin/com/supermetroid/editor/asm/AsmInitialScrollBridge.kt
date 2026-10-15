@@ -23,7 +23,7 @@ internal class AsmInitialScrollBridge(
     private fun dimensions(roomId: Int): Pair<Int, Int> {
         val room = project().rooms.getValue(project().roomKey(roomId))
         val header = requireNotNull(catalog.parser.readRoomHeader(roomId))
-        return (room.roomHeaderChange?.width ?: header.width) to (room.roomHeaderChange?.height ?: header.height)
+        return (room.effectiveHeaderChange?.width ?: header.width) to (room.effectiveHeaderChange?.height ?: header.height)
     }
     fun view(roomId: Int, stateId: String): AsmInitialScrollView = try {
         val (width, height) = dimensions(roomId)
@@ -32,6 +32,11 @@ internal class AsmInitialScrollBridge(
         lastGood[roomId to stateId] = resource
         AsmInitialScrollView(resource, null)
     } catch (error: Exception) { AsmInitialScrollView(lastGood[roomId to stateId], error.message ?: "Invalid initial scroll source.") }
+
+    fun preview(room: com.supermetroid.editor.data.RoomEdits, name: String): String {
+        val before = source().text
+        return roomSourceAddition(before, planInitialScrollMigration(before, room, catalog.parser, name, catalog.symbols).text)
+    }
 
     fun migrate(roomId: Int, roomName: String) {
         if (isManaged(roomId)) return

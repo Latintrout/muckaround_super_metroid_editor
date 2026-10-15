@@ -24,7 +24,7 @@ internal class AsmRoomLayoutBridge(
     fun view(roomId: Int, stateId: String): AsmRoomLayoutView = try {
         val room = project().rooms.getValue(project().roomKey(roomId))
         val header = requireNotNull(catalog.parser.readRoomHeader(roomId))
-        val inputs = source().resources(room, (room.roomHeaderChange?.width ?: header.width) * 16, (room.roomHeaderChange?.height ?: header.height) * 16)
+        val inputs = source().resources(room, (room.effectiveHeaderChange?.width ?: header.width) * 16, (room.effectiveHeaderChange?.height ?: header.height) * 16)
         val resource = inputs.getValue(stateId)
         lastGood[roomId to stateId] = resource
         AsmRoomLayoutView(resource, null)
@@ -40,20 +40,11 @@ internal class AsmRoomLayoutBridge(
         val staged = snapshotRoomForResize(room)
         require(staged.states.isNotEmpty() && levels.keys == staged.states.map { it.id }.toSet()) { "Layout state coverage is incomplete." }
         val header = requireNotNull(catalog.parser.readRoomHeader(roomId))
-        val width = (room.roomHeaderChange?.width ?: header.width) * 16
-        val height = (room.roomHeaderChange?.height ?: header.height) * 16
+        val width = (room.effectiveHeaderChange?.width ?: header.width) * 16
+        val height = (room.effectiveHeaderChange?.height ?: header.height) * 16
         val before = source().text
         require(!Regex("(?m)^macro ${AsmRoomLayoutSource.prefix(roomId)}").containsMatchIn(before)) { "Existing layout declarations need review before adoption." }
-        val addition = buildString {
-            appendLine("; SMEDIT room layout · ${roomName.replace('\n', ' ').replace('\r', ' ')} · ${width}×$height blocks")
-            appendLine("; Editable decoded level asset. Build validates and LZ5-compresses it; do not invoke at a ROM org.")
-            for ((levelId, states) in staged.states.groupBy { it.resources.level }) {
-                val data = levels.getValue(states.first().id)
-                require(states.all { levels.getValue(it.id).contentEquals(data) }) { "Sharing states have different private geometry. Make their layouts unique before adoption." }
-                appendLine(AsmRoomLayoutSource.render(SourceRoomLayoutResource(AsmRoomLayoutSource.dataName(roomId, levelId), width, height, data.map { it.toInt() and 255 })))
-            }
-            staged.states.forEach { appendLine(AsmRoomLayoutSource.renderState(roomId, it.id, it.resources.level)) }
-        }
+        val addition = preview(staged, roomName, levels)
         fun strip(operations: MutableList<com.supermetroid.editor.data.EditOperation>) {
             val retained = operations.map { it.copy(edits = emptyList()) }.filter { it.plmAdds.isNotEmpty() || it.plmRemoves.isNotEmpty() ||
                 it.enemyAdds.isNotEmpty() || it.enemyRemoves.isNotEmpty() || it.enemyUpdates.isNotEmpty() || it.scrollEdits.isNotEmpty() ||
@@ -79,6 +70,24 @@ internal class AsmRoomLayoutBridge(
         apply(beforeModel, staged)
     }
 
+    /** Pure inspection: rendering declarations must not adopt ownership or touch source buffers. */
+    fun preview(room: RoomEdits, roomName: String, levels: Map<String, ByteArray>): String {
+        val roomId = room.roomId
+        val header = requireNotNull(catalog.parser.readRoomHeader(roomId))
+        val width = (room.effectiveHeaderChange?.width ?: header.width) * 16
+        val height = (room.effectiveHeaderChange?.height ?: header.height) * 16
+        return buildString {
+            appendLine("; SMEDIT room layout · ${roomName.replace('\n', ' ').replace('\r', ' ')} · ${width}×$height blocks")
+            appendLine("; Editable decoded level asset. Build validates and LZ5-compresses it; do not invoke at a ROM org.")
+            for ((levelId, states) in room.states.groupBy { it.resources.level }) {
+                val data = levels.getValue(states.first().id)
+                require(states.all { levels.getValue(it.id).contentEquals(data) }) { "Sharing states have different private geometry. Make their layouts unique before adoption." }
+                appendLine(AsmRoomLayoutSource.render(SourceRoomLayoutResource(AsmRoomLayoutSource.dataName(roomId, levelId), width, height, data.map { it.toInt() and 255 })))
+            }
+            room.states.forEach { appendLine(AsmRoomLayoutSource.renderState(roomId, it.id, it.resources.level)) }
+        }
+    }
+
     fun edit(roomId: Int, stateId: String, edits: List<TileEdit>, beforeUndo: () -> Unit = {}, beforeRedo: () -> Unit = {}): Boolean {
         val room = project().rooms.getValue(project().roomKey(roomId))
         val view = view(roomId, stateId)
@@ -88,9 +97,9 @@ internal class AsmRoomLayoutBridge(
         val after = current.edit(room, stateId, resource.width, resource.height, edits)
         if (after == current.text) return false
         val links = room.states.map { it.id to it.resources.level }
-        val dimensions = room.roomHeaderChange
+        val dimensions = room.effectiveHeaderChange
         fun validate() {
-            require(project().rooms[project().roomKey(roomId)] === room && room.states.map { it.id to it.resources.level } == links && room.roomHeaderChange == dimensions) { "Undo newer layout sharing/dimension changes first." }
+            require(project().rooms[project().roomKey(roomId)] === room && room.states.map { it.id to it.resources.level } == links && room.effectiveHeaderChange == dimensions) { "Undo newer layout sharing/dimension changes first." }
         }
         workspace.replaceProjectSource(PLM_SOURCE_FILE, current.text, after,
             beforeUndo = { validate(); beforeUndo() }, beforeRedo = { validate(); beforeRedo() })

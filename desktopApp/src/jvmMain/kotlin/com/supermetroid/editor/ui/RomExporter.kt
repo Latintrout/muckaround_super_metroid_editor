@@ -215,12 +215,24 @@ internal class RomExporter(
     private val sourceFx: Map<Int, Map<String, com.supermetroid.editor.rom.SourceFxResource>> = emptyMap(),
     private val sourceEnemies: Map<Int, Map<String, com.supermetroid.editor.rom.SourceEnemyResources>> = emptyMap(),
     private val sourceLayouts: Map<Int, Map<String, com.supermetroid.editor.rom.SourceRoomLayoutResource>> = emptyMap(),
+    private val sourceRoomProperties: Map<Int, com.supermetroid.editor.rom.SourceRoomProperties> = emptyMap(),
+    private val sourceSelectors: Map<Int, com.supermetroid.editor.rom.SourceRoomSelectors> = emptyMap(),
     private val projectFilePath: String = "",
 ) {
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        if (project.rooms.values.any { it.asmStateSelectorsSourceVersion != 0 && it.roomId !in sourceSelectors && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
+            onLog("ERROR: Authored selectors require validated ASM build inputs.")
+            onStatus("Authored selectors require validated ASM build inputs.")
+            return null
+        }
+        if (project.rooms.values.any { it.asmRoomPropertiesSourceVersion != 0 && it.roomId !in sourceRoomProperties && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
+            onLog("ERROR: Authored room header/state properties require validated ASM build inputs.")
+            onStatus("Authored room header/state properties require validated ASM build inputs.")
+            return null
+        }
         if (project.rooms.values.any { it.asmLayoutSourceVersion != 0 && it.roomId !in sourceLayouts && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
             onLog("ERROR: Authored room layouts require validated ASM build inputs.")
             onStatus("Authored room layouts require validated ASM build inputs.")
@@ -474,7 +486,7 @@ internal class RomExporter(
                                 romData = workingRom,
                                 roomAreaOverrides = project.rooms.mapNotNull { (key, edits) ->
                                     val roomId = key.toIntOrNull(16) ?: return@mapNotNull null
-                                    edits.roomHeaderChange?.area?.let { roomId to it }
+                                    edits.effectiveHeaderChange?.area?.let { roomId to it }
                                 }.toMap(),
                                 freeSpaceAllocator = freeSpaceAllocator,
                                 onLog = onLog,
@@ -483,6 +495,8 @@ internal class RomExporter(
                                 sourceFx = sourceFx,
                                 sourceEnemies = sourceEnemies,
                                 sourceLayouts = sourceLayouts,
+                                sourceRoomProperties = sourceRoomProperties,
+                                sourceSelectors = sourceSelectors,
                             ).exportRooms()
                         }
                         roomsPatched.addAll(roomExportResult.roomsPatched)

@@ -436,7 +436,12 @@ data class RoomStateEdits(
     val doorFxChanges: MutableMap<String, FxChange> = mutableMapOf(),
     var stateDataChange: StateDataChange? = null,
     val customScrollCommands: MutableMap<String, MutableList<ScrollCommand>> = mutableMapOf(),
+    /** Disposable source preview; never a second persisted copy of state fields. */
+    @kotlinx.serialization.Transient var asmStatePropertiesProjection: StateDataChange? = null,
+    @kotlinx.serialization.Transient var asmConditionProjection: ProjectRoomStateCondition? = null,
 ) {
+    val effectiveCondition: ProjectRoomStateCondition get() = asmConditionProjection ?: condition
+    val effectiveStateDataChange: StateDataChange? get() = asmStatePropertiesProjection ?: stateDataChange
     val hasEdits: Boolean get() =
         conditionChanged || resourcesChanged || levelResourceChanged || operations.isNotEmpty() ||
             plmChanges.isNotEmpty() || enemyChanges.isNotEmpty() ||
@@ -501,9 +506,19 @@ data class RoomEdits(
     var asmEnemySourceVersion: Int = 0,
     /** Decoded layout/BTS/L2 declarations in project ASM; JSON stores ownership only. */
     var asmLayoutSourceVersion: Int = 0,
+    /** Header scalars and ordinary state fields are authored in project bank_8F.asm. */
+    var asmRoomPropertiesSourceVersion: Int = 0,
+    @kotlinx.serialization.Transient var asmHeaderPropertiesProjection: RoomHeaderChange? = null,
+    var asmStateSelectorsSourceVersion: Int = 0,
+    @kotlinx.serialization.Transient var asmSelectorOrderProjection: List<String>? = null,
 ) {
+    val effectiveStates: List<RoomStateEdits> get() = asmSelectorOrderProjection?.mapNotNull { id -> states.firstOrNull { it.id == id } } ?: states
+    val effectiveHeaderChange: RoomHeaderChange? get() = asmHeaderPropertiesProjection?.copy(
+        width = roomHeaderChange?.width, height = roomHeaderChange?.height, doorOut = roomHeaderChange?.doorOut,
+    ) ?: roomHeaderChange
+    val effectiveStateDataChange: StateDataChange? get() = stateDataChange
     val hasEdits: Boolean get() =
-        asmLayoutSourceVersion != 0 || asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || asmEnemySourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
+        asmStateSelectorsSourceVersion != 0 || asmRoomPropertiesSourceVersion != 0 || asmLayoutSourceVersion != 0 || asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || asmEnemySourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
             states.any { it.hasEdits } || operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||
@@ -944,7 +959,7 @@ data class SmEditProject(
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
-        const val CURRENT_PROJECT_FORMAT_VERSION = 14
+        const val CURRENT_PROJECT_FORMAT_VERSION = 16
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.widthIn
 import com.supermetroid.editor.ui.ProjectToolbar
 import com.supermetroid.editor.ui.ProjectToolbarActionPadding
 import com.supermetroid.editor.ui.ProjectToolbarActionMinWidth
-import com.supermetroid.editor.asm.placementAfterObjectMigration
+import com.supermetroid.editor.asm.RoomAsmSourceRequest
+import com.supermetroid.editor.asm.RoomAsmSourceKind
+import com.supermetroid.editor.asm.AsmRoomSourceLink
+import com.supermetroid.editor.ui.RoomAsmNavigation
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -95,9 +98,7 @@ import com.supermetroid.editor.asm.AsmEditorTarget
 import com.supermetroid.editor.asm.AsmReferenceContract
 import com.supermetroid.editor.asm.AsmWorkspaceState
 import com.supermetroid.editor.asm.AsmPlmSourceCatalog
-import com.supermetroid.editor.asm.AsmPlmSourceBridge
 import com.supermetroid.editor.asm.AsmPlmPlacementTarget
-import com.supermetroid.editor.asm.AsmPlmPlacementSnapshot
 import com.supermetroid.editor.ui.AsmWorkspaceCanvas
 import com.supermetroid.editor.ui.AsmWorkspaceSidebar
 import com.supermetroid.editor.ui.BossTabCanvas
@@ -553,40 +554,12 @@ fun main() = application {
                 }
             }
 
+            val roomAsmNavigation = RoomAsmNavigation(editorState, asmWorkspaceState,
+                roomName = { selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}" },
+                navigate = ::navigate, showAsm = { leftTab = TAB_ASM })
+
             fun openPlmPlacement(entry: RomParser.PlmEntry) {
-                if (!editorState.asmNavigationEnabled) return
-                navigate {
-                    var selectedEntry = entry
-                    val roomName = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
-                    var currentTarget = editorState.currentPlmSourcePointer()?.let { pointer ->
-                        editorState.asmPlmSourceBridge?.placementTarget(
-                            editorState.currentRoomId, editorState.currentStateIndex, pointer, entry,
-                        )
-                    } ?: AsmPlmPlacementTarget.Unavailable("No verified editable ASM placement source is available for this room state.")
-                    if (currentTarget is AsmPlmPlacementTarget.Unavailable && !editorState.hasManagedPlms() &&
-                        editorState.project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE) {
-                        if (!editorState.ensureCurrentPlmSource(roomName)) currentTarget = AsmPlmPlacementTarget.Unavailable(
-                            editorState.plmSourceMigrationProblem ?: currentTarget.reason)
-                        else selectedEntry = placementAfterObjectMigration(entry, editorState.workingPlms) ?: entry
-                    }
-                    val target = if (editorState.hasManagedPlms()) editorState.currentPlmStateId()?.let {
-                        editorState.asmPlmSourceBridge?.managedPlacement(editorState.currentRoomId, it, selectedEntry)
-                    } ?: currentTarget else currentTarget
-                    when (target) {
-                        is AsmPlmPlacementTarget.Source -> {
-                            asmWorkspaceState.showProjectWorkspace()
-                            asmWorkspaceState.openSource("bank_8F.asm", target.lineIndex, columnIndex = target.columnIndex)
-                        }
-                        is AsmPlmPlacementTarget.Unavailable -> asmWorkspaceState.openPlmPlacement(
-                            AsmPlmPlacementSnapshot(
-                                editorState.currentRoomId,
-                                roomName,
-                                editorState.currentPlmStateName(), entry, target.reason,
-                            ),
-                        )
-                    }
-                    leftTab = TAB_ASM
-                }
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.PLMS, plm = entry))
             }
 
             fun openScrollCommands(entry: RomParser.PlmEntry) {
@@ -604,77 +577,42 @@ fun main() = application {
             }
 
             fun openInitialScrolls() {
-                if (!editorState.asmNavigationEnabled) return
-                val name = selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}"
-                if (!editorState.ensureInitialScrollSource(name)) return
-                val stateId = editorState.currentPlmStateId() ?: return
-                runCatching { requireNotNull(editorState.asmPlmSourceBridge).initialScrolls.line(editorState.currentRoomId, stateId) }
-                    .onSuccess { line -> navigate {
-                        asmWorkspaceState.showProjectWorkspace()
-                        asmWorkspaceState.openSource("bank_8F.asm", line)
-                        leftTab = TAB_ASM
-                    } }.onFailure { editorState.postStatus(it.message ?: "Initial scroll source is unavailable.") }
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.INITIAL_SCROLLS))
             }
 
             fun openLayoutSource() {
-                if (!editorState.asmNavigationEnabled) return
-                if (!editorState.ensureLayoutSource(selectedRoom?.name ?: "Room")) return
-                val state = editorState.currentPlmStateId() ?: return
-                runCatching { requireNotNull(editorState.asmPlmSourceBridge).layouts.line(editorState.currentRoomId, state) }
-                    .onSuccess { line -> navigate {
-                        asmWorkspaceState.showProjectWorkspace()
-                        asmWorkspaceState.openSource("bank_8F.asm", line)
-                        leftTab = TAB_ASM
-                    } }.onFailure { editorState.postStatus("Layout source needs attention: ${it.message}") }
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.LAYOUT))
+            }
+
+            fun openRoomProperties(stateId: String?) {
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.PROPERTIES, stateId))
+            }
+
+            fun openRoomSelectors(stateId: String?) {
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.SELECTORS, stateId))
             }
 
             fun openFx(stateId: String, door: Int?) {
-                if (!editorState.asmNavigationEnabled) return
-                if (!editorState.ensureFxSource(selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}")) return
-                runCatching { requireNotNull(editorState.asmPlmSourceBridge).fx.line(editorState.currentRoomId, stateId, door) }
-                    .onSuccess { line -> navigate {
-                        asmWorkspaceState.showProjectWorkspace()
-                        asmWorkspaceState.openSource("bank_83.asm", line)
-                        leftTab = TAB_ASM
-                    } }.onFailure { editorState.postStatus(it.message ?: "FX source is unavailable.") }
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.FX, stateId, door = door))
             }
 
             fun openSaveSpawn(entry: RomParser.PlmEntry) {
-                if (!editorState.asmNavigationEnabled) return
-                if (!editorState.ensureSaveSpawnSource(entry)) return
-                val target = editorState.asmPlmSourceBridge?.saveTarget(editorState.currentRoomId,
-                    editorState.activeRoomAreaForEditing(), entry.param and 255) ?: return
-                when (target) {
-                    is AsmPlmPlacementTarget.Source -> navigate {
-                        asmWorkspaceState.showProjectWorkspace()
-                        asmWorkspaceState.openSource("bank_8F.asm", target.lineIndex, columnIndex = target.columnIndex)
-                        leftTab = TAB_ASM
-                    }
-                    is AsmPlmPlacementTarget.Unavailable -> editorState.postStatus(target.reason)
-                }
+                roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.SAVE_SPAWN, plm = entry))
             }
 
             val editorAsmAddressLink = editorState.projectAsmNavigation(::openAsmAddress)
             val editorPlmPlacementLink = editorState.projectAsmNavigation(::openPlmPlacement)
             val editorScrollCommandsLink = editorState.projectAsmNavigation(::openScrollCommands)
             val editorInitialScrollsLink = editorState.projectAsmNavigation(::openInitialScrolls)
-            val editorLayoutSourceLink = editorState.projectAsmNavigation(::openLayoutSource)
+            val editorLayoutSourceLink = editorState.projectAsmNavigation { openLayoutSource() }
+            val editorRoomPropertiesLink = editorState.projectAsmNavigation<(String?) -> Unit> { openRoomProperties(it) }
+            val editorSelectorsLink = editorState.projectAsmNavigation<(String?) -> Unit> { openRoomSelectors(it) }
             val editorFxLink = editorState.projectAsmNavigation(::openFx)
             val editorSaveSpawnLink = editorState.projectAsmNavigation(::openSaveSpawn)
             fun openEnemySource(entry: RomParser.EnemyEntry?, graphics: Boolean = false, requestedState: String? = null) {
-                if (!editorState.asmNavigationEnabled) return
-                val selectedIndex = entry?.let { actor -> editorState.workingEnemies.indexOfFirst { it === actor }
-                    .takeIf { it >= 0 } ?: editorState.workingEnemies.indexOf(actor) }
-                if (!editorState.ensureEnemySource(selectedRoom?.name ?: "Room")) return
-                val stateId = requestedState ?: editorState.currentPlmStateId() ?: return
-                val index = selectedIndex?.takeIf { it >= 0 && editorState.workingEnemies.getOrNull(it) == entry }
-                if (entry != null && index == null) { editorState.postStatus("This actor changed; select its current placement again."); return }
-                runCatching { requireNotNull(editorState.asmPlmSourceBridge).enemies.line(editorState.currentRoomId, stateId, index, graphics) }
-                    .onSuccess { line -> navigate {
-                        asmWorkspaceState.showProjectWorkspace()
-                        asmWorkspaceState.openSource(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, line)
-                        leftTab = TAB_ASM
-                    } }.onFailure { editorState.postStatus("Enemy source needs attention: ${it.message}") }
+                roomAsmNavigation.open(RoomAsmSourceRequest(
+                    if (graphics) RoomAsmSourceKind.ENEMY_GRAPHICS else RoomAsmSourceKind.ENEMIES,
+                    requestedState, enemy = entry))
             }
             val editorEnemyPlacementLink = editorState.projectAsmNavigation<(RomParser.EnemyEntry) -> Unit> { openEnemySource(it) }
             val editorEnemiesLink = editorState.projectAsmNavigation<(String, Boolean) -> Unit> { state, graphics -> openEnemySource(null, graphics, state) }
@@ -772,12 +710,7 @@ fun main() = application {
                     }
                     if (editorState.project !== owner || editorState.projectFilePath != projectPath) return@LaunchedEffect
                     catalog.onSuccess {
-                        val bridge = AsmPlmSourceBridge(it, asmWorkspaceState, registerSaveParticipant = false) { editorState.project }
-                            .also { bridge ->
-                                bridge.onMetadataChanged = editorState::notifyPlmSourceLinked
-                                bridge.describePlm = { entry -> editorState.customItemNameForPlm(entry.id)
-                                    ?: RomParser.plmDisplayName(entry.id, entry.param) }
-                            }
+                        val bridge = editorState.bindRoomSources(it, asmWorkspaceState)
                         bridge.preloadProjections()
                         if (editorState.project !== owner || editorState.projectFilePath != projectPath) return@LaunchedEffect
                         editorState.asmPlmSourceBridge = bridge
@@ -1391,6 +1324,8 @@ fun main() = application {
                                             onNavigateToAsm = editorAsmAddressLink,
                                             onNavigateToInitialScrolls = editorInitialScrollsLink,
                                             onNavigateToLayoutSource = editorLayoutSourceLink,
+                                            onNavigateToRoomProperties = editorRoomPropertiesLink,
+                                            onNavigateToSelectors = editorSelectorsLink,
                                             onNavigateToFx = editorFxLink,
                                             onNavigateToEnemies = editorEnemiesLink,
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },
@@ -1606,6 +1541,9 @@ fun main() = application {
                                         state = asmWorkspaceState,
                                         romParser = romParser,
                                         onOpenInEditor = ::openAsmEditorTarget,
+                                        onOpenRoomSource = editorState.projectAsmNavigation<(AsmRoomSourceLink) -> Unit> {
+                                            roomAsmNavigation.openFromAsm(it)
+                                        }.takeIf { !romReadOnly },
                                         onSaveProject = {
                                             editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
                                             editorState.saveProjectAsync()

@@ -24,6 +24,8 @@ internal fun resetRoomSource(
         if (room.asmPlmSourceVersion != 0) add(Regex(AsmRoomObjectSource.prefix(room.roomId) + "(?:(?:List|Common|Scroll)_[0-9]+|State_[0-9a-f]+|Save_[0-5]_[0-7])"))
         if (room.asmInitialScrollSourceVersion != 0) add(Regex(AsmInitialScrollSource.prefix(room.roomId) + "(?:Table_[0-9]+|State_[0-9a-f]+)"))
         if (room.asmLayoutSourceVersion != 0) add(Regex(AsmRoomLayoutSource.prefix(room.roomId) + "(?:Data|State)_[0-9a-f]+"))
+        if (room.asmRoomPropertiesSourceVersion != 0) add(Regex(AsmRoomPropertiesSource.prefix(room.roomId) + "(?:Header|State_[0-9a-f]+)"))
+        if (room.asmStateSelectorsSourceVersion != 0) add(Regex(AsmRoomSelectorsSource.prefix(room.roomId) + "(?:Order|Condition_[0-9a-f]+)"))
         if (room.asmFxSourceVersion != 0) add(Regex(AsmFxSource.prefix(room.roomId) + "(?:Table_[0-9]+|State_[0-9a-f]+)"))
         if (room.asmEnemySourceVersion != 0) add(Regex(AsmEnemySource.prefix(room.roomId) + "(?:(?:Population|Graphics)_[0-9]+|State_[0-9a-f]+)"))
     }
@@ -73,6 +75,6 @@ internal fun resetRoomSource(
 }
 
 internal fun resetSourceReferences(text: String): Set<String> =
-    Regex("\\bSmedit(?:Objects|Scrolls|Fx|Enemies|Layout)_[A-Za-z0-9_]+\\b")
+    Regex("\\bSmedit(?:Objects|Scrolls|Fx|Enemies|Layout|RoomInfo|Selectors)_[A-Za-z0-9_]+\\b")
         .findAll(text.lineSequence().joinToString("\n") { it.substringBefore(';') })
         .map { it.value }.toSet()
