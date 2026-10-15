@@ -1461,6 +1461,47 @@ composition with PLMs, scrolls, FX, new conditional states and ordinary patches 
 isolated projects. Project-created rooms and whole-room reset are intentionally
 guarded until those compound operations have stable reciprocal source identities.
 
+## Compound tile / object pattern strokes
+
+Functional tile patterns (including floating pattern placement) now work in
+existing-room ASM projects. Painting an item, door cap, refill, gate or save
+station pattern automatically adopts its object lists when needed. The drag
+previews tiles and objects in memory; releasing it validates and publishes all
+PLM rows and save-spawn resources as **one** Bank `$8F` source edit. JSON retains
+the layout edits, not a parallel stream of PLM values. There is no new toolbar or
+special ASM-only placement workflow.
+
+Undo/Redo from either the room editor or ASM reverses both halves together,
+including when viewing a different state sharing that layout. The source-history
+sidecar captures the layout identity and before/after operations, rather than
+depending on whichever room happens to be selected later. Newer layout/state
+changes must be undone first; a rejected undo changes neither source nor model.
+Saving/reopening and compiling use the ordinary resource-owned layout exporter
+and checked authored PLM placements.
+
+Placement keeps the existing This state / All states semantics. Private object
+edits detach their PLM list, independently of the tile layout's sharing choice.
+Gate shot blocks retain their paired body. A final prospective-geometry check
+prevents an All-states gate or door-cap pattern from leaving an incompatible
+independent state layout. Save strokes reserve distinct free slots across the
+whole drag; repainting retains the station's slot and customized spawn. Slot
+exhaustion, invalid source and source changes during a drag never leave a
+half-applied pattern. A rejected stamp rolls back that stamp while retaining
+earlier valid stamps in the same drag; an abandoned drag discards its preview.
+Objects can still be added when their decorative tile bytes already match.
+
+Scroll-trigger patterns remain explicitly guarded: a tile-only pattern does not
+carry a named command-list resource. Use **Add scroll trigger** for those. This
+slice does not imply that selecting/moving tiles also selects or moves actors or
+PLMs. Whole-room resize, generation/theme/reset, and added-room source identities
+remain separate compound operations with their existing guards.
+
+`AsmPlmSourceBridgeTest` exercises staging, rollback, scopes, gate pairs, slots,
+cross-view undo, interrupted strokes, reopen and the ROM-only backend using
+synthetic fixtures. The real-Asar `authored enemy populations` integration also
+stamps patterns, undoes/redoes them, and checks the final geometry and PLMs in the
+same compiled ROM alongside enemies/GFX, FX, scrolls, new states and ROM patches.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -1482,7 +1523,8 @@ Follow-up work can now be incremental:
    GUI, including state exceptions and copy-on-write. Initial screen grids,
    scroll-trigger commands, paired save-spawn records and ordinary door/default FX
    now use the same authority contract, including paired enemy populations/GFX.
-   Next prioritize source-aware compound operations and one asset-owned graphics
+   Tile/PLM pattern strokes now have an atomic source/layout undo boundary.
+   Next extend the remaining source-aware compound operations and one asset-owned graphics
    example. Then extend full
    authoring to rewritten state graphs, level data, doors, headers, and state selectors;
    then give project-created rooms stable source

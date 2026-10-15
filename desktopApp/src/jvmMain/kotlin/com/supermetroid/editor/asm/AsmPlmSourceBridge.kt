@@ -18,6 +18,15 @@ internal data class AsmPlmSourceView(
     val problem: String?,
 )
 
+/** A pattern stroke is planned in memory, then published as one source/model edit. */
+internal data class AsmPlmStamp(
+    val entry: RomParser.PlmEntry,
+    val allStates: Boolean,
+    val companions: List<RomParser.PlmEntry> = emptyList(),
+    val replaceIds: Set<Int> = setOf(entry.id),
+    val save: SourceSaveResource? = null,
+)
+
 /** GUI lens over AsmWorkspaceState's document. Project JSON persists identity only, not object values. */
 internal class AsmPlmSourceBridge(
     val catalog: AsmPlmSourceCatalog,
@@ -120,12 +129,15 @@ internal class AsmPlmSourceBridge(
     fun isManaged(roomId: Int): Boolean = (project().rooms[project().roomKey(roomId)]?.asmPlmSourceVersion ?: 0) != 0
 
     fun sourceText(): String = workspace.projectSourceText(PLM_SOURCE_FILE)
-    fun undoSource(expected: String, fileId: String = PLM_SOURCE_FILE) {
+    fun sourceUndoHead(fileId: String = PLM_SOURCE_FILE): AsmSourceTextChange? = workspace.sourceUndoHead(fileId)
+    fun undoSource(expected: String, fileId: String = PLM_SOURCE_FILE, change: AsmSourceTextChange? = null) {
         require(workspace.projectSourceText(fileId) == expected) { "Source changed; undo the newer edit in ASM first." }
+        require(change == null || workspace.sourceUndoHead(fileId) === change) { "Source history changed; undo the newer edit in ASM first." }
         check(workspace.undoSourceEdit(fileId)) { "Could not undo this source edit." }
     }
-    fun redoSource(expected: String, fileId: String = PLM_SOURCE_FILE) {
+    fun redoSource(expected: String, fileId: String = PLM_SOURCE_FILE, change: AsmSourceTextChange? = null) {
         require(workspace.projectSourceText(fileId) == expected) { "Source changed; redo this edit in ASM instead." }
+        require(change == null || workspace.sourceRedoHead(fileId) === change) { "Source history changed; redo this edit in ASM instead." }
         check(workspace.redoSourceEdit(fileId)) { "Could not redo this source edit." }
     }
     fun hasStateSource(roomId: Int, stateId: String): Boolean = isManaged(roomId) && managedSource().contains(AsmRoomObjectSource.stateMacro(roomId, stateId))
@@ -220,7 +232,7 @@ internal class AsmPlmSourceBridge(
         replaceSaveSource(roomId, source, result, setOf(spawn.area to spawn.slot))
     }
 
-    fun availableSaveSlot(roomId: Int, area: Int): Int? {
+    fun availableSaveSlot(roomId: Int, area: Int, reservedSlots: Set<Int> = emptySet()): Int? {
         require(area in 0..5) { "Ceres/debug load records are not ordinary save slots." }
         val all = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.flatMap { room -> saveResources(room.roomId) }
         val entries = project().rooms.values.filter { it.asmPlmSourceVersion != 0 &&
@@ -231,6 +243,7 @@ internal class AsmPlmSourceBridge(
         } } }
         val legacy = project().rooms.values.flatMap { it.saveStationSpawns }
         for (slot in 0 until catalog.parser.saveStationSlotCount(area)) {
+            if (slot in reservedSlots) continue
             val claim = all.singleOrNull { it.area == area && it.slot == slot }
             if (all.count { it.area == area && it.slot == slot } > 1) error("Conflicting authored save slots need review.")
             if (claim != null) {
@@ -332,6 +345,47 @@ internal class AsmPlmSourceBridge(
         source.resources(room)
         val edited = AsmRoomObjectSource(source.edit(room, stateId, allStates, remove, add, externalObjectReferences(), companions = companions), catalog.symbols)
         workspace.replaceProjectSource(PLM_SOURCE_FILE, source.text, edited.withComments(roomId, describePlm))
+    }
+
+    /** No workspace or model mutation until every row, spawn and resource link is checked. */
+    fun applyStamps(roomId: Int, stateId: String, expected: String, stamps: List<AsmPlmStamp>,
+                    beforeUndo: () -> Unit, beforeRedo: () -> Unit): Boolean {
+        require(sourceText() == expected) { "Object source changed during painting; try the stroke again." }
+        val room = project().rooms.getValue(project().roomKey(roomId))
+        val (width, height) = dimensions(roomId)
+        val external = externalObjectReferences()
+        var source = managedSource()
+        source.resources(room, width * height)
+        for (stamp in stamps) {
+            val entry = stamp.entry
+            val remove: (RomParser.PlmEntry) -> Boolean = { it.x == entry.x && it.y == entry.y && it.id in stamp.replaceIds }
+            val states = if (stamp.allStates) room.states.map { it.id } else listOf(stateId)
+            val target = (stamp.companions + entry).groupingBy { it }.eachCount()
+            if (states.all { source.table(roomId, it).document.entries.filter(remove).groupingBy { it }.eachCount() == target } &&
+                (stamp.save == null || stamp.save in source.saveResources(roomId))) continue
+            val updated = if (stamp.save != null) {
+                validateSourceSaveOwnership(stamp.save, catalog.parser)
+                require(room.saveStationSpawns.none { it.area == stamp.save.area && it.saveIndex == stamp.save.slot }) {
+                    "Adopt the save spawn before stamping over its GUI override."
+                }
+                val staged = AsmRoomObjectSource(source.withSave(stamp.save), catalog.symbols)
+                staged.editSaveStation(room, stateId, remove, entry, stamp.save, external, stamp.allStates)
+            } else source.edit(room, stateId, stamp.allStates, remove, entry, external, companions = stamp.companions)
+            source = AsmRoomObjectSource(updated, catalog.symbols)
+        }
+        val resources = source.resources(room, width * height)
+        val saves = source.saveResources(roomId)
+        validateSourceSaveLinks(roomId, room.roomHeaderChange?.area ?: catalog.parser.readRoomHeader(roomId)!!.area,
+            resources.values.flatMap { it.entries }, saves, room.saveStationSpawns, catalog.parser)
+        saves.forEach { validateSourceSaveOwnership(it, catalog.parser) }
+        project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.flatMap { source.saveResources(it.roomId) }
+            .groupBy { it.area to it.slot }.forEach { (_, owners) ->
+                require(owners.distinct().size == 1) { "Another source room already owns this save slot." }
+            }
+        val after = source.withComments(roomId, describePlm)
+        if (after == expected) return false
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, expected, after, beforeUndo, beforeRedo)
+        return true
     }
 
     fun updateManaged(roomId: Int, stateId: String, expected: AsmPlmDocument, index: Int, entry: RomParser.PlmEntry) {

@@ -64,7 +64,7 @@ internal data class AsmSourceTextChange(
     val offset: Int,
     val removed: String,
     val inserted: String,
-    /** Rare source/model ownership transitions must undo atomically with their text. */
+    /** Ownership transitions and compound layout/source edits undo atomically with their text. */
     val beforeUndo: (() -> Unit)? = null,
     val beforeRedo: (() -> Unit)? = null,
 ) {
@@ -811,6 +811,10 @@ internal class AsmWorkspaceState(
     fun canUndoSource(fileId: String): Boolean = sourceUndoStacks[fileId]?.isNotEmpty() == true
 
     fun canRedoSource(fileId: String): Boolean = sourceRedoStacks[fileId]?.isNotEmpty() == true
+
+    /** Text equality is insufficient: an edit can be changed away and back in a newer undo step. */
+    internal fun sourceUndoHead(fileId: String): AsmSourceTextChange? = sourceUndoStacks[fileId]?.lastOrNull()
+    internal fun sourceRedoHead(fileId: String): AsmSourceTextChange? = sourceRedoStacks[fileId]?.lastOrNull()
 
     fun undoSourceEdit(fileId: String? = selectedFileId): Boolean {
         val selectedId = fileId ?: return false

@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.asm.AsmPlmSourceBridge
+import com.supermetroid.editor.asm.AsmPlmStamp
+import com.supermetroid.editor.asm.AsmSourceTextChange
 import com.supermetroid.editor.asm.PLM_SOURCE_FILE
 import com.supermetroid.editor.asm.FX_SOURCE_FILE
 import com.supermetroid.editor.rom.withFxChange
@@ -324,6 +326,18 @@ class EditorState(
     private val pendingPlmRemoves = mutableListOf<PlmChange>()
     private var pendingAllStateItemBefore: ItemScopeSnapshot? = null
     private var pendingPlmGeometry: ByteArray? = null
+    private data class SourcePatternStroke(
+        val owner: SmEditProject,
+        val room: RoomEdits,
+        val stateId: String,
+        val levelId: String,
+        val width: Int,
+        val height: Int,
+        val before: String,
+        val plmsBefore: List<RomParser.PlmEntry>,
+        val stamps: MutableList<AsmPlmStamp> = mutableListOf(),
+    )
+    private var pendingSourcePattern: SourcePatternStroke? = null
     private val itemScopeSnapshots = java.util.IdentityHashMap<EditOperation, ItemScopeUndo>()
     private val layoutEditScopes = mutableMapOf<String, LayoutEditScope>()
     private var pendingLayoutEditAction: (() -> Unit)? = null
@@ -613,7 +627,9 @@ class EditorState(
     private val _workingPlms = mutableListOf<RomParser.PlmEntry>()
     val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
     internal var asmPlmSourceBridge by mutableStateOf<AsmPlmSourceBridge?>(null)
-    private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, Triple<String, String, String>>()
+    private data class ManagedSourceUndo(val fileId: String, val before: String, val after: String,
+                                         val change: AsmSourceTextChange? = null)
+    private val managedPlmUndo = java.util.IdentityHashMap<EditOperation, ManagedSourceUndo>()
     private var linkedObjectPreviewRevision: Triple<Int, String?, String>? = null
     internal var plmSourceMigrationProblem: String? = null
         private set
@@ -699,7 +715,8 @@ class EditorState(
             val after = bridge.sourceText()
             if (before != after) {
                 val op = EditOperation(name)
-                managedPlmUndo[op] = Triple(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, before, after)
+                managedPlmUndo[op] = ManagedSourceUndo(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE, before, after,
+                    requireNotNull(asmPlmSourceBridge).sourceUndoHead(com.supermetroid.editor.asm.ENEMY_SOURCE_FILE))
                 undoStack.add(op); redoStack.clear(); undoVersion++
                 refreshEnemies(); editVersion++
             }
@@ -716,7 +733,7 @@ class EditorState(
             val after = bridge.fx.sourceText()
             if (before != after) {
                 val op = EditOperation(if (door == 0) "Edit Default FX · ASM" else "Edit door FX · ASM")
-                managedPlmUndo[op] = Triple(FX_SOURCE_FILE, before, after)
+                managedPlmUndo[op] = ManagedSourceUndo(FX_SOURCE_FILE, before, after, bridge.sourceUndoHead(FX_SOURCE_FILE))
                 undoStack.add(op); redoStack.clear(); undoVersion++
                 refreshFx()
                 editVersion++
@@ -794,7 +811,7 @@ class EditorState(
             val after = bridge.sourceText()
             if (before != after) {
                 val op = EditOperation(name, emptyList())
-                managedPlmUndo[op] = Triple(PLM_SOURCE_FILE, before, after)
+                managedPlmUndo[op] = ManagedSourceUndo(PLM_SOURCE_FILE, before, after, bridge.sourceUndoHead())
                 undoStack.add(op)
                 redoStack.clear()
                 undoVersion++
@@ -3154,9 +3171,11 @@ class EditorState(
     fun commitFloatingSelection(): Boolean {
         val floating = floatingSelection ?: return false
         if (brush == null) return false
+        if (!allowOrQueueLayoutEdit { commitFloatingSelection() }) return false
         beginStroke()
         val changed = paintAt(floating.x, floating.y)
-        endStroke()
+        val committed = endStroke()
+        if (!committed) return false
         floatingSelection = null
         activeTool = EditorTool.SELECT
         return changed
@@ -3788,6 +3807,7 @@ class EditorState(
         pendingPlmRemoves.clear()
         pendingAllStateItemBefore = null
         pendingPlmGeometry = null
+        pendingSourcePattern = null
         itemScopeSnapshots.clear()
         itemEditScope = ItemStateScope.ALL_STATES
         plmEditScopeOverrides.clear()
@@ -3953,6 +3973,7 @@ class EditorState(
         pendingPositions.clear()
         pendingAllStateItemBefore = null
         pendingPlmGeometry = null
+        pendingSourcePattern = null
         itemScopeSnapshots.clear()
 
         // Load scroll data for this room (resize if dimensions changed)
@@ -4166,6 +4187,7 @@ class EditorState(
         followLinkedResource: Boolean = true,
         includeSharedOperations: Boolean = true,
         includeStateOperations: Boolean = true,
+        prospectiveLayoutEdits: List<TileEdit> = emptyList(),
     ): ByteArray? {
         val room = romParser.readRoomHeader(currentRoomId) ?: return null
         val runtimeStates = romParser.parseRoomStatesWithData(currentRoomId)
@@ -4211,6 +4233,7 @@ class EditorState(
         if (includeSharedOperations) {
             applyOperations(roomEdits.levelResourceOperations[state.resources.level].orEmpty())
         }
+        if (prospectiveLayoutEdits.isNotEmpty()) applyOperations(listOf(EditOperation("Pattern preview", prospectiveLayoutEdits)))
         if (includeStateOperations) applyOperations(state.operations)
         return data
     }
@@ -4753,7 +4776,10 @@ class EditorState(
                 levelBtsAt(data, point.first, point.second, workingBlocksWide)
         val selected = geometryReference ?: workingLevelData ?: error("Room layout is unavailable.")
         for (state in room.states.filter { it.id != currentPlmStateId() }) {
-            val other = effectiveLevelDataForState(room, state, parser) ?: error("State layout is unavailable.")
+            val preview = if (geometryReference == null && state.resources.level == currentStateEdits()?.resources?.level)
+                pendingEdits.toList() else emptyList()
+            val other = effectiveLevelDataForState(room, state, parser, prospectiveLayoutEdits = preview)
+                ?: error("State layout is unavailable.")
             require(points.all { collision(selected, it) == collision(other, it) }) {
                 "Gate/door-cap geometry differs in ${state.condition.displaySummary(currentArea)}. Use This state or align the layouts first."
             }
@@ -5018,6 +5044,7 @@ class EditorState(
         pendingPlmRemoves.clear()
         pendingAllStateItemBefore = null
         pendingPlmGeometry = null
+        pendingSourcePattern = null
         itemScopeSnapshots.clear()
         undoVersion++
 
@@ -5210,6 +5237,8 @@ class EditorState(
     // ─── Paint / Erase / Fill ───────────────────────────────────
 
     fun beginStroke() {
+        // A lost mouse release must not strand a preview outside the undo/model history.
+        if (pendingSourcePattern != null) rollbackSourcePattern()
         pendingEdits.clear()
         pendingPositions.clear()
         pendingPlmAdds.clear()
@@ -5217,6 +5246,39 @@ class EditorState(
         pendingAllStateItemBefore = null
         pendingPlmGeometry = workingLevelData?.copyOf()
     }
+
+    private fun rollbackSourcePattern() {
+        val stroke = pendingSourcePattern ?: return
+        if (project === stroke.owner && currentRoomId == stroke.room.roomId &&
+            workingBlocksWide == stroke.width && workingBlocksTall == stroke.height) {
+            pendingEdits.asReversed().forEach { applyTileEdit(it, useNew = false) }
+            _workingPlms.clear()
+            _workingPlms.addAll(stroke.plmsBefore)
+            refreshLinkedPlms()
+            editVersion++
+        }
+        pendingSourcePattern = null
+        pendingEdits.clear()
+        pendingPositions.clear()
+        pendingPlmAdds.clear()
+        pendingPlmRemoves.clear()
+    }
+
+    private fun prepareSourcePattern(): Boolean = runCatching {
+        if (pendingSourcePattern != null) return true
+        require(pendingEdits.isEmpty()) { "Finish the current tile stroke before switching to a functional pattern." }
+        if (!hasManagedPlms()) require(ensureCurrentPlmSource(currentRomParser?.readRoomHeader(currentRoomId)?.name ?: "Room")) {
+            plmSourceMigrationProblem ?: "Object source is unavailable."
+        }
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
+        val room = project.rooms.getValue(project.roomKey(currentRoomId))
+        val state = requireNotNull(currentStateEdits()) { "Select a room state before painting objects." }
+        val view = bridge.managedView(currentRoomId, state.id)
+        require(view.problem == null) { view.problem ?: "Review invalid object source first." }
+        pendingSourcePattern = SourcePatternStroke(project, room, state.id, state.resources.level,
+            workingBlocksWide, workingBlocksTall, bridge.sourceText(), _workingPlms.toList())
+        true
+    }.getOrElse { postStatus("Pattern blocked: ${it.message}"); false }
 
     /** Paint the full brush at map position (bx, by). Returns true if anything changed. */
     fun paintAt(bx: Int, by: Int): Boolean {
@@ -5229,8 +5291,16 @@ class EditorState(
         if (activeRoomLayer == RoomEditLayer.LAYER2) return paintLayer2At(bx, by)
         val b = brush ?: return false
         if (pendingPlmGeometry == null) pendingPlmGeometry = workingLevelData?.copyOf()
-        if ((0 until b.rows).any { r -> (0 until b.cols).any { c -> b.plmAt(r, c) != null } } &&
-            blockLinkedPlmMutation(allStates = itemEditScope == ItemStateScope.ALL_STATES)) return false
+        val functional = (0 until b.rows).any { r -> (0 until b.cols).any { c -> b.plmAt(r, c)?.first?.let { it != 0 } == true } }
+        if (functional) {
+            if (hasManagedPlms() || project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) {
+                if (b.plmOverrides.values.any { it.first == 0xB703 }) {
+                    postStatus("Use Add scroll trigger to place its command list; a tile pattern cannot copy that linked resource.")
+                    return false
+                }
+                if (!prepareSourcePattern()) return false
+            } else if (blockLinkedPlmMutation(allStates = itemEditScope == ItemStateScope.ALL_STATES)) return false
+        }
         // A brush stamp may contain both decorative tiles and a functional PLM.
         // If the PLM cannot be represented (for example, all save slots are in
         // use), roll back this whole stamp while preserving earlier drag-stroke
@@ -5238,6 +5308,8 @@ class EditorState(
         val editCheckpoint = pendingEdits.size
         val plmAddCheckpoint = pendingPlmAdds.size
         val plmRemoveCheckpoint = pendingPlmRemoves.size
+        val sourceStampCheckpoint = pendingSourcePattern?.stamps?.size ?: 0
+        val positionsBefore = pendingPositions.toSet()
         val pendingAllStateBeforeCheckpoint = pendingAllStateItemBefore
         val workingPlmsBefore = _workingPlms.toList()
         val roomKey = project.roomKey(currentRoomId)
@@ -5257,6 +5329,9 @@ class EditorState(
             pendingEdits.subList(editCheckpoint, pendingEdits.size).clear()
             pendingPlmAdds.subList(plmAddCheckpoint, pendingPlmAdds.size).clear()
             pendingPlmRemoves.subList(plmRemoveCheckpoint, pendingPlmRemoves.size).clear()
+            pendingSourcePattern?.stamps?.let { it.subList(sourceStampCheckpoint, it.size).clear() }
+            pendingPositions.clear()
+            pendingPositions.addAll(positionsBefore)
             pendingAllStateItemBefore = pendingAllStateBeforeCheckpoint
             _workingPlms.clear()
             _workingPlms.addAll(workingPlmsBefore)
@@ -5284,14 +5359,17 @@ class EditorState(
                 val newWord = b.blockWordAt(r, c)
                 val oldBts = readBts(tx, ty)
                 val newBts = b.btsAt(r, c)
-                if (oldWord == newWord && oldBts == newBts) continue
-                writeBlockWord(tx, ty, newWord)
-                writeBts(tx, ty, newBts)
-                pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, oldBts, newBts))
+                val tileChanged = oldWord != newWord || oldBts != newBts
+                val plm = b.plmAt(r, c)
+                if (!tileChanged && (pendingSourcePattern == null || plm?.first?.let { it != 0 } != true)) continue
+                if (tileChanged) {
+                    writeBlockWord(tx, ty, newWord)
+                    writeBts(tx, ty, newBts)
+                    pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, oldBts, newBts))
+                }
                 pendingPositions.add(key)
                 changed = true
                 // Collect pattern PLMs for grouped undo (applied in endStroke)
-                val plm = b.plmAt(r, c)
                 if (plm != null && plm.first != 0) {
                     val plmId = plm.first
                     val param = plm.second
@@ -5316,7 +5394,12 @@ class EditorState(
                     val retainedItemParam = existing.singleOrNull()
                         ?.takeIf { isItem && param == 0 }
                         ?.param
-                    val actualParam = retainedSaveParam ?: retainedItemParam ?: autoAssignParam(plmId, param)
+                    val actualParam = if (pendingSourcePattern != null && plmId == 0xB76F && retainedSaveParam == null && param == 0x8000) {
+                        runCatching { requireNotNull(asmPlmSourceBridge).availableSaveSlot(currentRoomId, currentArea,
+                            pendingSourcePattern!!.stamps.mapNotNull { it.save?.slot }.toSet())?.let { 0x8000 or it }
+                            ?: error("No free ordinary save slot in this area (maximum eight).")
+                        }.getOrElse { postStatus(it.message ?: "Save allocation failed"); null }
+                    } else retainedSaveParam ?: retainedItemParam ?: autoAssignParam(plmId, param)
                     if (actualParam == null) {
                         rollbackStamp()
                         return false
@@ -5334,6 +5417,36 @@ class EditorState(
                     if (companion != null && !validatePlmPlacement(companion.id, tx, ty, companion.param, scope, geometryReference = pendingPlmGeometry)) {
                         rollbackStamp()
                         return false
+                    }
+                    if (pendingSourcePattern != null) {
+                        val staged = runCatching {
+                            val bridge = requireNotNull(asmPlmSourceBridge)
+                            val replaceIds = (effectiveAuthoredStatePlms().flatMap { it.second }.filter { samePlmFamily(it.id, plmId) }
+                                .map { it.id } + plmId + bodyIds).toSet()
+                            val spawn = if (plmId == 0xB76F) {
+                                val slot = actualParam and 255
+                                val saved = bridge.saveSpawn(currentRoomId, currentArea, slot)?.takeUnless { it.cleared }
+                                val derived = deriveSaveStationSpawn(tx, ty, slot)
+                                val values = if (retainedSaveParam != null) saved?.words ?: currentAreaRomSaveEntries[slot]
+                                    ?.takeIf { it.roomId == currentRoomId }?.words() else null
+                                saved?.takeIf { retainedSaveParam != null } ?: SourceSaveResource(
+                                    com.supermetroid.editor.asm.AsmSaveStationSource.name(currentRoomId, currentArea, slot), currentRoomId, currentArea, slot,
+                                    values ?: listOf(currentRoomId, derived.doorPtr, currentAreaRomSaveEntries[slot]?.doorBts ?: 0,
+                                        derived.scrollX, derived.scrollY, derived.samusY, derived.samusX))
+                            } else null
+                            val entry = RomParser.PlmEntry(plmId, tx, ty, actualParam)
+                            pendingSourcePattern!!.stamps += AsmPlmStamp(entry, scope == ItemStateScope.ALL_STATES,
+                                listOfNotNull(companion), replaceIds, spawn)
+                            _workingPlms.removeAll { it.x == tx && it.y == ty && it.id in replaceIds }
+                            _workingPlms.addAll(listOfNotNull(companion))
+                            _workingPlms.add(entry)
+                        }
+                        if (staged.isFailure) {
+                            rollbackStamp()
+                            postStatus("Pattern blocked: ${staged.exceptionOrNull()?.message}")
+                            return false
+                        }
+                        continue
                     }
                     if (scope == ItemStateScope.ALL_STATES) {
                         if (pendingAllStateItemBefore == null) pendingAllStateItemBefore = plmScopeBefore
@@ -5471,7 +5584,7 @@ class EditorState(
 
         val roomOps = currentOperations()
         val lastOp = undoStack.lastOrNull()
-        if (lastOp != null && lastOp.edits.size == 1 &&
+        if (lastOp != null && lastOp !in managedPlmUndo && lastOp.edits.size == 1 &&
             lastOp.edits[0].blockX == bx && lastOp.edits[0].blockY == by &&
             lastOp.description.startsWith("Properties")) {
             val origEdit = lastOp.edits[0]
@@ -6689,7 +6802,7 @@ class EditorState(
                 val after = bridge.sourceText()
                 if (before != after) {
                     val op = EditOperation("Initial Screen Scroll ${oneBasedRoomCoordinate(screenX, screenY)} → ${listOf("Red", "Blue", "Green")[newValue]}")
-                    managedPlmUndo[op] = Triple(PLM_SOURCE_FILE, before, after)
+                    managedPlmUndo[op] = ManagedSourceUndo(PLM_SOURCE_FILE, before, after, bridge.sourceUndoHead())
                     undoStack.add(op)
                     redoStack.clear()
                     undoVersion++
@@ -7599,9 +7712,12 @@ class EditorState(
         return changed
     }
 
-    fun endStroke(description: String? = null) {
+    fun endStroke(description: String? = null): Boolean {
         pendingPlmGeometry = null
-        if (pendingEdits.isEmpty() && pendingPlmAdds.isEmpty()) return
+        if (pendingEdits.isEmpty() && pendingPlmAdds.isEmpty() && pendingSourcePattern?.stamps.isNullOrEmpty()) {
+            pendingSourcePattern = null
+            return false
+        }
         val layerLabel = if (pendingEdits.any { it.layer == TILE_EDIT_LAYER_2 }) "Layer 2 " else ""
         val desc = description ?: if (floatingSelection != null) {
             "${layerLabel}Place selection ${pendingEdits.size} tile(s)"
@@ -7620,6 +7736,8 @@ class EditorState(
             plmRemoves = pendingPlmRemoves.toList(),
             itemScope = if (pendingAllStateItemBefore != null) ItemStateScope.ALL_STATES else null,
         )
+        if (pendingSourcePattern?.stamps?.isNotEmpty() == true) return commitSourcePattern(operation)
+        pendingSourcePattern = null
         pushEditOperation(operation)
         pendingAllStateItemBefore?.let { before ->
             itemScopeSnapshots[operation] = ItemScopeUndo(before, itemScopeSnapshot())
@@ -7629,6 +7747,80 @@ class EditorState(
         pendingPlmAdds.clear()
         pendingPlmRemoves.clear()
         pendingAllStateItemBefore = null
+        return true
+    }
+
+    /** Source and layout history share a reversible boundary, not a second set of PLM deltas. */
+    private fun commitSourcePattern(operation: EditOperation): Boolean {
+        val stroke = requireNotNull(pendingSourcePattern)
+        return runCatching {
+            val bridge = requireNotNull(asmPlmSourceBridge)
+            require(project === stroke.owner && currentRoomId == stroke.room.roomId &&
+                currentPlmStateId() == stroke.stateId && currentStateEdits()?.resources?.level == stroke.levelId &&
+                workingBlocksWide == stroke.width && workingBlocksTall == stroke.height) {
+                "Room or layout changed during painting; try the stroke again."
+            }
+            val room = stroke.room
+            val projected = effectiveLevelDataForState(room, requireNotNull(currentStateEdits()), requireNotNull(currentRomParser),
+                prospectiveLayoutEdits = operation.edits)
+            require(projected?.contentEquals(workingLevelData) == true) {
+                "Older state-specific layout overrides conflict with this pattern. Reconcile the layout before stamping."
+            }
+            stroke.stamps.forEach { stamp ->
+                validatePlmSharedGeometry(stamp.entry.id, stamp.entry.x, stamp.entry.y, stamp.allStates, geometryReference = null)
+            }
+            val statesBefore = room.states.map { it.id to it.resources.level }
+            val headerBefore = room.roomHeaderChange
+            val previous = room.levelResourceOperations[stroke.levelId].orEmpty().toList()
+            val next = if (operation.edits.isEmpty()) previous else previous + operation.tileOnly()
+            fun transition(undo: Boolean) {
+                // Preflight everything before changing either the source or its model sidecar.
+                require(project === stroke.owner && project.rooms[project.roomKey(room.roomId)] === room &&
+                    room.asmPlmSourceVersion == 1 && room.states.map { it.id to it.resources.level } == statesBefore &&
+                    room.roomHeaderChange == headerBefore) { "Undo newer room/state changes before this pattern stroke." }
+                require(room.levelResourceOperations[stroke.levelId].orEmpty() == if (undo) next else previous) {
+                    "Undo newer layout edits before this pattern stroke."
+                }
+                require(pendingEdits.isEmpty()) { "Finish the current tile stroke before undoing source." }
+                val target = if (undo) previous else next
+                if (target.isEmpty()) room.levelResourceOperations.remove(stroke.levelId)
+                else room.levelResourceOperations[stroke.levelId] = target.toMutableList()
+                if (currentRoomId == room.roomId && currentStateEdits()?.resources?.level == stroke.levelId) {
+                    (if (undo) operation.edits.asReversed() else operation.edits).forEach { applyTileEdit(it, useNew = !undo) }
+                    val from = if (undo) undoStack else redoStack
+                    val to = if (undo) redoStack else undoStack
+                    val index = from.indexOfFirst { it === operation }
+                    if (index >= 0) { from.removeAt(index); to.add(operation) }
+                }
+                dirty = true
+                undoVersion++
+                editVersion++
+            }
+            val changed = bridge.applyStamps(room.roomId, stroke.stateId, stroke.before, stroke.stamps,
+                beforeUndo = { transition(true) }, beforeRedo = { transition(false) })
+            // From here onward there are no fallible resource operations. Tiles are already previewed.
+            if (changed) {
+                if (operation.edits.isNotEmpty()) room.levelResourceOperations[stroke.levelId] = next.toMutableList()
+                managedPlmUndo[operation] = ManagedSourceUndo(PLM_SOURCE_FILE, stroke.before, bridge.sourceText(), requireNotNull(bridge.sourceUndoHead()))
+                undoStack.add(operation)
+                redoStack.clear()
+                undoVersion++
+                dirty = true
+                editVersion++
+            } else if (operation.edits.isNotEmpty()) pushEditOperation(operation)
+            pendingSourcePattern = null
+            pendingEdits.clear()
+            pendingPositions.clear()
+            pendingPlmAdds.clear()
+            pendingPlmRemoves.clear()
+            pendingAllStateItemBefore = null
+            refreshLinkedPlms()
+            true
+        }.getOrElse {
+            rollbackSourcePattern()
+            postStatus("Pattern blocked: ${it.message ?: "No changes applied."}")
+            false
+        }
     }
 
     /**
@@ -8480,11 +8672,11 @@ class EditorState(
         if (hasManagedEnemies() && (pending.enemyAdds.isNotEmpty() || pending.enemyRemoves.isNotEmpty() || pending.enemyUpdates.isNotEmpty())) {
             postStatus("Enemy edit blocked: undo the source adoption in ASM before undoing older ROM enemy edits."); return false
         }
-        managedPlmUndo[pending]?.let { (fileId, _, after) ->
+        managedPlmUndo[pending]?.let { (fileId, _, after, change) ->
             return runCatching {
-                requireNotNull(asmPlmSourceBridge).undoSource(after, fileId)
-                undoStack.removeAt(undoStack.lastIndex)
-                redoStack.add(pending)
+                requireNotNull(asmPlmSourceBridge).undoSource(after, fileId, change)
+                if (undoStack.lastOrNull() === pending) undoStack.removeAt(undoStack.lastIndex)
+                if (redoStack.none { it === pending }) redoStack.add(pending)
                 undoVersion++
                 refreshLinkedPlms()
                 true
@@ -8572,11 +8764,11 @@ class EditorState(
         if (hasManagedEnemies() && (pending.enemyAdds.isNotEmpty() || pending.enemyRemoves.isNotEmpty() || pending.enemyUpdates.isNotEmpty())) {
             postStatus("Enemy edit blocked: older ROM enemy edits cannot overwrite authored population source."); return false
         }
-        managedPlmUndo[pending]?.let { (fileId, before, _) ->
+        managedPlmUndo[pending]?.let { (fileId, before, _, change) ->
             return runCatching {
-                requireNotNull(asmPlmSourceBridge).redoSource(before, fileId)
-                redoStack.removeAt(redoStack.lastIndex)
-                undoStack.add(pending)
+                requireNotNull(asmPlmSourceBridge).redoSource(before, fileId, change)
+                if (redoStack.lastOrNull() === pending) redoStack.removeAt(redoStack.lastIndex)
+                if (undoStack.none { it === pending }) undoStack.add(pending)
                 undoVersion++
                 refreshLinkedPlms()
                 true

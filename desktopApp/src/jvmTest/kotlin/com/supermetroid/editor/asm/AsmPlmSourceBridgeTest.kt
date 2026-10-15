@@ -7,6 +7,9 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.ensureStateManifest
 import com.supermetroid.editor.ui.EditorState
+import com.supermetroid.editor.ui.TileBrush
+import com.supermetroid.editor.ui.LayoutEditScope
+import com.supermetroid.editor.data.ItemStateScope
 import com.supermetroid.editor.rom.SourceSaveResource
 import com.supermetroid.editor.rom.words
 import kotlinx.coroutines.runBlocking
@@ -25,6 +28,337 @@ class AsmPlmSourceBridgeTest {
         initForProject(File(directory, "Test.smedit"), project)
         asmPlmSourceBridge = bridge
         loadRoom(0x91F8, bridge.catalog.parser, bridge.catalog.parser.readRoomHeader(0x91F8)!!)
+    }
+
+    private fun stampBrush(id: Int, parameter: Int = 0, tile: Int = 42) = TileBrush(
+        listOf(listOf(tile, tile + 1)), plmOverrides = mapOf(0L to (id to parameter)))
+
+    @Test fun `pattern drag publishes tiles and objects once with reciprocal source and GUI undo`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xEEDF)
+        val before = bridge.sourceText()
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(editor.paintAt(12, 8), editor.statusMessage)
+        assertEquals(before, bridge.sourceText(), "Dragging is a transient preview, not a series of source edits")
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        val after = bridge.sourceText()
+        val painted = editor.workingLevelData!!.copyOf()
+        val room = project.rooms.getValue("91F8")
+        assertEquals(1, editor.undoStack.size)
+        assertEquals(4, room.levelResourceOperations.values.flatten().flatMap { it.edits }.size)
+        assertTrue(room.plmChanges.isEmpty() && room.states.all { it.plmChanges.isEmpty() && it.operations.isEmpty() })
+        room.states.forEach { state ->
+            val additions = bridge.managedView(room.roomId, state.id).document!!.entries.filter { it.id == 0xEEDF }
+            assertEquals(2, additions.size)
+            assertEquals(2, additions.map { it.param }.distinct().size)
+        }
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertEquals(before, bridge.sourceText())
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertTrue(room.levelResourceOperations.isEmpty())
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertEquals(after, bridge.sourceText())
+        assertContentEquals(painted, editor.workingLevelData)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        editor.refreshLinkedPlms()
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertTrue(editor.undoStack.isEmpty())
+        assertEquals(1, editor.redoStack.size)
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        editor.refreshLinkedPlms()
+        assertContentEquals(painted, editor.workingLevelData)
+        assertEquals(1, editor.undoStack.size)
+        assertTrue(editor.redoStack.isEmpty())
+        assertTrue(workspace.saveAllSources())
+        val reopened = scopeEditor(bridge, project)
+        assertContentEquals(painted, reopened.workingLevelData)
+        assertEquals(editor.workingPlms, reopened.workingPlms)
+    }
+
+    @Test fun `private gate stamps detach only PLM lists and retain their companion as one edit`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.selectItemEditScope(ItemStateScope.THIS_STATE)
+        val room = project.rooms.getValue("91F8")
+        val other = room.states.first { it.id != editor.currentPlmStateId() }.id
+        editor.brush = stampBrush(0xC836, 8)
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(setOf(0xC836, 0xC82A), editor.workingPlms.filter { it.x == 8 && it.y == 8 }.map { it.id }.toSet())
+        assertTrue(bridge.managedView(room.roomId, other).document!!.entries.none { RomParser.isGatePlm(it.id) })
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertTrue(editor.workingPlms.none { RomParser.isGatePlm(it.id) })
+        assertEquals(0, editor.readBlockWord(8, 8))
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertEquals(2, editor.workingPlms.count { RomParser.isGatePlm(it.id) })
+    }
+
+    @Test fun `source conflicts or invalid drafts roll back the whole unpublished pattern without overwriting text`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xEEDF)
+        val pixels = editor.workingLevelData!!.copyOf()
+        val before = bridge.sourceText()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8))
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, before, before + "; independent edit\n")
+        assertFalse(editor.endStroke())
+        assertContains(editor.statusMessage, "changed during painting")
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertEquals(before + "; independent edit\n", bridge.sourceText())
+        assertTrue(editor.undoStack.isEmpty())
+        val current = bridge.sourceText()
+        val invalid = current.replace("dw \$0000 ; End of PLM list", "dw \$0001 ; invalid terminator")
+        assertNotEquals(current, invalid)
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, current, invalid)
+        editor.beginStroke()
+        assertFalse(editor.paintAt(8, 8))
+        assertFalse(editor.endStroke())
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertEquals(invalid, bridge.sourceText())
+    }
+
+    @Test fun `a rejected stamp keeps earlier drag stamps and unchanged graphics can still add a PLM`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        val other = project.rooms.getValue("91F8").states.first { it.id != editor.currentPlmStateId() }.id
+        bridge.editManaged(0x91F8, other, false, { false }, RomParser.PlmEntry(0xB6DF, 12, 8, 0))
+        editor.brush = stampBrush(0xEEDF, tile = 0).copy(tiles = listOf(listOf(0)), blockType = 0)
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertFalse(editor.paintAt(12, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(1, editor.workingPlms.count { it.id == 0xEEDF })
+        assertEquals(0, editor.readBlockWord(8, 8))
+        assertEquals(0, editor.readBlockWord(12, 8))
+        assertTrue(project.rooms.getValue("91F8").levelResourceOperations.isEmpty())
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertTrue(editor.workingPlms.none { it.id == 0xEEDF })
+    }
+
+    @Test fun `save pattern drag reserves separate slots and publishes spawn resources with the tiles`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true, withSaveData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xB76F, 0x8000)
+        val before = bridge.sourceText()
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(editor.paintAt(12, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(setOf(2, 3), editor.workingPlms.filter { it.id == 0xB76F }.map { it.param and 255 }.toSet())
+        assertEquals(2, bridge.saveResources(0x91F8).size)
+        assertEquals(7, bridge.saveSpawn(0x91F8, 0, 2)!!.words[2], "Retain the native door BTS word")
+        assertTrue(project.rooms.getValue("91F8").saveStationSpawns.isEmpty())
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertEquals(before, bridge.sourceText())
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertTrue(bridge.saveResources(0x91F8).isEmpty())
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        editor.refreshLinkedPlms()
+        val station = editor.workingPlms.first { it.id == 0xB76F }
+        val spawn = bridge.saveSpawn(0x91F8, 0, station.param and 255)
+        editor.beginStroke()
+        assertTrue(editor.paintAt(station.x, station.y))
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(2, bridge.saveResources(0x91F8).size, "Repainting retains the slot and custom spawn")
+        assertEquals(spawn, bridge.saveSpawn(0x91F8, 0, station.param and 255))
+    }
+
+    @Test fun `source undo cannot leave newer geometry behind and works after changing room state`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xEEDF)
+        val before = bridge.sourceText()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8))
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        val after = bridge.sourceText()
+        editor.setTileProperties(9, 8, 0, 0)
+        assertFalse(workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        assertEquals(after, bridge.sourceText())
+        assertContains(workspace.error!!, "newer layout edits")
+        assertTrue(editor.undo())
+        val other = project.rooms.getValue("91F8").states.first { it.id != editor.currentPlmStateId() }.id
+        editor.switchRoomState(other, bridge.catalog.parser)
+        assertNotEquals(0, editor.readBlockWord(8, 8))
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertEquals(before, bridge.sourceText())
+        assertEquals(0, editor.readBlockWord(8, 8))
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertNotEquals(0, editor.readBlockWord(8, 8))
+    }
+
+    @Test fun `ROM mode pattern strokes retain the delta backend and no source dependency`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        project.asmWorkspace.enabled = false
+        project.asmWorkspace.buildMode = ProjectRomBuildMode.PATCHED_ROM
+        val editor = scopeEditor(bridge, project)
+        editor.asmPlmSourceBridge = null
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xEEDF)
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertTrue(editor.workingPlms.any { it.id == 0xEEDF })
+        assertEquals(0, project.rooms.getValue("91F8").asmPlmSourceVersion)
+        assertTrue(editor.undo())
+        assertEquals(0, editor.readBlockWord(8, 8))
+        assertTrue(editor.workingPlms.none { it.id == 0xEEDF })
+        assertTrue(editor.redo())
+        assertTrue(editor.workingPlms.any { it.id == 0xEEDF })
+    }
+
+    @Test fun `first source pattern adopts automatically and an interrupted drag discards only its preview`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xEEDF)
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(bridge.isManaged(0x91F8), "No separate Link action is needed")
+        val adopted = bridge.sourceText()
+        editor.beginStroke() // Lost mouse release / a new stroke starts.
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertTrue(editor.workingPlms.none { it.id == 0xEEDF })
+        assertEquals(adopted, bridge.sourceText())
+        assertTrue(editor.paintAt(12, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(listOf(12), editor.workingPlms.filter { it.id == 0xEEDF }.map { it.x })
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertEquals(adopted, bridge.sourceText())
+    }
+
+    @Test fun `an all states gate stamp cannot leave incompatible private layout geometry`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.THIS_STATE)
+        editor.brush = stampBrush(0xC836, 8)
+        val before = bridge.sourceText()
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertFalse(editor.endStroke())
+        assertContains(editor.statusMessage, "geometry differs")
+        assertEquals(before, bridge.sourceText())
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertTrue(editor.workingPlms.none { RomParser.isGatePlm(it.id) })
+        editor.selectItemEditScope(ItemStateScope.THIS_STATE)
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(2, editor.workingPlms.count { RomParser.isGatePlm(it.id) })
+    }
+
+    @Test fun `a multi-cell save pattern fails atomically when only one slot remains`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true, withSaveData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        // Slots 0/1 are native; reserve 2..6 with ordinary source-owned stations.
+        for (x in 4..8) editor.addPlm(0xB76F, x, 16, 0x8000)
+        assertEquals(setOf(2, 3, 4, 5, 6), bridge.saveResources(0x91F8).map { it.slot }.toSet())
+        editor.brush = TileBrush(listOf(listOf(42, 43)),
+            plmOverrides = mapOf(0L to (0xB76F to 0x8000), 1L to (0xB76F to 0x8000)))
+        val before = bridge.sourceText()
+        val pixels = editor.workingLevelData!!.copyOf()
+        val undoCount = editor.undoStack.size
+        editor.beginStroke()
+        assertFalse(editor.paintAt(12, 8), editor.statusMessage)
+        assertFalse(editor.endStroke())
+        assertContains(editor.statusMessage, "No free ordinary save slot")
+        assertEquals(before, bridge.sourceText())
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertEquals(undoCount, editor.undoStack.size)
+        assertEquals(5, bridge.saveResources(0x91F8).size)
+    }
+
+    @Test fun `equal source text from a newer edit cannot masquerade as the compound undo step`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = stampBrush(0xEEDF)
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8))
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        val after = bridge.sourceText()
+        val painted = editor.workingLevelData!!.copyOf()
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, after, after + "; temporary edit\n")
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, after + "; temporary edit\n", after)
+        assertFalse(editor.undo(), "Do not silently undo an unrelated text edit just because bytes match")
+        assertEquals(after, bridge.sourceText())
+        assertContentEquals(painted, editor.workingLevelData)
+        assertEquals(1, editor.undoStack.size)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(pixels, editor.workingLevelData)
+    }
+
+    @Test fun `repainting an unchanged source placement keeps notes aliases and source history intact`() = runBlocking {
+        val (workspace, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        val original = bridge.sourceText()
+        val noted = original.replace("; PLM: Missile (Visible)", "; PLM: Missile (Visible) ; personal note")
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, original, noted)
+        val history = workspace.sourceUndoHead(PLM_SOURCE_FILE)
+        editor.brush = stampBrush(0xEEDB, 5)
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(2, 3), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        assertEquals(noted, bridge.sourceText())
+        assertSame(history, workspace.sourceUndoHead(PLM_SOURCE_FILE))
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(pixels, editor.workingLevelData)
+        assertEquals(noted, bridge.sourceText())
+    }
+
+    @Test fun `floating patterns honor the layout scope prompt and rejected linked resources stay unplaced`() = runBlocking {
+        val (_, bridge, project) = fixture(withLevelData = true)
+        bridge.migrateRoom(0x91F8, "Landing Site")
+        val editor = scopeEditor(bridge, project)
+        editor.brush = stampBrush(0xEEDF)
+        assertTrue(editor.beginFloatingSelectionFromBrushAt(8, 8))
+        assertFalse(editor.commitFloatingSelection())
+        assertNotNull(editor.pendingLayoutEditScope)
+        editor.resolvePendingLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        assertNull(editor.floatingSelection)
+        assertTrue(editor.workingPlms.any { it.id == 0xEEDF && it.x == 8 && it.y == 8 })
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertTrue(editor.workingPlms.none { it.id == 0xEEDF })
+        val before = bridge.sourceText()
+        val pixels = editor.workingLevelData!!.copyOf()
+        editor.brush = stampBrush(0xB703)
+        editor.beginFloatingSelectionFromBrushAt(12, 8)
+        assertFalse(editor.commitFloatingSelection())
+        assertNotNull(editor.floatingSelection)
+        assertContains(editor.statusMessage, "Add scroll trigger")
+        assertEquals(before, bridge.sourceText())
+        assertContentEquals(pixels, editor.workingLevelData)
     }
 
     @Test fun `new PLMs default all states with complete gates and future conditions`() = runBlocking {

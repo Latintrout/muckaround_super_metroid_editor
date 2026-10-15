@@ -66,6 +66,18 @@ class AsmBuildPipelineIntegrationTest {
         assertTrue(editor.ensureCurrentPlmSource("Landing Site"))
         editor.setScroll(0, 0, 2, editor.workingBlocksWide / 16)
         editor.setRoomStateFxChange(newId, com.supermetroid.editor.data.FxChange(fxType = 2, liquidSurfaceStart = 0x100), parser)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        editor.brush = TileBrush(listOf(listOf(42, 43)), plmOverrides = mapOf(0L to (0xEEDF to 0)))
+        val patternBefore = editor.workingLevelData!!.copyOf()
+        editor.beginStroke()
+        assertTrue(editor.paintAt(8, 8), editor.statusMessage)
+        assertTrue(editor.paintAt(12, 8), editor.statusMessage)
+        assertTrue(editor.endStroke(), editor.statusMessage)
+        val patternAfter = editor.workingLevelData!!.copyOf()
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(patternBefore, editor.workingLevelData)
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertContentEquals(patternAfter, editor.workingLevelData)
         project.patches += SmPatch("enemy-test-patch", "Independent ROM patch", enabled = true,
             writes = mutableListOf(PatchWrite(0x2FFFF0, listOf(0x43))))
         suspend fun buildAndVerify() {
@@ -79,6 +91,9 @@ class AsmBuildPipelineIntegrationTest {
                 assertContentEquals(expected.population.bytes(), com.supermetroid.editor.rom.readSourceEnemyPopulation(built, states[index].enemySetPtr, expected.population.identity).bytes())
                 assertContentEquals(expected.graphics.bytes(), com.supermetroid.editor.rom.readSourceEnemyGraphics(built, states[index].enemyGfxPtr, expected.graphics.identity).bytes())
                 assertEquals(bridge.managedView(room.roomId, state.id).document!!.entries, built.parsePlmSet(states[index].plmSetPtr))
+                if (state.resources.level == room.states.single { it.id == newId }.resources.level) {
+                    assertContentEquals(patternAfter, built.decompressLZ2(states[index].levelDataPtr), "Compound pattern geometry and PLMs must reach the same built ROM")
+                }
             }
             val populations = room.states.mapIndexed { index, state -> bridge.enemies.view(room.roomId, state.id).resource!!.population.identity to states[index].enemySetPtr }.groupBy({ it.first }, { it.second })
             assertTrue(populations.values.all { it.distinct().size == 1 })

@@ -93,6 +93,18 @@ not project content; its four viewport scroll states survive main-view/subtab
 navigation in the current session. Only the tab selection is persisted across app
 restarts. Scroll offsets clamp naturally when content/viewport size changes.
 
+Functional pattern strokes also use the reciprocal object source in ASM mode:
+tiles and PLMs preview together, then publish one source/layout transaction on
+release. Undo from either editor restores both, and private list scope stays
+independent of layout sharing. Gate pairs and save-spawn resources participate in
+the same operation; slots are reserved across the entire drag. Invalid/stale
+source, exhausted slots and incompatible prospective All-states gate/door-cap
+geometry cannot leave partial patterns behind. Source undo refuses to overwrite
+newer layout/state edits. ROM mode retains its delta backend. Tile patterns do
+not carry named scroll commands: use Add scroll trigger rather than stamping a
+scroll trigger, and do not infer object movement from a tile selection. See
+[compound pattern strokes](../asm/reference_workspace.md#compound-tile--object-pattern-strokes).
+
 Ordinary room FX now uses the same reciprocal authority in ASM projects.
 **Room Info → Default FX → ASM** or a door row's **ASM** link adopts effective
 values into `bank_83.asm`; `asmFxSourceVersion = 1` retains ownership only and
