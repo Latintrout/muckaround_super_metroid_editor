@@ -101,6 +101,7 @@ fun RoomPropertiesPanel(
     onNavigateToMap: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
     onNavigateToInitialScrolls: (() -> Unit)? = null,
+    onNavigateToLayoutSource: (() -> Unit)? = null,
     onNavigateToFx: ((String, Int?) -> Unit)? = null,
     onNavigateToEnemies: ((String, Boolean) -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
@@ -108,6 +109,7 @@ fun RoomPropertiesPanel(
 ) {
     val asmLinkCallback = editorState.projectAsmNavigation(onNavigateToAsm)
     val initialScrollsLink = editorState.projectAsmNavigation(onNavigateToInitialScrolls)
+    val layoutSourceLink = editorState.projectAsmNavigation(onNavigateToLayoutSource)
     val fxLink = editorState.projectAsmNavigation(onNavigateToFx)
     val enemiesLink = editorState.projectAsmNavigation(onNavigateToEnemies)
     val stateInspection = remember(room.roomId, romParser) { romParser.inspectRoomStates(room.roomId) }
@@ -869,7 +871,8 @@ fun RoomPropertiesPanel(
                 onDismiss = { helpTopic = null },
             )
         }
-        PropertyRow("Layout", sharingDescription("levelDataPtr", levelDataPtr))
+        PropertyRow("Layout", sharingDescription("levelDataPtr", levelDataPtr), layoutSourceLink)
+        editorState.layoutPreviewProblem?.let { Text(it, fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error) }
         PropertyRow(
             "Background",
             (if (bgDataPtr == 0) "Embedded in layout" else "Separate background") +
@@ -921,7 +924,7 @@ fun RoomPropertiesPanel(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 3.dp),
             )
-            PropertyRow("Layout Data", snesAddr24(levelDataPtr), asmLink(levelDataPtr))
+            PropertyRow("Layout Data", if (editorState.hasManagedLayouts()) "Project tile/BTS source" else snesAddr24(levelDataPtr), layoutSourceLink ?: asmLink(levelDataPtr))
             PropertyRow(
                 "BG Data",
                 if (bgDataPtr == 0) "None" else "\$8F:${hex16(bgDataPtr).removePrefix("0x")}",

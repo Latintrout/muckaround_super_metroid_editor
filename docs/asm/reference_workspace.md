@@ -1546,8 +1546,9 @@ custom references and save resources survive; only unreachable owned scroll
 helpers are collected. Source plans check the project source revision so a newer
 macro/custom reference cannot be overwritten by an older plan.
 
-Generated rooms persist ordinary resource-owned tile edits and authored Bank
-`$8F` PLM/grid values, not duplicate JSON values. Reopen, raw ASM edits, subsequent
+Generated rooms persist resource-owned tile edits until layout-source adoption;
+adopted layouts instead update their authored `SmeditLayout_*` declarations.
+Bank `$8F` PLM/grid values remain authored, not duplicate JSON values. Reopen, raw ASM edits, subsequent
 GUI edits, and checked compiled placements use the same existing lenses. ROM-only
 generation retains its delta backend. Bulk Generate/Reset skips source-owned
 rooms: bulk reset must not remove only geometry while leaving generated camera
@@ -1668,6 +1669,58 @@ reciprocal raw edits, save/reopen and the actual Generate entry point.
 Asar output for theme and layout data, the previous result after undo, redo,
 ordinary ROM patches and base-ROM immutability.
 
+## Reciprocal room layouts
+
+**Room Info → Layout → ASM** adopts an existing room's effective layouts and
+opens their editable decoded declarations in project `bank_8F.asm`. This is
+different from the read-only, last-build **Room Data** catalog. Navigation does
+not require a build first. The source pane's **Edit room** link returns to a
+state using that exact shared/private layout, including after the canvas reloads.
+
+`SmeditLayout_<room>_Data_<identity>()` macros contain a `dw` L1 byte count,
+row-major `dw` L1 tile words, row-major `db` BTS bytes, and any embedded L2/tail
+data. Comments show zero-based row/column coordinates; rows are at most sixteen
+cells long. The first word is the allocation header, not a tile. State wrappers
+reference the same macro when their complete layouts are linked. Hidden allocated
+blocks, embedded L2, odd tails and unused bytes survive adoption without
+normalization. These are typed source assets: do not invoke an uncompressed
+layout macro at a ROM `org`. SMEDIT's build encoder validates the literals and
+LZ5-compresses them before Asar compiles the generated placement plan.
+
+Painting, filling, selection-property edits and ordinary tile batches update
+those same literals; raw source edits refresh the canvas. Existing handwritten
+comments and literal spelling survive unrelated GUI edits. **Make layout unique**
+clones a whole source asset; **Use another state's layout** relinks it explicitly.
+Equal independent assets are not merged. Invalid drafts retain the last valid
+preview (or show an unavailable-source warning on fresh load), remain saveable,
+and block GUI writes and builds rather than falling back to native geometry.
+
+Adoption retires legacy tile deltas with one reciprocal undo boundary. New source
+edits prevent older GUI undo from overwriting them. Generation, themed generation,
+functional tile/PLM patterns, resize and whole-room reset retain their joint
+source/model history without reintroducing duplicate tile operations. Source
+builds use validated resource inputs and checked allocations/pointers; ROM-only
+export cannot ignore authored ownership. Project schema 14 records ownership and
+resource identities only. Added-room projects and selection-to-multiple-state
+application remain guarded; copy/share complete layouts instead.
+
+Manual round trip:
+
+1. Generate Flyway, then open **Room Info → Layout → ASM**.
+2. Find an `L1 tiles` row. Copy a visibly different nearby tile's word into one
+   ordinary wall cell to see an appearance change. Changing only `$8xxx` to
+   `$0xxx` changes collision to air but keeps the same graphic. Do not change
+   the allocation header or door/trigger cells for this test.
+3. Use **Edit room** to inspect the change. Paint a block in the canvas, then
+   reopen **Layout → ASM** to see its authored value.
+4. Check shared/private states and Undo/Redo. Build to refresh **Room Data**.
+
+`AsmRoomLayoutSourceTest` covers adoption/retirement, raw and GUI edits, sharing,
+invalid drafts, reopen, typed export, generation/themes, patterns, resize/reset,
+retained allocation bytes and reverse navigation. The real-Asar integration
+`authored layout code round trips` builds Flyway after raw edits, undo, a private
+fork and restored sharing, checking decoded bytes and state-specific resources.
+
 ## Next layers
 
 The separation between editable source and executable output is intentional.
@@ -1690,8 +1743,9 @@ Follow-up work can now be incremental:
    scroll-trigger commands, paired save-spawn records and ordinary door/default FX
    now use the same authority contract, including paired enemy populations/GFX.
    Tile/PLM pattern strokes, room generation, themes, resizing and reset now have atomic source/model undo boundaries.
+   Decoded room layouts/BTS/L2 now have a reciprocal typed source asset as well.
    Next add one asset-owned graphics example. Then extend full
-   authoring to rewritten state graphs, level data, doors, headers, and state selectors;
+   authoring to rewritten state graphs, doors, headers, and state selectors;
    then give project-created rooms stable source
    identities. Graphics, map, text, and sound encoders should follow the same
    project-owned `data/`/source boundary before Asar.

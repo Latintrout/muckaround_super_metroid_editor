@@ -616,6 +616,18 @@ fun main() = application {
                     } }.onFailure { editorState.postStatus(it.message ?: "Initial scroll source is unavailable.") }
             }
 
+            fun openLayoutSource() {
+                if (!editorState.asmNavigationEnabled) return
+                if (!editorState.ensureLayoutSource(selectedRoom?.name ?: "Room")) return
+                val state = editorState.currentPlmStateId() ?: return
+                runCatching { requireNotNull(editorState.asmPlmSourceBridge).layouts.line(editorState.currentRoomId, state) }
+                    .onSuccess { line -> navigate {
+                        asmWorkspaceState.showProjectWorkspace()
+                        asmWorkspaceState.openSource("bank_8F.asm", line)
+                        leftTab = TAB_ASM
+                    } }.onFailure { editorState.postStatus("Layout source needs attention: ${it.message}") }
+            }
+
             fun openFx(stateId: String, door: Int?) {
                 if (!editorState.asmNavigationEnabled) return
                 if (!editorState.ensureFxSource(selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}")) return
@@ -646,6 +658,7 @@ fun main() = application {
             val editorPlmPlacementLink = editorState.projectAsmNavigation(::openPlmPlacement)
             val editorScrollCommandsLink = editorState.projectAsmNavigation(::openScrollCommands)
             val editorInitialScrollsLink = editorState.projectAsmNavigation(::openInitialScrolls)
+            val editorLayoutSourceLink = editorState.projectAsmNavigation(::openLayoutSource)
             val editorFxLink = editorState.projectAsmNavigation(::openFx)
             val editorSaveSpawnLink = editorState.projectAsmNavigation(::openSaveSpawn)
             fun openEnemySource(entry: RomParser.EnemyEntry?, graphics: Boolean = false, requestedState: String? = null) {
@@ -670,6 +683,8 @@ fun main() = application {
                 navigate {
                     when (target) {
                         is AsmEditorTarget.Room -> {
+                            if (target.layoutId != null || target.stateId != null)
+                                editorState.requestLayoutNavigation(target.roomId, target.layoutId, target.stateId)
                             rooms.firstOrNull { it.getRoomIdAsInt() == target.roomId }?.let { room ->
                                 selectedRoom = room
                                 RomPreferences.getLastRomPath()?.let { saveLastRoom(it, room) }
@@ -1375,6 +1390,7 @@ fun main() = application {
                                             },
                                             onNavigateToAsm = editorAsmAddressLink,
                                             onNavigateToInitialScrolls = editorInitialScrollsLink,
+                                            onNavigateToLayoutSource = editorLayoutSourceLink,
                                             onNavigateToFx = editorFxLink,
                                             onNavigateToEnemies = editorEnemiesLink,
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },

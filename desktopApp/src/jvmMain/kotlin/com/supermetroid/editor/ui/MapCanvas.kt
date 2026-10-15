@@ -446,16 +446,19 @@ fun MapCanvas(
                             // Apply any project header changes (e.g. resize) before loading/rendering
                             val roomHeader = editorState?.applyHeaderChanges(romHeader) ?: romHeader
                             // Load working level data for editing
-                            editorState?.loadRoom(roomId, romParser, romHeader)
+                            editorState?.loadRoomForCanvas(roomId, romParser, romHeader)
                             // Render using effective dimensions and resized level data
                             val es = editorState
-                            renderData = if (es?.workingLevelData != null) {
+                            renderData = if (es?.hasManagedLayouts() == true && es.workingLevelData == null) {
+                                errorMessage = es.layoutPreviewProblem ?: "Wait for the room layout source."
+                                null
+                            } else if (es?.workingLevelData != null) {
                                 MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(
                                     roomHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                             } else {
                                 MapRenderer(romParser).renderRoom(roomHeader)
                             }
-                            if (renderData == null) errorMessage = "Failed to render"
+                            if (renderData == null && errorMessage == null) errorMessage = "Failed to render"
                         } else {
                             errorMessage = "Room header not found"
                         }
@@ -468,6 +471,20 @@ fun MapCanvas(
                 }
 
                 val editVersion = editorState?.editVersion ?: 0
+                val sourceLayoutReady = editorState?.hasManagedLayouts() == true && editorState.workingLevelData != null
+                LaunchedEffect(room.id, romParser, isLoading, sourceLayoutReady) {
+                    // A saved authored layout can arrive after its asynchronous workspace bridge.
+                    // Recover the initial source-only loading/error view without loading native data.
+                    if (!isLoading && sourceLayoutReady && renderData == null) {
+                        val es = requireNotNull(editorState)
+                        val header = romParser.readRoomHeader(room.getRoomIdAsInt())?.let(es::applyHeaderChanges)
+                        if (header != null) {
+                            renderData = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(
+                                header, requireNotNull(es.workingLevelData), es.workingPlms, es.workingEnemies)
+                            if (renderData != null) errorMessage = null
+                        }
+                    }
+                }
 
                 // ─── Compact toolbar ─────────────────────────────
                 FlowRow(

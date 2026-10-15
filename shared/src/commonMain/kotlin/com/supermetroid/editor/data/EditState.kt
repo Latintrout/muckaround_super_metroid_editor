@@ -499,9 +499,11 @@ data class RoomEdits(
     var asmFxSourceVersion: Int = 0,
     /** Population and GFX macros share one authored bank_A1.asm buffer; JSON stores only ownership. */
     var asmEnemySourceVersion: Int = 0,
+    /** Decoded layout/BTS/L2 declarations in project ASM; JSON stores ownership only. */
+    var asmLayoutSourceVersion: Int = 0,
 ) {
     val hasEdits: Boolean get() =
-        asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || asmEnemySourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
+        asmLayoutSourceVersion != 0 || asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || asmEnemySourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
             states.any { it.hasEdits } || operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||
@@ -942,7 +944,7 @@ data class SmEditProject(
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
-        const val CURRENT_PROJECT_FORMAT_VERSION = 13
+        const val CURRENT_PROJECT_FORMAT_VERSION = 14
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

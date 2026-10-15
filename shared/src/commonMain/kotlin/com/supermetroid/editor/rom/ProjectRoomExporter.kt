@@ -52,6 +52,7 @@ class ProjectRoomExporter(
     private val sourceInitialScrolls: Map<Int, Map<String, SourceInitialScrollResource>> = emptyMap(),
     private val sourceFx: Map<Int, Map<String, SourceFxResource>> = emptyMap(),
     private val sourceEnemies: Map<Int, Map<String, SourceEnemyResources>> = emptyMap(),
+    private val sourceLayouts: Map<Int, Map<String, SourceRoomLayoutResource>> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -158,6 +159,11 @@ class ProjectRoomExporter(
 
         for ((roomKey, roomEdits) in effectiveEdits) {
             if (!roomEdits.hasEdits) continue
+            if (roomEdits.asmLayoutSourceVersion != 0) {
+                require(roomEdits.asmLayoutSourceVersion == 1 && roomEdits.roomId in sourceLayouts) { "Room $roomKey requires its decoded layout source." }
+                require(roomEdits.operations.all { it.edits.isEmpty() } && roomEdits.levelResourceOperations.values.flatten().all { it.edits.isEmpty() } &&
+                    roomEdits.states.all { state -> state.operations.all { it.edits.isEmpty() } }) { "Room $roomKey has both authored layout and GUI tile deltas." }
+            }
             if (roomEdits.asmEnemySourceVersion != 0) {
                 require(roomEdits.asmEnemySourceVersion == 1 && roomEdits.roomId in sourceEnemies) { "Room $roomKey requires its decoded enemy source." }
                 require(roomEdits.enemyChanges.isEmpty() && roomEdits.states.all { it.enemyChanges.isEmpty() }) { "Room $roomKey has both authored enemies and GUI deltas." }
@@ -198,7 +204,7 @@ class ProjectRoomExporter(
             val effectiveHeight = headerChange?.height ?: room.height
             val isResized = effectiveWidth != room.width || effectiveHeight != room.height
 
-            if (roomEdits.hasTileEdits || isResized) {
+            if (roomEdits.asmLayoutSourceVersion == 0 && (roomEdits.hasTileEdits || isResized)) {
                 if (room.levelDataPtr == 0) {
                     failExport("Room 0x$roomKey has level edits but no level-data pointer")
                 }
@@ -283,7 +289,7 @@ class ProjectRoomExporter(
                 roomsPatched.add(roomKey)
             }
 
-            if (roomEdits.states.any { it.levelResourceChanged }) {
+            if (roomEdits.asmLayoutSourceVersion == 0 && roomEdits.states.any { it.levelResourceChanged }) {
                 applyLevelResourceLinks(roomKey, roomId, roomEdits, rewrittenStateOffsets)
                 roomsPatched.add(roomKey)
             }
@@ -303,6 +309,10 @@ class ProjectRoomExporter(
 
             if (roomEdits.states.any { it.hasEdits }) {
                 applyExistingStateEdits(roomKey, roomId, roomEdits, rewrittenStateOffsets)
+                roomsPatched.add(roomKey)
+            }
+            if (roomEdits.asmLayoutSourceVersion != 0) {
+                applySourceLayouts(roomKey, roomId, roomEdits, rewrittenStateOffsets, effectiveWidth, effectiveHeight)
                 roomsPatched.add(roomKey)
             }
             if (roomEdits.asmInitialScrollSourceVersion != 0) {
@@ -449,6 +459,37 @@ class ProjectRoomExporter(
                 ?: failExport("Enemy source state ${state.id} has no state record")
             writeU16(romData, offset + 8, popPtr)
             writeU16(romData, offset + 10, gfxPtr)
+        }
+    }
+
+    private fun applySourceLayouts(roomKey: String, roomId: Int, edits: RoomEdits, rewritten: Map<String, Int>, width: Int, height: Int) {
+        val inputs = sourceLayouts.getValue(roomId)
+        require(inputs.keys == edits.states.map { it.id }.toSet()) { "Layout source state membership changed." }
+        val states = romParser.inspectRoomStates(roomId).states
+        if (rewritten.isEmpty()) require(edits.states.size == states.size && edits.states.mapNotNull { it.sourceStateIndex }.toSet() == states.indices.toSet()) {
+            "Layout source requires a complete existing-state manifest or rebuilt state graph."
+        }
+        val pointers = mutableMapOf<String, Pair<Int, SourceRoomLayoutResource>>()
+        for (state in edits.states) {
+            val resource = inputs.getValue(state.id)
+            require(resource.width == width * 16 && resource.height == height * 16) { "Layout source dimensions no longer match the room." }
+            val previous = pointers[resource.identity]
+            val pointer = if (previous != null) {
+                require(previous.second == resource) { "A shared layout has inconsistent source values." }
+                previous.first
+            } else {
+                val bytes = resource.bytes()
+                val compressed = LZ5Compressor.compress(bytes)
+                require(LZ5Compressor.decompress(compressed).contentEquals(bytes)) { "Layout compression did not round trip." }
+                val native = requireNotNull(state.baseSourceStateIndex()?.let { states.getOrNull(it)?.stateDataPcOffset })
+                val originalPointer = romParser.readStateData(native).getValue("levelDataPtr")
+                val allocation = levelDataAllocator.allocate(compressed, levelDataRelocationBanks(originalPointer), "Room $roomKey source layout ${resource.identity}")
+                    ?: failExport("Room $roomKey source layout needs ${compressed.size} contiguous bytes of level-data space")
+                allocation.snesAddress.also { pointers[resource.identity] = it to resource }
+            }
+            val offset = rewritten[state.id] ?: state.sourceStateIndex?.let { states.getOrNull(it)?.stateDataPcOffset }
+                ?: failExport("Layout source state ${state.id} has no writable record")
+            writeU24(romData, offset, pointer)
         }
     }
 

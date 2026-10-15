@@ -2725,9 +2725,12 @@ private fun AsmSourceCanvas(
     val indexedExactAddress = addressAnchorsByLine[pane.lineIndex]
     val compiledExactAddress = compiledAddressesByLine[pane.lineIndex]
     val exactSnesAddress = compiledExactAddress ?: indexedExactAddress?.snesAddress
-    val editorLinks = remember(semanticIndex, exactSnesAddress) {
+    val editorLinks = remember(semanticIndex, exactSnesAddress, source, pane.lineIndex) {
         val address = exactSnesAddress
-        if (semanticIndex == null || address == null) emptyList()
+        val layoutTarget = com.supermetroid.editor.asm.AsmRoomLayoutSource.targetAt(source.lines, pane.lineIndex)
+        if (layoutTarget != null) listOf(com.supermetroid.editor.asm.AsmEditorLink(
+            "Edit room", "Decoded layout · tile/BTS source", layoutTarget))
+        else if (semanticIndex == null || address == null) emptyList()
         else semanticIndex.linksFor(address)
     }
     val referenceLabel = remember(index, source.id, pane.lineIndex, pane.referenceSymbol) {

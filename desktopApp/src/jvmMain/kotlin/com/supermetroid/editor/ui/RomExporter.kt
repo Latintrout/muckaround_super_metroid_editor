@@ -214,12 +214,18 @@ internal class RomExporter(
     private val sourceInitialScrolls: Map<Int, Map<String, com.supermetroid.editor.rom.SourceInitialScrollResource>> = emptyMap(),
     private val sourceFx: Map<Int, Map<String, com.supermetroid.editor.rom.SourceFxResource>> = emptyMap(),
     private val sourceEnemies: Map<Int, Map<String, com.supermetroid.editor.rom.SourceEnemyResources>> = emptyMap(),
+    private val sourceLayouts: Map<Int, Map<String, com.supermetroid.editor.rom.SourceRoomLayoutResource>> = emptyMap(),
     private val projectFilePath: String = "",
 ) {
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        if (project.rooms.values.any { it.asmLayoutSourceVersion != 0 && it.roomId !in sourceLayouts && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
+            onLog("ERROR: Authored room layouts require validated ASM build inputs.")
+            onStatus("Authored room layouts require validated ASM build inputs.")
+            return null
+        }
         if (project.rooms.values.any { it.asmEnemySourceVersion != 0 && it.roomId !in sourceEnemies && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
             onLog("ERROR: Authored enemy populations/GFX require validated ASM build inputs.")
             onStatus("Authored enemy populations/GFX require validated ASM build inputs.")
@@ -476,6 +482,7 @@ internal class RomExporter(
                                 sourceInitialScrolls = sourceInitialScrolls,
                                 sourceFx = sourceFx,
                                 sourceEnemies = sourceEnemies,
+                                sourceLayouts = sourceLayouts,
                             ).exportRooms()
                         }
                         roomsPatched.addAll(roomExportResult.roomsPatched)

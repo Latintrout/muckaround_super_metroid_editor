@@ -43,6 +43,79 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `authored layout code round trips Flyway geometry BTS sharing and undo through real Asar builds`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState()
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        val native = parser.readRoomHeader(0x9879)!!
+        val baseStates = parser.parseRoomStatesWithData(native.roomId)
+        editor.loadRoom(native.roomId, parser, native)
+        editor.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        val profile = com.supermetroid.editor.procgen.TilesetProfileCache.getOrLearn(parser,
+            parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }, native.tileset)
+        assertTrue(editor.generateBiome(
+            com.supermetroid.editor.procgen.BiomeRules.roll(com.supermetroid.editor.procgen.BiomeStyle.PIPE_MAZE, 1234L),
+            profile, 1234L, romParser = parser) > 0, editor.statusMessage)
+        val generated = editor.workingLevelData!!.copyOf()
+        assertTrue(editor.ensureLayoutSource(native.name), editor.statusMessage)
+        val room = project.rooms.getValue("9879")
+        val selected = editor.currentPlmStateId()!!
+        assertTrue(room.levelResourceOperations.isEmpty())
+        val adopted = bridge.sourceText()
+        editor.setTileProperties(20, 8, 8, 7)
+        assertNotEquals(adopted, bridge.sourceText())
+        val painted = bridge.sourceText()
+        val newWord = editor.readBlockWord(20, 8) and 0x0FFF
+        val raw = com.supermetroid.editor.asm.AsmRoomLayoutSource(painted).edit(room, selected, 48, 16,
+            listOf(com.supermetroid.editor.data.TileEdit(20, 8, editor.readBlockWord(20, 8), newWord, editor.readBts(20, 8), 3)))
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, painted, raw)
+        editor.refreshLinkedPlms()
+        assertEquals(newWord, editor.readBlockWord(20, 8)); assertEquals(3, editor.readBts(20, 8))
+        val shared = editor.workingLevelData!!.copyOf()
+        assertFalse(editor.undo(), "A newer raw code edit must not be overwritten by GUI undo")
+        suspend fun buildAndVerify(expected: Map<String, ByteArray>, pointers: Int) {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            val logs = mutableListOf<String>()
+            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val built = RomParser(result.resultRom)
+            val states = built.parseRoomStatesWithData(native.roomId)
+            assertEquals(pointers, states.map { it.levelDataPtr }.distinct().size)
+            room.states.forEachIndexed { index, state ->
+                assertContentEquals(expected.getValue(state.id), built.decompressLZ2(states[index].levelDataPtr))
+                val base = baseStates[state.sourceStateIndex ?: state.templateSourceStateIndex!!]
+                assertEquals(parser.parsePlmSet(base.plmSetPtr).filterNot { RomParser.isScrollPlm(it.id) }, built.parsePlmSet(states[index].plmSetPtr))
+                assertEquals(parser.parseEnemyPopulation(base.enemySetPtr), built.parseEnemyPopulation(states[index].enemySetPtr))
+                assertEquals(parser.parseFxEntries(base.fxPtr), built.parseFxEntries(states[index].fxPtr))
+                assertEquals(base.mainAsmPtr, states[index].mainAsmPtr)
+                assertEquals(base.setupAsmPtr, states[index].setupAsmPtr)
+            }
+            assertTrue(room.levelResourceOperations.isEmpty())
+            assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+        }
+        buildAndVerify(room.states.associate { it.id to shared }, 1)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(generated, editor.workingLevelData)
+        buildAndVerify(room.states.associate { it.id to generated }, 1)
+        assertTrue(editor.redo(), editor.statusMessage)
+        val sharedPainted = editor.workingLevelData!!.copyOf()
+        editor.setCurrentLayoutEditScope(LayoutEditScope.THIS_STATE)
+        val originalType = editor.readBlockWord(21, 8) ushr 12
+        editor.setTileProperties(21, 8, if (originalType == 8) 0 else 8, 9)
+        val private = editor.workingLevelData!!.copyOf()
+        buildAndVerify(room.states.associate { it.id to if (it.id == selected) private else sharedPainted }, 2)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error) // Undo the private-layout fork.
+        editor.refreshLinkedPlms()
+        assertContentEquals(sharedPainted, editor.workingLevelData)
+        buildAndVerify(room.states.associate { it.id to sharedPainted }, 1)
+    }
+
     @Test fun `Flyway generates one shared maze without merging state objects actors FX or scripts`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)

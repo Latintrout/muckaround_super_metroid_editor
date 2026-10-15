@@ -222,10 +222,19 @@ see [save-station authoring](../asm/reference_workspace.md#reciprocal-save-stati
 Original fixed-address links still have fixed-size restrictions. Managed lists
 and named command streams support growth/shrinkage; changed resource links,
 added-room projects and mixed source/GUI operations are guarded boundaries. Only
-objects, named scroll commands, adopted save spawns, initial scroll grids and
-ordinary FX tables have migrated: selectors, layouts and other resources keep their existing
+objects, named scroll commands, adopted save spawns, initial scroll grids,
+ordinary FX tables, paired enemy/GFX tables and adopted decoded layouts have migrated:
+selectors, headers, doors and other resources keep their existing
 model/backend. This does **not** change the ordinary unlinked/ROM
 editing model described below. See the [source/GUI ownership contract](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
+
+**Room Info → Layout → ASM** adopts effective L1/BTS/L2 into editable decoded
+`dw`/`db` macros, retiring JSON tile deltas with one undo boundary. Painting and
+raw code edit one asset; state wrappers retain complete shared/private resources.
+The source pane's **Edit room** link selects a state using that layout. Build
+validates and compresses it into checked placements. Generation/themes, functional
+patterns, resize and reset remain reciprocal. See
+[room layout source](../asm/reference_workspace.md#reciprocal-room-layouts).
 
 Existing source rooms remain deltas keyed by their physical room-header address. Project-owned
 rooms have stable semantic identities and complete initial payloads, then use the same `RoomEdits`

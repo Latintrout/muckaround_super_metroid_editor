@@ -40,6 +40,7 @@ internal class AsmPlmSourceBridge(
     val initialScrolls = AsmInitialScrollBridge(catalog, workspace, project) { onMetadataChanged() }
     val fx = AsmFxBridge(catalog, workspace, project) { onMetadataChanged() }
     val enemies = AsmEnemyBridge(catalog, workspace, project) { onMetadataChanged() }
+    val layouts = AsmRoomLayoutBridge(catalog, workspace, project) { onMetadataChanged() }
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
     private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
@@ -84,7 +85,7 @@ internal class AsmPlmSourceBridge(
     init { if (registerSaveParticipant) workspace.sourceSaveParticipant = this }
 
     override val sourceFileIds: Set<String> get() = buildSet {
-        if (project().rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 }) add(PLM_SOURCE_FILE)
+        if (project().rooms.values.any { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmLayoutSourceVersion != 0 }) add(PLM_SOURCE_FILE)
         if (project().rooms.values.any { it.asmFxSourceVersion != 0 }) add(FX_SOURCE_FILE)
         if (project().rooms.values.any { it.asmEnemySourceVersion != 0 }) add(ENEMY_SOURCE_FILE)
     }
@@ -351,7 +352,7 @@ internal class AsmPlmSourceBridge(
 
     /** No workspace or model mutation until every row, spawn and resource link is checked. */
     fun applyStamps(roomId: Int, stateId: String, expected: String, stamps: List<AsmPlmStamp>,
-                    beforeUndo: () -> Unit, beforeRedo: () -> Unit): Boolean {
+                    beforeUndo: () -> Unit, beforeRedo: () -> Unit, layoutEdits: List<com.supermetroid.editor.data.TileEdit> = emptyList()): Boolean {
         require(sourceText() == expected) { "Object source changed during painting; try the stroke again." }
         val room = project().rooms.getValue(project().roomKey(roomId))
         val (width, height) = dimensions(roomId)
@@ -384,7 +385,10 @@ internal class AsmPlmSourceBridge(
             .groupBy { it.area to it.slot }.forEach { (_, owners) ->
                 require(owners.distinct().size == 1) { "Another source room already owns this save slot." }
             }
-        val after = source.withComments(roomId, describePlm)
+        var after = source.withComments(roomId, describePlm)
+        if (room.asmLayoutSourceVersion != 0 && layoutEdits.isNotEmpty()) {
+            after = AsmRoomLayoutSource(after).edit(room, stateId, width * 16, height * 16, layoutEdits)
+        }
         if (after == expected) return false
         workspace.replaceProjectSource(PLM_SOURCE_FILE, expected, after, beforeUndo, beforeRedo)
         return true
@@ -410,7 +414,8 @@ internal class AsmPlmSourceBridge(
     }
 
     /** Adopt both inputs in a private model, then edit them. Failure publishes nothing, including ownership. */
-    fun planGeneration(roomId: Int, name: String, stateIds: Set<String>, isItem: (Int) -> Boolean): AsmRoomGenerationPlan {
+    fun planGeneration(roomId: Int, name: String, stateIds: Set<String>, isItem: (Int) -> Boolean,
+                       layoutEdits: List<com.supermetroid.editor.data.TileEdit> = emptyList()): AsmRoomGenerationPlan {
         val owner = project()
         require(owner.asmWorkspace.enabled && owner.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) { "Room source requires ASM mode." }
         require(owner.newRooms.isEmpty()) { "Generation source for projects with added rooms needs stable source identities first." }
@@ -457,6 +462,10 @@ internal class AsmPlmSourceBridge(
         validateSourceSaveLinks(roomId, room.roomHeaderChange?.area ?: header.area,
             resources.values.flatMap { it.entries }, saves, staged.saveStationSpawns, catalog.parser)
         text = finalObjects.withComments(roomId, describePlm)
+        if (room.asmLayoutSourceVersion != 0 && layoutEdits.isNotEmpty()) {
+            require(stateIds.map { id -> room.states.single { it.id == id }.resources.level }.distinct().size == 1) { "Generated layout targets must share one resource." }
+            text = AsmRoomLayoutSource(text).edit(staged, stateIds.first(), width * 16, height * 16, layoutEdits)
+        }
         val finalGrids = AsmInitialScrollSource(text, catalog.symbols).resources(staged, width, height)
         return AsmRoomGenerationPlan(owner, room, room.roomHeaderChange, workspace.sourceBufferRevision, before, text, AsmRoomBank8FMetadata.capture(room), AsmRoomBank8FMetadata.capture(staged),
             grids.mapValues { it.value.values }, finalGrids.mapValues { it.value.values }, resources.mapValues { it.value.entries })
@@ -650,6 +659,7 @@ internal class AsmPlmSourceBridge(
             resizeScrollCommands(commands, native.width, oldWidth, oldHeight)
         }
         text = AsmInitialScrollSource(text, catalog.symbols).resize(staged, oldWidth, oldHeight, width, height)
+        if (staged.asmLayoutSourceVersion != 0) text = AsmRoomLayoutSource(text).resize(staged, oldWidth, oldHeight, width, height)
         staged.roomHeaderChange = (staged.roomHeaderChange ?: com.supermetroid.editor.data.RoomHeaderChange()).copy(width = width, height = height)
         text = AsmRoomObjectSource(text, catalog.symbols).tidy(staged, references)
         val objects = AsmRoomObjectSource(text, catalog.symbols)

@@ -250,7 +250,7 @@ internal object ProjectFileService {
         onStatus: (String) -> Unit,
     ): AsmCompiledBuildBase? {
         if (project.asmWorkspace.buildMode == ProjectRomBuildMode.PATCHED_ROM) {
-            require(project.rooms.values.none { it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 || it.asmEnemySourceVersion != 0 }) { "Authored room data requires ASM source mode." }
+            require(project.rooms.values.none { it.asmLayoutSourceVersion != 0 || it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmFxSourceVersion != 0 || it.asmEnemySourceVersion != 0 }) { "Authored room data requires ASM source mode." }
             require(project.asmWorkspace.plmSourceBindings.isEmpty()) { "Linked room objects require ASM source mode." }
             val sourceEdits = if (project.asmWorkspace.enabled && projectFilePath.isNotBlank()) {
                 AsmProjectWorkspaceRepository().sourceOverrideFileIds(projectFilePath)
@@ -308,6 +308,11 @@ internal object ProjectFileService {
         if (managedRooms.isNotEmpty()) linkedCatalog.requireStandardMacro(linkedMacros)
         val managedSource = AsmRoomObjectSource(linkedSource, linkedCatalog.symbols)
         val initialScrollSource = AsmInitialScrollSource(linkedSource, linkedCatalog.symbols)
+        val layoutSource = com.supermetroid.editor.asm.AsmRoomLayoutSource(linkedSource)
+        val sourceLayouts = project.rooms.values.filter { it.asmLayoutSourceVersion != 0 }.associate { room ->
+            val header = requireNotNull(romParser.readRoomHeader(room.roomId))
+            room.roomId to layoutSource.resources(room, (room.roomHeaderChange?.width ?: header.width) * 16, (room.roomHeaderChange?.height ?: header.height) * 16)
+        }
         val fxRooms = project.rooms.values.filter { it.asmFxSourceVersion != 0 }
         val sourceFx = if (fxRooms.isEmpty()) emptyMap() else {
             val fxSource = AsmFxSource(File(linkedWorkspace.workingDirectory, "src/$FX_SOURCE_FILE").readText())
@@ -422,6 +427,7 @@ internal object ProjectFileService {
             sourceInitialScrolls = sourceInitialScrolls,
             sourceFx = sourceFx,
             sourceEnemies = sourceEnemies,
+            sourceLayouts = sourceLayouts,
         ).build() ?: throw AsmCompilationException(
             planningLog.lastOrNull { it.startsWith("ERROR:") }
                 ?.removePrefix("ERROR: ")
@@ -430,6 +436,9 @@ internal object ProjectFileService {
         val roomMaterialization = AsmSourceRoomMaterializer().materialize(
             project, planned.writeReport, planned.resultRom, initial.referenceRomBody.size, sourceScrolls, sourceSaves, sourceInitialScrolls, sourceFx, sourceEnemies,
         )
+        require(sourceLayouts.keys.all { project.roomKey(it) in roomMaterialization.roomIds }) {
+            "Authored layouts could not be included atomically in the ASM build; no ROM was produced."
+        }
         val enemyIdentities = sourceEnemies.values.flatMap { it.values }.flatMap { listOf(it.population.identity, it.graphics.identity) }.toSet()
         require(roomMaterialization.enemyTables.map { it.identity }.toSet() == enemyIdentities &&
             roomMaterialization.enemyTables.sumOf { it.pointerOffsets.size } == sourceEnemies.values.sumOf { it.size * 2 }) {

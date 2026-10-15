@@ -198,6 +198,18 @@ resolve exported doors or treated as persistent identity.
 
 ## Version Fields
 
+Schema 14 adds `RoomEdits.asmLayoutSourceVersion` (default 0, supported value 1).
+Decoded L1 tile words, BTS bytes, embedded L2 and retained allocation/tail bytes
+live in `SmeditLayout_*` macros in project `bank_8F.asm`. Stable state wrappers
+reference whole-layout resources; shared and private identities are not inferred
+from equal bytes. Adoption retires tile edits from common/state operations and
+`levelResourceOperations`, preserving non-layout history. JSON stores ownership
+and resource links, never duplicate authored level values or allocated addresses.
+The build validates literals, allocation size, state coverage and dimensions,
+LZ5-compresses each independent resource, and emits checked ASM placements and
+24-bit state pointers. Missing/invalid source, unknown versions, competing GUI
+tile deltas and ROM-only builds fail closed. Existing schema-upgrade backups apply.
+
 Schema 13 adds `RoomEdits.asmEnemySourceVersion` (default 0, supported value 1).
 It owns paired population/GFX declarations in `bank_A1.asm`; the checked planner
 emits the population in bank `$A1` and GFX in `$B4`. Stable state wrappers can

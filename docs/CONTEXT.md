@@ -211,6 +211,13 @@ export backend. See [compound themes](asm/reference_workspace.md#compound-biome-
 
 ## Background Programs and Embedded Layer 2
 
+Existing-room **Room Info → Layout → ASM** now adopts decoded L1/BTS/L2 into
+editable `SmeditLayout_*` macros in project Bank `$8F`. Painting and raw source
+edit one asset; **Edit room** returns to a matching layout state. Schema 14 stores
+ownership/links only, retiring GUI tile deltas. Build validates and compresses the
+decoded asset into checked ASM placements; Room Data remains a last-build report.
+See [reciprocal layouts](asm/reference_workspace.md#reciprocal-room-layouts).
+
 Room-state `bgDataPtr` addresses a bank-`$8F` library-background command program;
 it is separate from the two BG-scrolling bytes, which are horizontal/vertical motion
 factors. Embedded Layer 2 is present when the decompressed level payload contains the
