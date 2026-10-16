@@ -421,7 +421,17 @@ class RomParser(
             } else {
                 -1
             }
-            if (SmEditCompiledRoomStateConditionFormat.interpreterMatchesAt(romData, generatedRoutinePc)) {
+            val asmPredicate = if (generatedRoutinePc + SmEditAsmRoomPredicateFormat.ADAPTER_SIZE_BYTES <= bankEndExclusive)
+                SmEditAsmRoomPredicateFormat.targetAt(romData, generatedRoutinePc) else null
+            if (asmPredicate != null) {
+                if (pos + SmEditAsmRoomPredicateFormat.ENTRY_SIZE_BYTES > bankEndExclusive || snesToPc(asmPredicate) !in romData.indices) {
+                    issues.add(RoomStateParseIssue(pos, "ASM-only predicate entry/target is truncated"))
+                    return RoomStateInspection(roomId, area, states, issues, hasDefault = false)
+                }
+                condition = RoomStateCondition(code, RoomStateConditionKind.ASM_ONLY, RoomStateConditionArgumentKind.NONE,
+                    entrySizeBytes = SmEditAsmRoomPredicateFormat.ENTRY_SIZE_BYTES, asmPredicateAddress = asmPredicate)
+                statePtrOffset = pos + 2
+            } else if (SmEditCompiledRoomStateConditionFormat.interpreterMatchesAt(romData, generatedRoutinePc)) {
                 if (pos + SmEditCompiledRoomStateConditionFormat.ENTRY_SIZE_BYTES > bankEndExclusive) {
                     issues.add(RoomStateParseIssue(pos, "SMEDIT compound state predicate is truncated"))
                     return RoomStateInspection(roomId, area, states, issues, hasDefault = false)

@@ -23,9 +23,10 @@ import kotlin.test.assertTrue
 
 class ProjectRoomStatesTest {
     @Test
-    fun `serialized and runtime condition enums stay synchronized`() {
+    fun `typed condition enums stay synchronized without serializing opaque runtime predicates`() {
         assertEquals(
-            RoomStateConditionKind.entries.map { it.name },
+            // ASM_ONLY is an inspection result, never a guessed serializable GUI condition.
+            RoomStateConditionKind.entries.filter { it != RoomStateConditionKind.ASM_ONLY }.map { it.name },
             ProjectRoomStateConditionKind.entries.map { it.name },
         )
         assertEquals(

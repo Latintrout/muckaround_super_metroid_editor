@@ -3,6 +3,13 @@ package com.supermetroid.editor.asm
 import com.supermetroid.editor.data.*
 import com.supermetroid.editor.rom.*
 
+internal data class AsmSelectorConversionPreview(
+    val roomId: Int,
+    val sourceText: String,
+    val selectors: SourceRoomSelectors,
+    val stateIds: List<String>,
+)
+
 /** A literal prefix-tree lens. No executed macros, arbitrary expressions or compiled addresses. */
 internal class AsmRoomSelectorsSource(val text: String) {
     private data class Definition(val range: IntRange, val bodyStart: Int, val body: String)
@@ -36,7 +43,39 @@ internal class AsmRoomSelectorsSource(val text: String) {
             }
         }
     }
-    fun resource(room: RoomEdits): SourceRoomSelectors {
+    fun resource(room: RoomEdits): SourceRoomSelectors = readResource(room, recognizePredicates = false)
+
+    private fun isPredicate(name: String) = definition(name).body.lineSequence().any { it.trim() == AsmSelectorPredicateRecognizer.MARKER }
+    private fun isAsmPredicate(name: String) = definition(name).body.lineSequence().any { it.trim() == ASM_PREDICATE_MARKER }
+    private fun isManagedPredicate(name: String) = definition(name).body.lineSequence().any { it.trim() == MANAGED_PREDICATE_MARKER }
+
+    /** These bodies are assembled only by the managed placement gateway, never as table data. */
+    fun managedPredicates(): List<AsmManagedRoomPredicate> = definitions.keys.filter(::isManagedPredicate).map { name ->
+        AsmManagedRoomPredicate(name).also { it.validateBody(definition(name).body) }
+    }.sortedBy { it.label }
+
+    /** A proposal, NOT a build input. Invalid typed siblings/order still reject the whole proposal. */
+    fun conversionPreview(room: RoomEdits): AsmSelectorConversionPreview? {
+        val ids = room.states.filter { isPredicate(conditionName(room.roomId, it.id)) }.map { it.id }
+        return if (ids.isEmpty()) null else AsmSelectorConversionPreview(room.roomId, text, readResource(room, recognizePredicates = true), ids)
+    }
+
+    fun convertPredicates(room: RoomEdits): String {
+        val preview = requireNotNull(conversionPreview(room)) { "No recognized predicates to convert." }
+        val newline = if (text.contains("\r\n")) "\r\n" else "\n"
+        return preview.stateIds.map { id ->
+            val d = definition(conditionName(room.roomId, id))
+            // An explicit conversion retires the original code to comments. Keeping
+            // every line makes this auditable even after the undo history is closed.
+            val notes = d.body.lineSequence().filter { it.isNotBlank() }
+                .joinToString("") { "    ; Original predicate: ${it.trimEnd('\r')}$newline" }
+            (d.bodyStart until d.bodyStart + d.body.length) to
+                (notes + renderCondition(preview.selectors.conditions.getValue(id)).replace("\n", newline))
+        }.sortedByDescending { it.first.first }.fold(text) { result, (range, replacement) -> result.replaceRange(range, replacement) }
+            .also { require(AsmRoomSelectorsSource(it).resource(room) == preview.selectors) { "Converted predicates do not match the reviewed proposal." } }
+    }
+
+    private fun readResource(room: RoomEdits, recognizePredicates: Boolean): SourceRoomSelectors {
         require(room.asmStateSelectorsSourceVersion == 1 && room.states.isNotEmpty()) { "Unsupported selector source ownership." }
         require(room.states.all { !it.conditionChanged && it.condition == baseline(it) }) { "Selectors have both source and GUI condition overrides." }
         val order = definition(orderName(room.roomId)).body.lineSequence().mapNotNull { line ->
@@ -44,8 +83,35 @@ internal class AsmRoomSelectorsSource(val text: String) {
             if (code.isEmpty()) null else requireNotNull(Regex("^%${prefix(room.roomId)}Condition_([0-9a-f]+)\\(\\)$").matchEntire(code)) { "Selector order must contain only state-condition macro references." }
                 .groupValues[1].let(::decodeId)
         }.toList()
-        val conditions = room.states.associate { state ->
-            val f = fields(conditionName(room.roomId, state.id))
+        val routines = linkedMapOf<String, SourceRoomSelectorRoutine>()
+        val conditions = room.states.mapNotNull { state ->
+            val name = conditionName(room.roomId, state.id)
+            if (isManagedPredicate(name)) {
+                val managed = AsmManagedRoomPredicate(name)
+                managed.validateBody(definition(name).body)
+                routines[state.id] = SourceRoomSelectorRoutine(managed.label)
+                return@mapNotNull null
+            }
+            if (isAsmPredicate(name)) {
+                require(!isPredicate(name)) { "$name: choose either executable authority or conversion, not both." }
+                val body = definition(name).body
+                require(body.lineSequence().count { it.trim() == ASM_PREDICATE_MARKER } == 1) { "$name: duplicate executable predicate marker." }
+                val code = body.lineSequence().map { it.substringBefore(';').trim() }.filter(String::isNotEmpty).toList()
+                val label = code.singleOrNull()?.let { Regex("dw[ \\t]+([A-Za-z_][A-Za-z0-9_]*)", RegexOption.IGNORE_CASE).matchEntire(it)?.groupValues?.get(1) }
+                routines[state.id] = SourceRoomSelectorRoutine(requireNotNull(label) { "$name: expected exactly 'dw PredicateLabel' with an explicit executable marker." })
+                return@mapNotNull null
+            }
+            if (isPredicate(name)) {
+                require(recognizePredicates) { "$name: handwritten predicate requires review and explicit conversion before building." }
+                return@mapNotNull state.id to try {
+                    AsmSelectorPredicateRecognizer.recognize(definition(name).body)
+                } catch (error: IllegalArgumentException) {
+                    throw IllegalArgumentException("$name: ${error.message}", error)
+                } catch (error: IllegalStateException) {
+                    throw IllegalArgumentException("$name: ${error.message}", error)
+                }
+            }
+            val f = fields(name)
             var cursor = 0
             var nodes = 0
             fun read(depth: Int): ProjectRoomStateCondition {
@@ -65,14 +131,15 @@ internal class AsmRoomSelectorsSource(val text: String) {
             val condition = read(0)
             require(cursor == f.size) { "Trailing selector fields." }
             state.id to condition
-        }
-        val result = SourceRoomSelectors(order, conditions)
-        require(conditions.keys == room.states.map { it.id }.toSet())
+        }.toMap()
+        val result = SourceRoomSelectors(order, conditions, routines)
+        require(conditions.keys + routines.keys == room.states.map { it.id }.toSet())
         require(result.order.last() == room.states.single { baseline(it).kind == ProjectRoomStateConditionKind.DEFAULT }.id) { "The mandatory default state's identity cannot change." }
         return result
     }
     fun editCondition(room: RoomEdits, id: String, condition: ProjectRoomStateCondition): String {
         val current = resource(room)
+        require(current.routines.isEmpty()) { "ASM-only selector logic must be edited in source." }
         require(current.conditions.getValue(id).kind != ProjectRoomStateConditionKind.DEFAULT && condition.kind != ProjectRoomStateConditionKind.DEFAULT) { "The mandatory default cannot be changed." }
         SourceRoomSelectors(current.order, current.conditions + (id to condition))
         val name = conditionName(room.roomId, id)
@@ -102,15 +169,40 @@ internal class AsmRoomSelectorsSource(val text: String) {
     }
     fun editOrder(room: RoomEdits, order: List<String>): String {
         val current = resource(room)
-        SourceRoomSelectors(order, current.conditions)
+        SourceRoomSelectors(order, current.conditions, current.routines)
         require(order.last() == current.order.last()) { "The default branch must remain last." }
         val d = definition(orderName(room.roomId))
         val refs = Regex("%${prefix(room.roomId)}Condition_([0-9a-f]+)\\(\\)").findAll(d.body).toList()
         return refs.mapIndexed { index, match -> (d.bodyStart + match.range.first..d.bodyStart + match.range.last) to "%${conditionName(room.roomId, order[index])}()" }
             .sortedByDescending { it.first.first }.fold(text) { result, (range, value) -> result.replaceRange(range, value) }
     }
+    /** Membership changes are published with the room/resource transaction, never independently. */
+    fun changeStates(room: RoomEdits, next: SourceRoomSelectors): String {
+        val current = resource(room)
+        require(current.routines.isEmpty() && next.routines.isEmpty()) { "State membership changes require typed selectors; preserve custom predicates in ASM." }
+        require(next.order.last() == current.order.last()) { "The mandatory default state's identity cannot change." }
+        require(next.conditions.filterKeys { it in current.conditions } == current.conditions.filterKeys { it in next.conditions }) {
+            "A state membership edit cannot also replace existing conditions."
+        }
+        val d = definition(orderName(room.roomId))
+        val newline = if (text.contains("\r\n")) "\r\n" else "\n"
+        val notes = d.body.lineSequence().mapNotNull { line ->
+            line.indexOf(';').takeIf { it >= 0 }?.let { "    " + line.substring(it) + newline }
+        }.joinToString("")
+        var result = text.replaceRange(d.bodyStart until d.bodyStart + d.body.length,
+            notes + next.order.joinToString("") { "    %${conditionName(room.roomId, it)}()$newline" })
+        for ((id, condition) in next.conditions.filterKeys { it !in current.conditions }) {
+            val name = conditionName(room.roomId, id)
+            require(name !in definitions) { "Retained selector source already uses state identity $id." }
+            result += "$newline" + "macro $name()$newline" + renderCondition(condition).replace("\n", newline) + "endmacro$newline"
+        }
+        return result
+    }
+    fun hasState(roomId: Int, stateId: String) = conditionName(roomId, stateId) in definitions
     fun line(roomId: Int, stateId: String? = null) = text.take(definition(if (stateId == null) orderName(roomId) else conditionName(roomId, stateId)).range.first).count { it == '\n' }
     companion object {
+        const val ASM_PREDICATE_MARKER = "; smedit:asm-predicate-v1"
+        const val MANAGED_PREDICATE_MARKER = "; smedit:managed-predicate-v1"
         // Explicit, versioned wire order: never derive these IDs from enum ordinals.
         val KINDS = "DEFAULT INCOMING_DOOR AREA_MAIN_BOSS_DEAD NEVER EVENT_SET AREA_BOSS_BIT_SET MORPH_BALL_COLLECTED MORPH_BALL_AND_MISSILES POWER_BOMBS_COLLECTED SPEED_BOOSTER_COLLECTED EQUIPMENT_COLLECTED BEAM_COLLECTED MISSILE_CAPACITY_AT_LEAST SUPER_MISSILE_CAPACITY_AT_LEAST POWER_BOMB_CAPACITY_AT_LEAST ENERGY_CAPACITY_AT_LEAST RESERVE_CAPACITY_AT_LEAST ITEM_PICKUP_COLLECTED BOSS_DEFEATED EQUIPMENT_EQUIPPED BEAM_EQUIPPED CURRENT_ENERGY_AT_LEAST CURRENT_MISSILES_AT_LEAST CURRENT_SUPER_MISSILES_AT_LEAST CURRENT_POWER_BOMBS_AT_LEAST CURRENT_RESERVE_ENERGY_AT_LEAST DOOR_BIT_SET CHOZO_BLOCK_DESTROYED ESCAPE_ACTIVE ALL_OF ANY_OF".split(' ').map(ProjectRoomStateConditionKind::valueOf)
         fun baseline(state: RoomStateEdits) = state.sourceCondition ?: projectRoomStateCondition(ProjectRoomStateConditionKind.NEVER)
@@ -127,7 +219,12 @@ internal class AsmRoomSelectorsSource(val text: String) {
             c.children.forEach { append(renderCondition(it)) }
         }
         fun render(roomId: Int, name: String, selectors: SourceRoomSelectors): String = buildString {
+            require(selectors.routines.isEmpty()) { "Executable predicates must not be rendered as typed GUI data." }
             appendLine("; SMEDIT selectors v1 · ${name.replace('\n', ' ').replace('\r', ' ')} · typed input, not executable placement")
+            appendLine("; Bounded predicate import: mark a conditional macro body with '; smedit:predicate-v1'.")
+            appendLine("; Room Info offers review/conversion; marked code cannot build until explicitly converted.")
+            appendLine("; Custom executable logic: replace a NON-default condition body with '; smedit:managed-predicate-v1' and instructions.")
+            appendLine("; Managed bodies enter with 16-bit A/X/Y; return carry=match via RTS with a balanced stack. Placement/end labels are automatic.")
             KINDS.forEachIndexed { index, kind -> appendLine("; ${hex(index, 2)} = $kind") }
             appendLine("macro ${orderName(roomId)}()")
             selectors.order.forEach { appendLine("    %${conditionName(roomId, it)}()") }

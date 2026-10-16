@@ -2,10 +2,23 @@ package com.supermetroid.editor.rom
 
 import com.supermetroid.editor.data.*
 
-/** Source-owned branch order and typed predicates; stable identities still own the resources. */
-data class SourceRoomSelectors(val order: List<String>, val conditions: Map<String, ProjectRoomStateCondition>) {
+/** An explicit carry-result/RTS predicate. Addresses exist only in the compiled build input. */
+data class SourceRoomSelectorRoutine(val label: String, val snesAddress: Int? = null, val sizeBytes: Int? = null) {
     init {
-        require(order.size in 1..64 && order.distinct().size == order.size && order.toSet() == conditions.keys) { "Selector identities must cover every state exactly once." }
+        require(label.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) { "Predicate requires a plain global label." }
+        require((snesAddress == null) == (sizeBytes == null)) { "Incomplete compiled predicate placement." }
+        if (snesAddress != null) require(snesAddress in 0x8F8000..0x8FFFFF && sizeBytes!! in 1..1024 && snesAddress + sizeBytes <= 0x900000) {
+            "Predicate must fit in bank \$8F (1–1024 bytes)."
+        }
+    }
+}
+
+/** Source-owned branch order; opaque routines are NOT replaced with guessed typed conditions. */
+data class SourceRoomSelectors(val order: List<String>, val conditions: Map<String, ProjectRoomStateCondition>,
+                               val routines: Map<String, SourceRoomSelectorRoutine> = emptyMap()) {
+    init {
+        require(conditions.keys.intersect(routines.keys).isEmpty()) { "A selector cannot have both typed and executable authority." }
+        require(order.size in 1..64 && order.distinct().size == order.size && order.toSet() == conditions.keys + routines.keys) { "Selector identities must cover every state exactly once." }
         require(conditions.filterValues { it.kind == ProjectRoomStateConditionKind.DEFAULT }.keys == setOf(order.last())) { "Exactly one mandatory default selector must be last." }
         var nodes = 0
         fun validate(c: ProjectRoomStateCondition, depth: Int) {

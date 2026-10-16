@@ -1868,9 +1868,74 @@ baseline provenance, not competing overrides. Invalid drafts remain saveable,
 retain last-good previews and block selector writes/builds. Adoption, raw/GUI
 edits, reordering, source undo and GUI undo preserve their shared history.
 Resize, themes and whole-room reset retain this ownership; reset retires the
-owned declarations and undo restores them. Add/duplicate/delete state commands
-are guarded after selector adoption pending an atomic cross-resource graph-edit
-transaction. Existing pre-adoption added states can be adopted with stable IDs.
+owned declarations and undo restores them. Add/duplicate/delete state commands now
+stage selector membership, all owned resource wrappers and identity metadata as
+one cross-bank transaction. Existing pre-adoption added states can also be adopted
+with stable IDs.
+
+### Source-owned state lifecycle and projection status
+
+In **Room Info → Room States**, Add and Duplicate inherit the selected state's
+effective content and existing sharing, then insert a conditional branch directly
+after that state in the actual source selection order (or before ELSE when cloning
+the default). Nested AND/OR/NOT conditions use the existing typed condition model.
+No room resource is silently merged by equal contents. Existing-room source-owned
+families participate together: selectors, header/state scalars, decoded layouts,
+PLMs/save resources, initial scrolls, FX, and paired enemy populations/GFX. A state
+change adopts selectors if another family was already owned, but does not adopt
+unrelated native families. New state identities are never reused after deletion.
+
+Planning validates each participating family before publishing anything. Invalid
+drafts, active strokes/selections, stale project/ROM/source inputs, or inconsistent
+resource sharing reject the entire operation. A single history group covers all
+participating banks, including unchanged banks whose resources are dependencies.
+Undo/Redo from ASM or the room editor restores the whole source/model transition
+and selected state. Newer edits in any participating bank prevent partial undo.
+
+Delete preserves shared or custom-referenced helpers and handwritten comments.
+An authored save slot is released with an explicit zero record only when its last
+state consumer disappears. If retained custom code still references that station's
+list, deletion is blocked rather than clearing a potentially live save record.
+The default state cannot be deleted. Resource/model metadata remains separate
+from source-owned condition values, so serialized/headless builds do not depend
+on transient GUI projections.
+
+Selector projections distinguish **current**, **ASM-only** (valid executable binding), **recognized conversion proposal**,
+**stale last-valid**, and **unavailable**. An unreadable draft keeps source editable/saveable, displays the
+reason, and locks visual state creation/deletion, condition edits, reordering and
+simulation. Known state identities remain inspectable; the panel follows the same
+selection as the canvas and ASM navigation. Repairing source re-enables controls.
+On a fresh reopen without a last-valid projection, the canvas must not present
+native data as an authored selector result.
+
+This is not a general handwritten-ASM decompiler. Explicit executable predicates
+now have the separate source-only backend described below. Manually changing state membership still requires the matching
+identity/resource declarations; the current bounded lens rejects unmatched edits
+instead of inventing resources. Branch instructions inside condition macros remain
+non-buildable drafts; the opt-in importer below can propose an explicit conversion
+for a bounded subset. Arbitrary calls inside typed/import macros remain unsupported;
+an explicitly bound executable routine may contain calls. Neither path ignores
+lens failures or rebuilds stale GUI conditions as a fallback.
+
+UX decisions recorded for follow-up:
+
+- Duplicate currently requires a different condition before confirmation, retaining
+  the existing protection against an exactly shadowed branch. Whether to allow an
+  intentionally unreachable draft state is a product choice, not an automatic
+  condition rewrite.
+- Stale selector simulation is disabled; inspecting a specifically selected state's
+  known resources is distinct from claiming that state wins at runtime.
+- State-operation errors stay in the Add/Delete dialog so the user can repair a
+  source dependency without losing the proposed condition.
+- Opaque executable predicates now have an explicit binding/adapter authority
+  boundary. Malformed typed declarations still block builds; arbitrary code
+  behavior and hidden references are not claimed safe merely because it assembles.
+- Recognized handwritten drafts require a reviewed, whole-room conversion before
+  editing selectors visually or building. Conversion is not a claim that the
+  original routine executes. All marked predicates must be recognizable and all
+  typed siblings/order valid; there is no partial conversion or implicit fallback.
+  Allowing simulation of an unconverted proposal, or per-predicate conversion,
+  remains a UX choice. The current UI keeps those paths deliberately explicit.
 
 Manual check: open Flyway's conditional state in **Selectors → ASM**. After
 explicit adoption, set the node's first row to `db $04, $00, $00` and its argument
@@ -1884,6 +1949,220 @@ navigation and every writable vanilla selector graph. The real-Asar selector
 test combines source-owned layouts, headers, PLMs, initial scrolls, FX and enemy
 tables, then builds reordered compound conditions and their undo states from a
 serialized/headless project model while checking all state-specific resources.
+
+### Bounded handwritten predicate import
+
+This is an **explicit import/conversion workflow**, not automatic two-way rewriting
+of arbitrary executable code. In an adopted room's non-default
+`SmeditSelectors_<room>_Condition_<state>()` macro, replace the typed body with a
+predicate draft containing the exact standalone marker `; smedit:predicate-v1`.
+The input contract is 16-bit A and literal absolute reads of the supported game
+RAM fields. `SEC`/`CLC` followed by `RTS` return true/false; this is **not** the
+native room-selection handler's stack/pointer protocol.
+
+For example, retain the existing macro name and `endmacro`, replacing only its body:
+
+```asm
+    ; smedit:predicate-v1
+    lda.w $09A4       ; CollectedItems
+    bit.w #$0004     ; Morph Ball
+    beq .no
+    lda.w $09C8       ; MaxMissiles
+    cmp.w #$0019     ; 25, unsigned
+    bcc .no
+    sec
+    rts
+.no:
+    clc
+    rts
+```
+
+Return to **Room Info**. The panel shows a recognized conversion proposal for
+“Morph collected AND maximum missiles at least 25” and offers **Review recognized
+predicates…**. Inspect the proposed condition summaries and confirm **Convert to
+typed selectors**. Conversion retains the original code/comments as non-executing
+comments, leaves unrelated declarations and resource identities unchanged, and
+participates in both ASM and GUI undo/redo. Cancel or a source change while the
+dialog is open cannot publish the proposal. After conversion, ordinary GUI edits
+update the typed literals; they do not regenerate the original branch structure.
+Build uses the existing checked typed-condition runtime.
+
+The recognizer tracks A, Z and C across local control flow and reconstructs nested
+AND/OR/NOT, including branch joins, masked equality and unsigned threshold/equality
+tests. Supported input is `LDA.W`, immediate `AND.W`/`BIT.W`/`CMP.W`, named-local
+`BEQ`/`BNE`/`BCC`/`BCS`/`BRA`/`JMP`, `SEC`, `CLC`, `NOP`, and `RTS`.
+RAM reads cover `$09A2/$09A4/$09A6/$09A8` (equipped/collected items/beams) and
+`$09C2/$09C4/$09C6/$09C8/$09CA/$09CC/$09CE/$09D0/$09D4/$09D6`
+(current/maximum energy, ammunition and reserves). Operands must be literals,
+not symbol expressions. Capacity comparisons require an unmasked field; gear
+equality/mask tests expand to individual bit predicates.
+
+Unknown registers/flags, writes, calls, mode changes, indexed/indirect reads,
+unknown RAM, loops, unreachable statements, invalid relative-branch distances,
+fall-through and excessive control flow are rejected. Limits are 64 instructions,
+512 symbolic execution steps, 512 nodes per intermediate expression, and the
+existing 8-level/64-node final condition model. Complement simplification compares
+leaf predicates directly rather than recursively rebuilding their negations.
+Unsupported import drafts remain editable/saveable, but do not become executable
+by bypassing recognition. Use the separate explicit binding contract below for
+trusted custom routines. Neither a last-valid projection nor a recognized
+proposal is supplied to a headless build in place of validated typed source.
+
+`AsmSelectorPredicateRecognizerTest` checks truth tables, flag preservation,
+unsigned boundaries, RAM bindings and rejection limits. Source-flow tests cover
+non-mutating previews, cold reopen, CRLF/comments, invalid siblings, stale-dialog
+guards and reciprocal history. A real-Asar integration test builds the converted
+predicate from a serialized model, verifies all owned room resources, rejects
+unconverted undo states even after a successful cached build, and checks redo ROM
+parity.
+
+### Executable ASM-only predicates
+
+Existing source-owned rooms can bind a conditional state to actual authored
+bank-`$8F` code without converting that code into GUI logic. The mandatory default
+remains typed and last. Manual source edits do **not** themselves switch authority:
+supported tables and typed conditions stay bidirectional. Custom executable logic
+uses an explicit marker and locks only the visual selector section.
+
+#### Recommended: inline code with managed placement
+
+Open **Room Info → Selectors** (or navigate directly to that state's condition
+macro in ASM Source). Replace **only the non-default condition macro's body**:
+
+```asm
+    ; smedit:managed-predicate-v1
+    jsr.w .test
+    rts
+.test:
+    lda.w $09C8         ; MaxMissiles
+    and.w #$0001
+    cmp.w #$0001        ; Carry set iff capacity is odd
+    rts
+```
+
+Leave the surrounding `macro SmeditSelectors_...Condition_...()` / `endmacro`
+intact. There is no `dw` binding, `org`, entry label or end label to maintain.
+The build generates a stable `<condition macro name>_Predicate` symbol and its
+`_End` boundary without changing authored source. Local helper labels live under
+that generated entry label. The body must contain 1–1024 assembled bytes.
+
+The build first assembles authored source with discovery-only symbol stubs, then
+chooses verified trailing free space in bank `$8F` using both reference and authored
+ROM bytes. Complete manually declared `Label` / `Label_End` envelopes in that bank
+are excluded too, including unchanged padding. Managed bodies are packed to their
+actual sizes in deterministic symbol order; code growth can move following bodies.
+Authored allocations can move the whole block. Symbolic calls and selector adapters
+are reassembled against the actual placement. The placement stays pinned during
+generated-room/asset/patch passes of the same build. Bounds, full ownership and
+generated-claim collision checks fail the build rather than overwrite other data.
+
+Managed bodies accept normal 65C816 instructions, local labels, `db/dw/dl/dd`,
+and literal `fill` / `fillbyte`, one statement per line. Placement directives,
+includes, macro calls and global labels are deliberately excluded so the body
+cannot escape the allocation. Use the advanced binding below for metaprogramming
+or intentionally fixed placement. All predicates use the calling contract below;
+managed placement does not prove runtime logic correct. Refer to other routines
+symbolically rather than copying their current compiled addresses.
+
+#### Advanced: an explicitly placed routine
+
+The original fixed-address workflow remains available and is never silently
+relocated. In the existing condition macro, replace **only its body**:
+
+```asm
+    ; smedit:asm-predicate-v1
+    dw MyRoomPredicate
+```
+
+This marker is distinct from the import-only `; smedit:predicate-v1`. The binding
+must contain exactly one plain global label; numeric pointers, expressions,
+multiple words, mixed markers and inline instructions are rejected. Room/state
+identity and resource declarations still use the existing manifest. Raw source
+can reorder existing references while retaining exact identity coverage; this
+does not create missing states/resources automatically.
+
+Define the routine and a matching `MyRoomPredicate_End` label in project source.
+The complete envelope must be 1–1024 bytes inside bank `$8F`, in space that was
+`$FF` in the verified reference ROM. Choose source space that no other authored
+routine/module already uses. For a project with an unused native bank-`$8F` tail,
+this example binds a condition that has no current typed threshold equivalent:
+
+```asm
+pushpc
+org Freespace_Bank8F_E99B ; Only if this source area is still unused!
+MyRoomPredicate:
+    jsr.w .test
+    rts
+.test:
+    lda.w $09C8         ; MaxMissiles
+    and.w #$0001
+    cmp.w #$0001        ; Carry set iff capacity is odd
+    rts
+MyRoomPredicate_End:
+pullpc
+```
+
+The predicate enters in native mode with 16-bit A/X/Y. Return carry set for a
+match, clear for a non-match, via `RTS`. Balance the routine's own stack and do not
+change emulation mode. A generated tagged adapter saves/restores P, DB, D, X and Y,
+normalizes register widths before restoration, and handles the native selector
+success/skip protocol. **Do not** pop the selector-loop return address or jump
+directly to the game's state-selection exit from inside this predicate.
+
+Build first assembles project source, resolves both labels from real assembler
+symbols, verifies the native `$8F:E5D2–E5EA` dispatcher/exit ABI, and claims the
+entire routine envelope—including unchanged `$FF` bytes. Allocators exclude those
+full ranges. The room graph uses an allocated adapter pointing to the resolved
+routine; no guessed GUI condition is emitted for that state. A second assembly
+checks stable label placements, and the existing full-ROM parity and structural
+checks still apply. Moving a routine between builds updates its adapter through
+symbols, not a fixed numeric GUI pointer. Missing labels, bad bounds, occupied
+reference data, changed engine ABI, and conflicting ROM patches fail the build.
+
+**Room Info** displays `Managed in ASM · MyRoomPredicate` with a neutral notice and
+an **Open selector ASM** action. Valid custom logic is not an invalid-source error.
+Selector editing, state
+membership controls and simulation lock for that room; selecting known states,
+tiles/BTS, headers/state scalars and other supported source resources remain
+editable. Scope prompts and resource labels also identify the opaque state rather
+than showing its old native condition. Invalid binding drafts retain a clearly
+stale preview where possible; they remain saveable but cannot build. Source edits
+use ordinary ASM history, and visual resource edits retain their existing shared
+history. Restoring supported typed declarations automatically restores visual
+selector controls; no separate mode toggle is needed. Typed-only rooms keep their
+full state lifecycle workflow.
+
+The Room Data build snapshot decodes the exact tagged adapter as an explicit
+opaque condition and still shows its state resources. An exported ROM alone does
+not contain the project source/identity contract: opening it cannot synthesize an
+editable typed state manifest. Use the original source project/base ROM for that
+workflow. No JSON copy of executable predicate values is introduced.
+
+Safety boundary: this is trusted game code, **not a sandbox or a proof of arbitrary
+routine correctness**. Assembly/adapter/ownership checks cannot prove stack balance,
+termination, intended side effects, assumptions about visually edited geometry,
+hidden calls/references or arbitrary engine-format changes. Helpers outside the
+declared envelope remain ordinary ASM dependencies. Raw source/module overlap and
+reference correctness remain the author's responsibility. A valid binding also
+does not imply that an unsaved/invalid routine body will assemble successfully.
+
+UX follow-ups recorded: consider an explicit reviewed GUI-to-custom-code scaffold
+that preserves existing behavior (never silently replace a condition with a blank
+routine); consider allowing edits to known
+typed sibling predicates without unlocking opaque branches or pretending the full
+graph can be simulated. The current policy locks only the selector section, not
+the room's supported resource editors.
+
+Coverage includes instruction-level native dispatch for both outcomes with
+register/width clobbers, exact adapter/tag decoding and corruption rejection,
+headered ROMs, opaque-manifest rejection, symbol/bounds/free-space/ABI guards,
+unchanged-byte ownership, stale/cold projections, unrelated GUI edits, and a
+real-Asar scenario covering routine relocation, headless reopen/builds, resource
+parity, undo/cache parity and ROM-patch conflicts.
+Managed-inline coverage additionally checks packed sizes, local and cross-routine
+JSR relocation, growth, complete fill ownership, unchanged source on builds,
+oversize rejection, reciprocal PLM edits, repair/unlock transitions and cache/undo
+ROM parity.
 
 ## Next layers
 
@@ -1910,8 +2189,11 @@ Follow-up work can now be incremental:
    Decoded room layouts/BTS/L2 now have a reciprocal typed source asset as well.
    Ordinary header/state scalars now have reciprocal source declarations too.
    Conditions and selector order now have reciprocal source ownership too.
-   Next extend graph authoring to atomic add/duplicate/delete across source
-   resources, then doors/connections and associated door ASM, including joint map/area
+   Add/duplicate/delete now publish atomically across owned source resources.
+   Bounded handwritten predicate import now has explicit review/conversion.
+   Explicit executable predicates now have an ASM-only binding/adapter boundary.
+   Broader recognition and placement/scaffolding assistance can follow incrementally.
+   Next are doors/connections and associated door ASM, including joint map/area
    transactions. Asset-owned tileset/palette/separate-background authoring and
    stable project-created room source identities follow those room workflows.
    Graphics, map, text, and sound encoders should follow the same

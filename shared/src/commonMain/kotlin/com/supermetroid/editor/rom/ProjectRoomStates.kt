@@ -20,6 +20,9 @@ fun RoomEdits.ensureStateManifest(parser: RomParser): List<RoomStateEdits> {
         val detail = inspection.issues.joinToString { it.message }.ifBlank { "missing default state" }
         "Room 0x${roomId.toString(16).uppercase()} state graph cannot be edited safely: $detail"
     }
+    check(inspection.states.none { it.condition.kind == RoomStateConditionKind.ASM_ONLY }) {
+        "This ROM contains ASM-only room predicates. Open its source project with the original base ROM to edit state resources; opaque conditions cannot be imported as GUI predicates."
+    }
 
     val resourceIds = mutableMapOf<String, MutableMap<Int, String>>()
     fun resourceId(kind: String, pointer: Int): String {

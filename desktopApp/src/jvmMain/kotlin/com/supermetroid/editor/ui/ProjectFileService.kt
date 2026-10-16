@@ -43,7 +43,7 @@ import java.security.MessageDigest
 
 internal object ProjectFileService {
     private val asmProjectCompiler = AsmProjectCompiler()
-    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v9-enemies"
+    private const val PREPARED_ASM_CACHE_VERSION = "smedit-prepared-asm-base-v10-executable-selectors"
     private const val MAX_PREPARED_ASM_BASES = 2
     private val preparedAsmBases = object : LinkedHashMap<String, AsmCompiledBuildBase>(
         MAX_PREPARED_ASM_BASES,
@@ -314,7 +314,7 @@ internal object ProjectFileService {
             room.roomId to roomPropertiesSource.resource(room)
         }
         val selectorSource = com.supermetroid.editor.asm.AsmRoomSelectorsSource(linkedSource)
-        val sourceSelectors = project.rooms.values.filter { it.asmStateSelectorsSourceVersion != 0 }.associate { room -> room.roomId to selectorSource.resource(room) }
+        val selectorDeclarations = project.rooms.values.filter { it.asmStateSelectorsSourceVersion != 0 }.associate { room -> room.roomId to selectorSource.resource(room) }
         val sourceLayouts = project.rooms.values.filter { it.asmLayoutSourceVersion != 0 }.associate { room ->
             val header = requireNotNull(romParser.readRoomHeader(room.roomId))
             room.roomId to layoutSource.resources(room, (room.effectiveHeaderChange?.width ?: header.width) * 16, (room.effectiveHeaderChange?.height ?: header.height) * 16)
@@ -388,13 +388,15 @@ internal object ProjectFileService {
             linkedMacros,
             base,
         )
-        val initial = protectLinkedObjects(compiler.compile(
+        val resolvedSelectors = com.supermetroid.editor.asm.resolveExecutableRoomSelectors(selectorDeclarations, protectLinkedObjects(compiler.compile(
             projectFilePath = projectFilePath,
             loadedRom = loadedRom,
         ) { progress ->
             onLog("[ASM-BUILD] $progress")
             onStatus(progress)
-        })
+        }))
+        val initial = resolvedSelectors.compiled
+        val sourceSelectors = resolvedSelectors.selectors
         val compiledSaveParser = RomParser(initial.romBytes)
         protectInitialScrollBaseline(project, romParser, compiledSaveParser)
         protectFxBaseline(project, romParser, compiledSaveParser)
@@ -447,7 +449,10 @@ internal object ProjectFileService {
             val selectors = sourceSelectors[room.roomId]
             if (selectors == null) room else room.copy(
                 states = selectors.order.map { id -> room.states.single { it.id == id }.copy(
-                    condition = selectors.conditions.getValue(id), conditionChanged = true, asmConditionProjection = null,
+                    // Opaque predicates have no GUI condition. This private placement
+                    // model uses provenance only; the graph encoder emits their adapter.
+                    condition = selectors.conditions[id] ?: room.states.single { it.id == id }.condition,
+                    conditionChanged = true, asmConditionProjection = null,
                 ) }.toMutableList(),
                 stateGraphChanged = true, asmStateSelectorsSourceVersion = 0, asmSelectorOrderProjection = null,
             )
@@ -538,17 +543,20 @@ internal object ProjectFileService {
                         "${patchMaterialization.skippedWrites} write(s) remain on the ROM backend"
                 )
             }
-            val materializedCompile = protectLinkedObjects(compiler.compile(
+            val resolvedMaterialized = com.supermetroid.editor.asm.resolveExecutableRoomSelectors(selectorDeclarations, protectLinkedObjects(compiler.compile(
                 projectFilePath = projectFilePath,
                 loadedRom = loadedRom,
                 materialization = materialization,
                 patchMaterialization = patchMaterialization,
                 roomMaterialization = roomMaterialization,
                 referenceRomBody = initial.referenceRomBody,
+                managedPredicateStart = initial.managedPredicateStart,
             ) { progress ->
                 onLog("[ASM-BUILD] $progress")
                 onStatus(progress)
-            })
+            }))
+            require(resolvedMaterialized.selectors == sourceSelectors) { "Executable predicate labels moved during generated-room compilation; no ROM was produced." }
+            val materializedCompile = resolvedMaterialized.compiled
             materializedCompile.copy(
                 compilerOutput = (initial.compilerOutput + materializedCompile.compilerOutput).distinct(),
                 expectedFinalParitySha256 = asmGeneratedParitySha256(planned.resultRom),

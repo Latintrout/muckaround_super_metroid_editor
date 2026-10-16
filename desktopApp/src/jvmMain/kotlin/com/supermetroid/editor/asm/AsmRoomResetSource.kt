@@ -18,6 +18,7 @@ internal fun resetRoomSource(
     room: RoomEdits,
     sources: Map<String, String>,
     externalTexts: Sequence<String>,
+    retainedRoots: Set<String> = emptySet(),
 ): Map<String, String> {
     data class Definition(val file: String, val name: String, val range: IntRange, val body: String)
     val ownedNames = buildList {
@@ -55,6 +56,7 @@ internal fun resetRoomSource(
             .fold(text) { result, definition -> result.removeRange(definition.range) }
     }
     val live = (outside.values.asSequence() + externalTexts).flatMap { resetSourceReferences(it).asSequence() }.toMutableSet()
+    live.addAll(retainedRoots)
     val pending = ArrayDeque(live)
     while (pending.isNotEmpty()) {
         val definition = byName[pending.removeFirst()] ?: continue

@@ -86,6 +86,7 @@ internal class AsmPlmSourceBridge(
     init { if (registerSaveParticipant) workspace.sourceSaveParticipant = this }
 
     val selectors = AsmRoomSelectorsBridge(catalog, workspace, project) { onMetadataChanged() }
+    val stateLifecycle = AsmRoomStateLifecycle(catalog, workspace, project) { onMetadataChanged() }
     override val sourceFileIds: Set<String> get() = buildSet {
         if (project().rooms.values.any { it.asmStateSelectorsSourceVersion != 0 || it.asmRoomPropertiesSourceVersion != 0 || it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmLayoutSourceVersion != 0 }) add(PLM_SOURCE_FILE)
         if (project().rooms.values.any { it.asmFxSourceVersion != 0 }) add(FX_SOURCE_FILE)

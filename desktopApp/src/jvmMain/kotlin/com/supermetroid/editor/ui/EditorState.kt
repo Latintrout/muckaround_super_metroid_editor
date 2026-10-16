@@ -698,6 +698,36 @@ class EditorState(
         (!hasManagedSelectors() || project.rooms[project.roomKey(currentRoomId)]?.asmSelectorOrderProjection != null)
     internal var selectorPreviewProblem by mutableStateOf<String?>(null)
         private set
+    internal var selectorProjectionStatus by mutableStateOf(com.supermetroid.editor.asm.AsmSelectorProjectionStatus.CURRENT)
+        private set
+    internal var selectorConversionPreview by mutableStateOf<com.supermetroid.editor.asm.AsmSelectorConversionPreview?>(null)
+        private set
+    internal var selectorAsmOnlyLabels by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    private var romHasOpaqueSelectors by mutableStateOf(false)
+    internal fun selectorEditingAvailable() = !romHasOpaqueSelectors && (!hasManagedSelectors() ||
+        asmPlmSourceBridge != null && selectorPreviewProblem == null && selectorProjectionStatus == com.supermetroid.editor.asm.AsmSelectorProjectionStatus.CURRENT)
+    internal fun convertRecognizedSelectors(preview: com.supermetroid.editor.asm.AsmSelectorConversionPreview): Boolean = runCatching {
+        val owner = project
+        val roomId = currentRoomId
+        require(hasManagedSelectors()) { "The room no longer owns its selector source." }
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
+        val operation = EditOperation("Convert recognized selector predicates")
+        lateinit var managed: ManagedSourceUndo
+        bridge.selectors.convert(roomId, preview) { undo ->
+            if (project === owner && currentRoomId == roomId) {
+                undoStack.removeAll { it === operation }; redoStack.removeAll { it === operation }
+                managedPlmUndo[operation] = managed
+                if (undo) redoStack.add(operation) else undoStack.add(operation)
+                refreshLinkedPlms()
+            }
+            dirty = true; undoVersion++; editVersion++
+        }
+        recordManagedRoomOperation(operation, preview.sourceText, bridge)
+        managed = managedPlmUndo.getValue(operation)
+        refreshLinkedPlms()
+        true
+    }.getOrElse { postStatus("Selector conversion blocked: ${it.message}"); false }
     private var selectorPreviewRevision = emptyMap<Int, Pair<List<String>?, List<com.supermetroid.editor.data.ProjectRoomStateCondition?>>>()
 
     internal fun ensureSelectorSource(name: String): Boolean = runCatching {
@@ -719,8 +749,13 @@ class EditorState(
             it.roomId to (it.asmSelectorOrderProjection to it.states.map { state -> state.asmConditionProjection })
         }
         if (selectorPreviewRevision != projections) { selectorPreviewRevision = projections; _editVersionState.value++ }
-        selectorPreviewProblem = if (!hasManagedSelectors()) null else asmPlmSourceBridge?.selectors?.view(currentRoomId)?.problem
+        val view = if (!hasManagedSelectors()) null else asmPlmSourceBridge?.selectors?.view(currentRoomId)
+        selectorConversionPreview = view?.conversion
+        selectorAsmOnlyLabels = view?.resource?.routines.orEmpty().mapValues { it.value.label }
+        selectorPreviewProblem = if (!hasManagedSelectors()) null else view?.problem
             ?: if (asmPlmSourceBridge == null) "Wait for the state selector source." else null
+        selectorProjectionStatus = if (!hasManagedSelectors()) com.supermetroid.editor.asm.AsmSelectorProjectionStatus.CURRENT
+            else view?.status ?: com.supermetroid.editor.asm.AsmSelectorProjectionStatus.UNAVAILABLE
     }
 
     private fun editSourceSelectors(description: String, action: (AsmPlmSourceBridge) -> Unit): Boolean = runCatching {
@@ -1105,8 +1140,14 @@ class EditorState(
         return parser.readStateData(state)["plmSetPtr"]
     }
 
+    private fun stateDisplayName(state: RoomStateEdits): String = selectorAsmOnlyLabels[state.id]?.let {
+        "Managed in ASM · ${selectorRoutineCaption(currentRoomId, state.id, it)}"
+    }
+        ?: if (hasManagedSelectors() && selectorProjectionStatus == com.supermetroid.editor.asm.AsmSelectorProjectionStatus.UNAVAILABLE)
+            "${state.id} · selector unavailable" else state.effectiveCondition.displaySummary(currentArea)
+
     internal fun currentPlmStateName(): String =
-        selectedStateEdits(project.rooms[project.roomKey(currentRoomId)])?.effectiveCondition?.displaySummary(currentArea)
+        selectedStateEdits(project.rooms[project.roomKey(currentRoomId)])?.let(::stateDisplayName)
             ?: currentRomParser?.parseRoomStates(currentRoomId)?.getOrNull(currentStateIndex)?.conditionName
             ?: "Selected state"
 
@@ -4189,6 +4230,7 @@ class EditorState(
         currentRomParser = romParser
         loadedLayoutRomVersion = romVersion
         currentRoomId = roomId
+        romHasOpaqueSelectors = romParser.inspectRoomStates(roomId).states.any { it.condition.kind == com.supermetroid.editor.rom.RoomStateConditionKind.ASM_ONLY }
         currentStateIndex = romParser.preferredPreviewStateIndex(roomId)
         romTilesetId = room.tileset
         // A stored state-data change (e.g. from the biome generator or room
@@ -4320,6 +4362,7 @@ class EditorState(
         val parser = currentRomParser ?: return null
         if (currentRoomId == 0 || currentStateIndex < 0) return null
         val roomEdits = project.getOrCreateRoom(currentRoomId)
+        if (romHasOpaqueSelectors && roomEdits.states.isEmpty()) return null
         roomEdits.ensureStateManifest(parser)
         val state = selectedStateEdits(roomEdits)
             ?: return null
@@ -4346,6 +4389,7 @@ class EditorState(
         val parser = currentRomParser ?: return null
         if (currentRoomId == 0) return null
         val roomEdits = project.getOrCreateRoom(currentRoomId)
+        if (romHasOpaqueSelectors && roomEdits.states.isEmpty()) return null
         roomEdits.ensureStateManifest(parser)
         val state = selectedStateEdits(roomEdits) ?: return null
         val resourceId = state.resources.level
@@ -4361,12 +4405,12 @@ class EditorState(
         return LayoutEditingContext(
             roomId = currentRoomId,
             stateId = state.id,
-            stateName = state.effectiveCondition.displaySummary(currentArea),
+            stateName = stateDisplayName(state),
             resourceId = resourceId,
             allStateIds = roomEdits.states.map { it.id },
-            allStateNames = roomEdits.states.map { it.effectiveCondition.displaySummary(currentArea) },
+            allStateNames = roomEdits.states.map(::stateDisplayName),
             sharingStateIds = sharingStates.map { it.id },
-            sharingStateNames = sharingStates.map { it.effectiveCondition.displaySummary(currentArea) },
+            sharingStateNames = sharingStates.map(::stateDisplayName),
             scope = inferredScope,
             hasResourceEdits = hasManagedLayouts() || resourceOperations.any { it.edits.isNotEmpty() },
             hasLegacyPrivateEdits = state.operations.any { it.edits.isNotEmpty() },
@@ -4409,6 +4453,10 @@ class EditorState(
      * layout is shared or explicitly forks it for this state.
      */
     private fun allowOrQueueLayoutEdit(action: () -> Unit): Boolean {
+        if (romHasOpaqueSelectors) {
+            postStatus("Open the original source project/base ROM to edit rooms with ASM-only predicates; compiled ROM predicates cannot be imported as GUI conditions.")
+            return false
+        }
         if (hasManagedLayouts()) {
             val view = currentPlmStateId()?.let { asmPlmSourceBridge?.layouts?.view(currentRoomId, it) }
             if (view == null || view.problem != null || view.resource == null) {
@@ -4675,7 +4723,7 @@ class EditorState(
             roomEdits.levelResourceOperations.remove(resourceId)
         } else {
             roomEdits.levelResourceOperations[resourceId] = mutableListOf(
-                EditOperation("Unique layout for ${state.effectiveCondition.displaySummary(currentArea)}", edits)
+                EditOperation("Unique layout for ${stateDisplayName(state)}", edits)
             )
         }
         stripTileEdits(state.operations)
@@ -4746,7 +4794,7 @@ class EditorState(
                 }
             }
         }
-        val sourceName = sourceState.effectiveCondition.displaySummary(currentArea)
+        val sourceName = stateDisplayName(sourceState)
         applyBulkEdits("Copy layout from $sourceName", edits)
         return edits.size
     }
@@ -4757,7 +4805,7 @@ class EditorState(
         val bounds = mapSelectionBounds() ?: return 0
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         roomEdits.ensureStateManifest(romParser)
-        val sourceName = selectedStateEdits(roomEdits)?.effectiveCondition?.displaySummary(currentArea) ?: "selected state"
+        val sourceName = selectedStateEdits(roomEdits)?.let(::stateDisplayName) ?: "selected state"
         val layer = if (activeRoomLayer == RoomEditLayer.LAYER2) TILE_EDIT_LAYER_2 else TILE_EDIT_LAYER_1
         var editCount = 0
         for (target in roomEdits.states.filter { it.id in targetStateIds && it.id != currentStateId }) {
@@ -4852,7 +4900,7 @@ class EditorState(
             )
             if (edits.isNotEmpty()) {
                 roomEdits.levelResourceOperations[candidate] = mutableListOf(
-                    EditOperation("Share layout from ${source.effectiveCondition.displaySummary(currentArea)}", edits)
+                    EditOperation("Share layout from ${stateDisplayName(source)}", edits)
                 )
             }
             stripTileEdits(source.operations)
@@ -4986,7 +5034,7 @@ class EditorState(
         if (hasManagedPlms()) return roomEdits!!.states.map { state ->
             val view = requireNotNull(asmPlmSourceBridge).managedView(currentRoomId, state.id)
             require(view.problem == null) { view.problem ?: "Review invalid object source before editing." }
-            state.effectiveCondition.displaySummary(currentArea) to requireNotNull(view.document).entries
+            stateDisplayName(state) to requireNotNull(view.document).entries
         }
         val runtimeStates = parser.parseRoomStatesWithData(currentRoomId)
         if (roomEdits?.states.isNullOrEmpty()) {
@@ -5002,7 +5050,7 @@ class EditorState(
             val runtimeState = runtimeStates.getOrNull(sourceIndex) ?: return@mapNotNull null
             val base = parser.parsePlmSet(runtimeState.plmSetPtr)
             val common = applyPlmChanges(base, authoredRoom.plmChanges)
-            state.effectiveCondition.displaySummary(currentArea) to applyPlmChanges(common, state.plmChanges)
+            stateDisplayName(state) to applyPlmChanges(common, state.plmChanges)
         }
     }
 
@@ -5131,7 +5179,7 @@ class EditorState(
             val other = effectiveLevelDataForState(room, state, parser, prospectiveLayoutEdits = preview)
                 ?: error("State layout is unavailable.")
             require(points.all { collision(selected, it) == collision(other, it) }) {
-                "Gate/door-cap geometry differs in ${state.effectiveCondition.displaySummary(currentArea)}. Use This state or align the layouts first."
+                "Gate/door-cap geometry differs in ${stateDisplayName(state)}. Use This state or align the layouts first."
             }
         }
     }
@@ -5451,7 +5499,7 @@ class EditorState(
         _editVersionState.value++
         editorLog(
             "Switched to state '${selectedState.id}' (source $baseStateIndex): " +
-                "${selectedState.condition.kind} (enemies=${_workingEnemies.size}, PLMs=${_workingPlms.size})"
+                "${stateDisplayName(selectedState)} (enemies=${_workingEnemies.size}, PLMs=${_workingPlms.size})"
         )
     }
 
@@ -8044,7 +8092,7 @@ class EditorState(
         condition: ProjectRoomStateCondition,
         romParser: RomParser,
     ): String {
-        require(!hasManagedSelectors()) { "Adding source-owned selectors needs an atomic cross-resource transaction; state creation is not supported after selector adoption yet." }
+        if (usesSourceStateLifecycle()) return addSourceRoomState(templateStateId, condition, romParser)
         require(condition.kind != com.supermetroid.editor.data.ProjectRoomStateConditionKind.DEFAULT) {
             "A room may contain only one mandatory default state"
         }
@@ -8119,9 +8167,31 @@ class EditorState(
 
     /** Delete a conditional state and return the state that should remain selected. */
     fun deleteRoomState(stateId: String, romParser: RomParser): String {
-        require(!hasManagedSelectors()) { "Deleting source-owned selectors needs an atomic cross-resource transaction; state deletion is not supported after selector adoption yet." }
+        if (usesSourceStateLifecycle()) return changeSourceRoomStates("Delete room state", romParser) { bridge, _ ->
+            var next = ""
+            val selected = currentPlmStateId()
+            val plan = bridge.stateLifecycle.plan(currentRoomId, romParser.readRoomHeader(currentRoomId)?.name ?: "Room") {
+                val index = it.effectiveStates.indexOfFirst { state -> state.id == stateId }
+                deleteRoomStateModel(it, stateId, romParser)
+                next = selected?.takeIf { id -> it.states.any { state -> state.id == id } }
+                    ?: (it.effectiveStates.getOrNull(index) ?: it.effectiveStates.last()).id
+            }
+            plan to next
+        }
         val roomEdits = project.getOrCreateRoom(currentRoomId)
         roomEdits.ensureStateManifest(romParser)
+        val oldLevel = roomEdits.states.firstOrNull { it.id == stateId }?.resources?.level
+        val next = deleteRoomStateModel(roomEdits, stateId, romParser)
+        if (oldLevel != null && roomEdits.states.none { it.resources.level == oldLevel }) {
+            layoutEditScopes.remove(layoutScopeKey(currentRoomId, oldLevel))
+        }
+        project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
+        dirty = true; editVersion++
+        return next
+    }
+
+    /** Private staging helper: no GUI history, selection or live project mutation. */
+    private fun deleteRoomStateModel(roomEdits: RoomEdits, stateId: String, romParser: RomParser): String {
         val index = roomEdits.states.indexOfFirst { it.id == stateId }
         require(index >= 0) { "Room state '$stateId' is not available" }
         require(roomEdits.states[index].condition.kind !=
@@ -8135,7 +8205,7 @@ class EditorState(
         } else {
             emptyList()
         }
-        if (linkedDependents.isNotEmpty()) {
+        if (linkedDependents.isNotEmpty() && roomEdits.asmLayoutSourceVersion == 0) {
             // Keep a valid owner for the semantic resource. Normalize the shared
             // layout against the promoted state's own ROM source before the old
             // owner disappears from the authored graph.
@@ -8171,15 +8241,78 @@ class EditorState(
         }
         roomEdits.states.removeAt(index)
         pruneUnusedLevelResources(roomEdits)
-        if (roomEdits.states.none { it.resources.level == deleting.resources.level }) {
-            layoutEditScopes.remove(layoutScopeKey(currentRoomId, deleting.resources.level))
-        }
         roomEdits.stateGraphChanged = true
         val selected = roomEdits.states.getOrNull(index) ?: roomEdits.states.last()
-        project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
-        dirty = true
-        editVersion++
         return selected.id
+    }
+
+    private fun usesSourceStateLifecycle(): Boolean = hasManagedSelectors() || hasManagedRoomProperties() || hasManagedLayouts() ||
+        hasManagedPlms() || hasManagedInitialScrolls() || hasManagedFx() || hasManagedEnemies()
+
+    private fun addSourceRoomState(templateId: String, condition: ProjectRoomStateCondition, parser: RomParser): String =
+        changeSourceRoomStates("Add room state", parser) { bridge, room ->
+            require(condition.kind != com.supermetroid.editor.data.ProjectRoomStateConditionKind.DEFAULT) { "A room may contain only one mandatory default state." }
+            val id = bridge.stateLifecycle.nextId(room)
+            val plan = bridge.stateLifecycle.plan(currentRoomId, parser.readRoomHeader(currentRoomId)?.name ?: "Room", templateId to id, condition) { staged ->
+                val template = requireNotNull(staged.states.firstOrNull { it.id == templateId }) { "The template state is no longer available." }
+                val state = template.copy(id = id, sourceStateIndex = null, sourceCondition = null,
+                    templateSourceStateIndex = requireNotNull(template.baseSourceStateIndex()), condition = condition, conditionChanged = true,
+                    operations = template.operations.toMutableList(), plmChanges = template.plmChanges.toMutableList(),
+                    enemyChanges = template.enemyChanges.toMutableList(), scrollChanges = template.scrollChanges.toMutableList(),
+                    doorFxChanges = template.doorFxChanges.toMutableMap(),
+                    customScrollCommands = template.customScrollCommands.mapValuesTo(linkedMapOf()) { it.value.toMutableList() })
+                val index = staged.states.indexOf(template)
+                staged.states.add(if (index == staged.states.lastIndex) index else index + 1, state)
+            }
+            plan to id
+        }
+
+    /** The same compound source entry is undoable from any bank or the visual editor. */
+    private fun changeSourceRoomStates(description: String, parser: RomParser,
+        prepare: (AsmPlmSourceBridge, RoomEdits) -> Pair<com.supermetroid.editor.asm.AsmRoomStatePlan, String>): String {
+        val roomId = currentRoomId
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
+        require(bridge.catalog.parser === parser && currentRomParser === parser) { "The room ROM changed; reopen the room before changing states." }
+        fun requireIdle() {
+            require(pendingEdits.isEmpty() && pendingSourcePattern == null && floatingSelection == null &&
+                pendingPlmAdds.isEmpty() && pendingPlmRemoves.isEmpty() && pendingLayoutEditScope == null) {
+                "Finish the active stroke, selection or scope choice before changing states."
+            }
+        }
+        requireIdle()
+        val room = requireNotNull(project.rooms[project.roomKey(roomId)]) { "Load the room's state manifest before changing states." }
+        require(room.states.isNotEmpty()) { "The source-owned room has no state manifest; repair its identity metadata before changing states." }
+        val (plan, selectedAfter) = prepare(bridge, room)
+        val selectedBefore = currentPlmStateId()
+        val previousUndo = undoStack.toList()
+        val previousManaged = java.util.IdentityHashMap(managedPlmUndo)
+        val previousScopes = java.util.IdentityHashMap(itemScopeSnapshots)
+        val operation = EditOperation(description)
+        var sourceChange: AsmSourceTextChange? = null
+        bridge.stateLifecycle.apply(plan, beforeTransition = { requireIdle() }, afterTransition = { undo ->
+            if (currentRoomId == roomId && currentRomParser === parser) {
+                val retainedRedo = if (sourceChange == null) emptyList() else redoStack.filter { it !== operation }
+                val retainedManaged = java.util.IdentityHashMap(managedPlmUndo)
+                val retainedScopes = java.util.IdentityHashMap(itemScopeSnapshots)
+                loadRoom(roomId, parser, requireNotNull(parser.readRoomHeader(roomId)))
+                val selected = if (undo) selectedBefore else selectedAfter
+                if (selected != null && project.rooms[project.roomKey(roomId)]?.states?.any { it.id == selected } == true) switchRoomState(selected, parser)
+                undoStack.clear(); redoStack.clear(); managedPlmUndo.clear(); itemScopeSnapshots.clear()
+                if (sourceChange == null) sourceChange = requireNotNull(bridge.sourceUndoHead())
+                managedPlmUndo.putAll(previousManaged)
+                managedPlmUndo.putAll(retainedManaged)
+                managedPlmUndo[operation] = ManagedSourceUndo(PLM_SOURCE_FILE,
+                    plan.replacements.getValue(PLM_SOURCE_FILE).first, plan.replacements.getValue(PLM_SOURCE_FILE).second, sourceChange)
+                itemScopeSnapshots.putAll(previousScopes)
+                itemScopeSnapshots.putAll(retainedScopes)
+                undoStack.addAll(previousUndo)
+                redoStack.addAll(retainedRedo)
+                if (undo) redoStack.add(operation) else undoStack.add(operation)
+            }
+            project.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
+            dirty = true; undoVersion++; editVersion++
+        })
+        return selectedAfter
     }
 
     fun moveRoomState(stateId: String, direction: Int, romParser: RomParser): Boolean {

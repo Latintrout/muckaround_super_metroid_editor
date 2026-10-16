@@ -1,6 +1,7 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.clickable
+import com.supermetroid.editor.asm.AsmRoomSelectorsSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,11 +39,38 @@ import com.supermetroid.editor.data.ProjectRoomStateConditionArgumentKind
 import com.supermetroid.editor.data.ProjectRoomStateConditionKind
 import com.supermetroid.editor.rom.RoomStateCondition
 import com.supermetroid.editor.rom.RoomStateSimulationContext
+
 import com.supermetroid.editor.rom.displaySummary
 import com.supermetroid.editor.rom.projectRoomStateCondition
 import com.supermetroid.editor.rom.packedBossConditionArgument
 import com.supermetroid.editor.rom.flattened
 import com.supermetroid.editor.rom.matches
+
+/** Generated linkage names are useful in ASM, but too long for state rows and scope prompts. */
+internal fun selectorRoutineCaption(roomId: Int, stateId: String, label: String): String =
+    if (label == AsmRoomSelectorsSource.conditionName(roomId, stateId) + "_Predicate") "Custom predicate" else label
+
+@Composable
+internal fun SelectorConversionDialog(preview: com.supermetroid.editor.asm.AsmSelectorConversionPreview,
+                                     area: Int, error: String?, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Convert recognized predicates?") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This replaces the marked handwritten predicates with typed selector data. The original code and notes are retained as comments. Other states and resource identities stay unchanged.")
+                Text("The current draft cannot build. After conversion, the build executes the generated condition logic—not the original handwritten routine.")
+                preview.selectors.order.forEachIndexed { index, id ->
+                    if (id in preview.stateIds) Text("State ${index + 1}: ${preview.selectors.conditions.getValue(id).displaySummary(area)}")
+                }
+                Text("You can undo this conversion from either ASM or the room editor.")
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Convert to typed selectors") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep source unchanged") } },
+    )
+}
 
 internal data class ItemPickupConditionOption(
     val id: Int,
@@ -1009,6 +1037,7 @@ internal fun AddRoomStateDialog(
     existingConditions: List<ProjectRoomStateCondition>,
     onDismiss: () -> Unit,
     onAdd: (ProjectRoomStateCondition) -> Unit,
+    error: String? = null,
 ) {
     var condition by remember(initialCondition) { mutableStateOf(initialCondition) }
     var showBuilder by remember(initialCondition) { mutableStateOf(false) }
@@ -1045,6 +1074,7 @@ internal fun AddRoomStateDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
@@ -1075,15 +1105,17 @@ internal fun DeleteRoomStateDialog(
     stateName: String,
     onDismiss: () -> Unit,
     onDelete: () -> Unit,
+    error: String? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Delete room state?") },
         text = {
-            Text(
-                "Delete “$stateName” and its state-specific edits? Shared resources used by other " +
-                    "states are kept. The mandatory ELSE state cannot be deleted.",
-            )
+            Column {
+                Text("Delete “$stateName” and its state-specific edits? Shared resources used by other " +
+                    "states are kept. The mandatory ELSE state cannot be deleted.")
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
         },
         confirmButton = { TextButton(onClick = onDelete) { Text("Delete") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

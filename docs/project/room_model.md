@@ -62,6 +62,24 @@ is conventionally used as an always-false selector that skips its state pointer.
 
 ## Current Boundary
 
+Existing-room selectors now support reciprocal typed AND/OR/NOT predicates and
+source order, including atomic state add/duplicate/delete across all owned room
+resource banks. GUI and ASM history restore membership, resources, sharing and
+selection together; source values are not duplicated in project JSON. Invalid
+drafts retain an explicitly stale last-valid preview when one exists, otherwise
+report the selector mapping unavailable. Visual condition/state edits and
+simulation lock until repaired; ASM editing and draft saving remain available.
+This bounded typed format is not arbitrary executable-ASM recognition. A separate
+explicit ASM-only backend preserves authored bank-`$8F` routines and generates
+a carry/RTS adapter from verified assembler labels. Inline managed bodies now have
+automatic packed placement and generated entry/end labels; explicitly placed
+routines remain available for advanced source. Opaque conditions have no GUI
+predicate: selector controls/simulation show a neutral “Managed in ASM” notice while
+known room resources remain editable. Restoring supported typed source unlocks the
+controls automatically. Full source envelopes, free-space/ABI checks and build parity protect
+the interface, not arbitrary code behavior or hidden references. See the lifecycle contracts and
+recorded UX questions in [the ASM workspace guide](../asm/reference_workspace.md#source-owned-state-lifecycle-and-projection-status).
+
 Existing-room enemy populations and their GFX lists are reciprocal in ASM mode.
 The first actor edit or **Room Info → Enemy Actors / Enemy Graphics → ASM** adopts
 all effective state lists, retaining their ordering, eight per-actor words and
@@ -223,8 +241,8 @@ Original fixed-address links still have fixed-size restrictions. Managed lists
 and named command streams support growth/shrinkage; changed resource links,
 added-room projects and mixed source/GUI operations are guarded boundaries. Only
 objects, named scroll commands, adopted save spawns, initial scroll grids,
-ordinary FX tables, paired enemy/GFX tables and adopted decoded layouts have migrated:
-selectors, headers, doors and other resources keep their existing
+ordinary FX tables, paired enemy/GFX tables, decoded layouts, ordinary header/state
+scalars and typed selectors have migrated. Doors and other resources keep their existing
 model/backend. This does **not** change the ordinary unlinked/ROM
 editing model described below. See the [source/GUI ownership contract](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
 
@@ -565,7 +583,14 @@ identities without asking the user to enter a BTS index, DoorDef pointer, or roo
 
 - Known routine, project symbol, opaque pointer, and no-routine code references.
 - Base-ROM/profile symbol tables and assembler/linker integration.
-- Custom selector schemas with explicit encoded argument contracts.
+- Bounded, explicitly marked handwritten predicate import is implemented: control-flow/flag
+  recognition produces a review proposal, and explicit conversion authors typed AND/OR/NOT selectors
+  while retaining original code as comments. Recognition alone does not permit builds or visual edits.
+  See `../asm/reference_workspace.md` for the supported numeric RAM/16-bit instruction contract.
+- Executable ASM-only predicates have inline managed placement or an advanced explicit
+  label/end-label binding, both using the tagged carry/RTS adapter backend. They are not typed GUI conditions, and unsupported import drafts
+  are not silently built from stale projections. General custom selector-table schemas and
+  arbitrary engine-format changes remain unsupported.
 
 ## Test Boundary
 

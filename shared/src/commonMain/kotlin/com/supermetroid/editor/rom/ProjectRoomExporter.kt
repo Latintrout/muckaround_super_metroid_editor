@@ -67,6 +67,7 @@ class ProjectRoomExporter(
     private var statePredicateRoutinePtr: Int? = null
     private var stateExpressionInterpreterPtr: Int? = null
     private val stateExpressionPointers = mutableMapOf<Pair<Int, com.supermetroid.editor.data.ProjectRoomStateCondition>, Int>()
+    private val asmPredicateAdapters = mutableMapOf<Int, Int>()
 
     private val allocationSession = (
         freeSpaceAllocator ?: RomFreeSpaceAllocator(
@@ -74,6 +75,9 @@ class ProjectRoomExporter(
             snesToPc = romParser::snesToPc,
             pcToSnes = romParser::pcToSnes,
             guardBytes = 2,
+            excludedRanges = sourceSelectors.values.flatMap { it.routines.values }.mapNotNull { routine ->
+                routine.snesAddress?.let { start -> romParser.snesToPc(start).let { it until it + routine.sizeBytes!! } }
+            },
         )
         ).observing(allocations::add)
 
@@ -137,7 +141,11 @@ class ProjectRoomExporter(
             val selectors = if (storedEdits.asmStateSelectorsSourceVersion == 0) null else {
                 require(storedEdits.asmStateSelectorsSourceVersion == 1 && storedEdits.states.all { !it.conditionChanged }) { "Unsupported or competing selector ownership." }
                 requireNotNull(sourceSelectors[storedId]) { "Room $storedKey requires its validated selector source." }.also {
-                    require(it.conditions.keys == storedEdits.states.map { state -> state.id }.toSet()) { "Selector state coverage changed." }
+                    require(it.conditions.keys + it.routines.keys == storedEdits.states.map { state -> state.id }.toSet()) { "Selector state coverage changed." }
+                    if (it.routines.isNotEmpty()) {
+                        require(project.asmWorkspace.enabled && project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE && project.newRooms.isEmpty()) { "Executable predicates require existing-room ASM source mode." }
+                        require(it.routines.values.all { routine -> routine.snesAddress != null && routine.sizeBytes != null }) { "Executable predicates require validated assembler symbol placements." }
+                    }
                     require(it.order.last() == storedEdits.states.single { state -> state.sourceCondition?.kind == com.supermetroid.editor.data.ProjectRoomStateConditionKind.DEFAULT }.id) { "Default state identity changed." }
                     require(storedEdits.states.all { state -> state.condition == (state.sourceCondition ?: projectRoomStateCondition(com.supermetroid.editor.data.ProjectRoomStateConditionKind.NEVER)) }) { "Selectors have both source and GUI conditions." }
                 }
@@ -164,7 +172,9 @@ class ProjectRoomExporter(
                 state.copy(
                     stateDataChange = properties?.states?.getValue(state.id) ?: state.stateDataChange,
                     asmStatePropertiesProjection = null,
-                    condition = remapCondition(selectors?.conditions?.getValue(state.id) ?: state.condition),
+                    // For opaque slots this is native record provenance, never an executable
+                    // fallback. rewriteStateGraph always emits the authored routine adapter.
+                    condition = remapCondition(selectors?.conditions?.get(state.id) ?: state.condition),
                     conditionChanged = selectors != null || state.conditionChanged,
                     asmConditionProjection = null,
                     doorFxChanges = state.doorFxChanges.entries.associateTo(linkedMapOf()) { (key, value) ->
@@ -1907,6 +1917,7 @@ class ProjectRoomExporter(
         roomId: Int,
         roomEdits: RoomEdits,
     ): Map<String, Int> {
+        val routines = sourceSelectors[roomId]?.routines.orEmpty()
         val sourceInspection = romParser.inspectRoomStates(roomId)
         if (!sourceInspection.isComplete) {
             val details = sourceInspection.issues.joinToString { it.message }.ifBlank { "missing default state" }
@@ -1929,13 +1940,13 @@ class ProjectRoomExporter(
         }
         val roomArea = sourceInspection.area
             ?: failExport("Room 0x$roomKey has no readable area for state-condition export")
-        val generatedPredicatePtr = if (roomEdits.states.any { it.condition.kind.isSmEditGeneratedPredicate() }) {
+        val generatedPredicatePtr = if (roomEdits.states.any { it.id !in routines && it.condition.kind.isSmEditGeneratedPredicate() }) {
             ensureStatePredicateRoutine(roomKey)
         } else {
             null
         }
         val compiledPointers = roomEdits.states.mapNotNull { state ->
-            state.condition.takeIf { it.requiresCompiledExpression() }?.let { condition ->
+            state.condition.takeIf { state.id !in routines && it.requiresCompiledExpression() }?.let { condition ->
                 state.id to ensureCompiledStateExpression(condition, roomArea, roomKey)
             }
         }.toMap()
@@ -1967,7 +1978,10 @@ class ProjectRoomExporter(
             )
         }
 
-        val selectorBytes = roomEdits.states.sumOf { it.condition.encodedSizeBytes() }
+        fun entrySize(state: com.supermetroid.editor.data.RoomStateEdits) = if (state.id in routines)
+            SmEditAsmRoomPredicateFormat.ENTRY_SIZE_BYTES else state.condition.encodedSizeBytes()
+        val adapters = routines.mapValues { (_, routine) -> ensureAsmPredicateAdapter(roomKey, routine) }
+        val selectorBytes = roomEdits.states.sumOf(::entrySize)
         val conditionalCount = roomEdits.states.size - 1
         val graphSize = selectorBytes + RomConstants.STATE_DATA_SIZE +
             conditionalCount * RomConstants.STATE_DATA_SIZE
@@ -1996,11 +2010,15 @@ class ProjectRoomExporter(
                 selectorCursor += RomConstants.STATE_DATA_SIZE
             } else {
                 val statePointer = (allocation.snesAddress + conditionalRecordCursor) and 0xFFFF
-                encodeStateSelector(
+                val adapter = adapters[state.id]
+                if (adapter != null) {
+                    writeU16(graph, selectorCursor, adapter)
+                    writeU16(graph, selectorCursor + 2, statePointer)
+                } else encodeStateSelector(
                     graph, selectorCursor, state.condition, statePointer,
                     roomKey, state.id, generatedPredicatePtr, compiledPointers[state.id], roomArea,
                 )
-                selectorCursor += state.condition.encodedSizeBytes()
+                selectorCursor += entrySize(state)
                 record.copyInto(graph, conditionalRecordCursor)
                 stateOffsets[state.id] = allocation.pcOffset + conditionalRecordCursor
                 conditionalRecordCursor += RomConstants.STATE_DATA_SIZE
@@ -2019,6 +2037,18 @@ class ProjectRoomExporter(
                 "\$8F:${(allocation.snesAddress and 0xFFFF).toString(16).uppercase().padStart(4, '0')}"
         )
         return stateOffsets
+    }
+
+    private fun ensureAsmPredicateAdapter(roomKey: String, routine: SourceRoomSelectorRoutine): Int {
+        val target = requireNotNull(routine.snesAddress) { "Unresolved executable predicate ${routine.label}." }
+        asmPredicateAdapters[target]?.let { return it }
+        val enginePc = romParser.snesToPc(0x8FE5D2)
+        require(romData.copyOfRange(enginePc, enginePc + SmEditAsmRoomPredicateFormat.engineBytes.size)
+            .contentEquals(SmEditAsmRoomPredicateFormat.engineBytes)) { "Executable predicates require the verified native selector ABI; an engine patch/source edit changed it." }
+        val bytes = SmEditAsmRoomPredicateFormat.adapterBytes(target)
+        val allocation = roomDataAllocator.allocate(bytes, listOf(0x8F), "room 0x$roomKey ASM predicate ${routine.label} adapter")
+            ?: failExport("Room 0x$roomKey has no bank \$8F space for the executable predicate adapter")
+        return (allocation.snesAddress and 0xFFFF).also { asmPredicateAdapters[target] = it }
     }
 
     private fun ensureStateGraphRedirectRoutine(roomKey: String): Int {

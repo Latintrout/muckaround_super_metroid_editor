@@ -6,6 +6,20 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class RomFreeSpaceAllocatorTest {
+    @Test fun `source envelopes exclude unchanged fill bytes across shared allocator views`() {
+        val rom = ByteArray(0x300000)
+        rom.fill(-1, 0x7F000, 0x80000)
+        val allocator = RomFreeSpaceAllocator(rom, ::snesToPc, ::pcToSnes, guardBytes = 2,
+            excludedRanges = listOf(0x7F080 until 0x7F180))
+        val observed = mutableListOf<RomAllocation>()
+        val first = allocator.observing(observed::add).allocate(byteArrayOf(1, 2), listOf(0x8F), "after live code")!!
+        assertEquals(0x7F182, first.pcOffset)
+        assertEquals(0x7F184, allocator.reserve(8, listOf(0x8F), "next")!!.pcOffset)
+        assertEquals(listOf(first), observed)
+        val exhausted = RomFreeSpaceAllocator(rom, ::snesToPc, ::pcToSnes,
+            excludedRanges = listOf(0x7FF00 until 0x80000))
+        assertNull(exhausted.reserve(1, listOf(0x8F), "cannot reuse code padding"))
+    }
     @Test
     fun `reserves and writes from trailing bank free space`() {
         val rom = ByteArray(0x300000) { 0x00 }

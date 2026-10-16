@@ -91,6 +91,25 @@ internal data class RoomStateUiItem(
     val edits: RoomStateEdits?,
 )
 
+/** Selector capability is separate from selecting/inspecting a known state's resources. */
+@Composable
+internal fun RoomStateActions(editable: Boolean, isDefault: Boolean, selectedIndex: Int, stateCount: Int,
+                              onAdd: () -> Unit, onDuplicate: () -> Unit, onMove: (Int) -> Unit,
+                              onDelete: () -> Unit, onSimulate: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp), verticalAlignment = Alignment.CenterVertically) {
+        @Composable fun action(label: String, enabled: Boolean, click: () -> Unit) {
+            TextButton(onClick = click, enabled = enabled, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
+                modifier = Modifier.height(26.dp)) { Text(label, fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
+        }
+        action("+ Add", editable, onAdd)
+        action("Duplicate", editable, onDuplicate)
+        action("↑", editable && !isDefault && selectedIndex > 0) { onMove(-1) }
+        action("↓", editable && !isDefault && selectedIndex in 0 until stateCount - 2) { onMove(1) }
+        action("Delete", editable && !isDefault, onDelete)
+        action("Simulate", editable, onSimulate)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoomPropertiesPanel(
@@ -173,7 +192,10 @@ fun RoomPropertiesPanel(
                 id = "state-${index + 1}",
                 baseSourceStateIndex = index,
                 condition = projectRoomStateCondition(
-                    ProjectRoomStateConditionKind.valueOf(state.condition.kind.name),
+                    // Opaque ROM predicates are shown explicitly below, not as this
+                    // inert UI placeholder. Creating an editable manifest rejects them.
+                    if (state.condition.kind == com.supermetroid.editor.rom.RoomStateConditionKind.ASM_ONLY) ProjectRoomStateConditionKind.NEVER
+                    else ProjectRoomStateConditionKind.valueOf(state.condition.kind.name),
                     state.condition.argument,
                     state.condition.negated,
                 ),
@@ -181,12 +203,8 @@ fun RoomPropertiesPanel(
             )
         }
     }
-    var selectedStateId by remember(room.roomId) {
-        mutableStateOf(
-            editorState.currentStateId?.takeIf { id -> states.any { it.id == id } }
-                ?: states.lastOrNull()?.id
-        )
-    }
+    // Source undo/redo and ASM navigation select states too; do not keep a second selection here.
+    val selectedStateId = editorState.currentStateId?.takeIf { id -> states.any { it.id == id } } ?: states.lastOrNull()?.id
     val selectedStateItem = states.firstOrNull { it.id == selectedStateId } ?: states.lastOrNull()
     val selectedStateIdx = states.indexOf(selectedStateItem).coerceAtLeast(0)
     var showRomAddresses by remember(room.roomId) { mutableStateOf(false) }
@@ -194,6 +212,15 @@ fun RoomPropertiesPanel(
     var showAddStateDialog by remember(room.roomId) { mutableStateOf(false) }
     var duplicateSelectedCondition by remember(room.roomId) { mutableStateOf(false) }
     var showDeleteStateDialog by remember(room.roomId) { mutableStateOf(false) }
+    var stateOperationError by remember(room.roomId) { mutableStateOf<String?>(null) }
+    var selectorConversionReview by remember(room.roomId) { mutableStateOf<com.supermetroid.editor.asm.AsmSelectorConversionPreview?>(null) }
+    val selectorsEditable = editorState.selectorEditingAvailable()
+    val opaqueRom = stateInspection.states.any { it.condition.kind == com.supermetroid.editor.rom.RoomStateConditionKind.ASM_ONLY }
+    val opaqueSelectorLabels = editorState.selectorAsmOnlyLabels + stateInspection.states.mapIndexedNotNull { index, state ->
+        state.condition.asmPredicateAddress?.let { "state-${index + 1}" to "\$${it.toString(16).uppercase()}" }
+    }.toMap()
+    val selectorUnavailable = editorState.hasManagedSelectors() &&
+        editorState.selectorProjectionStatus == com.supermetroid.editor.asm.AsmSelectorProjectionStatus.UNAVAILABLE
     var showConditionBuilder by remember(room.roomId) { mutableStateOf(false) }
     var showStateSimulator by remember(room.roomId) { mutableStateOf(false) }
     var doorManagerError by remember(room.roomId) { mutableStateOf<String?>(null) }
@@ -243,7 +270,7 @@ fun RoomPropertiesPanel(
 
     val selectedStateEdits = selectedStateItem?.edits
     val savedDoorFxChanges = selectedStateEdits?.doorFxChanges.orEmpty()
-    val editableCondition = selectedStateItem?.condition
+    val editableCondition = selectedStateItem?.takeUnless { it.id in opaqueSelectorLabels }?.condition
     val commonFx = roomEdits?.fxChange
     val stateFx = selectedStateEdits?.fxChange
     val savedFx = if (stateFx != null || commonFx != null) {
@@ -366,7 +393,32 @@ fun RoomPropertiesPanel(
         PropertyRow("Header", "Room scalars", propertiesSourceLink?.let { open -> { open(null) } })
         PropertyRow("State fields", "Tileset, music, BG scrolling", propertiesSourceLink?.let { open -> { open(selectedStateItem?.id) } })
         PropertyRow("Selectors", "Conditions / branch order", selectorsSourceLink?.let { open -> { open(selectedStateItem?.id) } })
-        editorState.selectorPreviewProblem?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = ROOM_INFO_BODY_FONT_SIZE) }
+        editorState.selectorPreviewProblem?.let {
+            Text((when (editorState.selectorProjectionStatus) {
+                com.supermetroid.editor.asm.AsmSelectorProjectionStatus.STALE -> "Showing last valid selector preview. "
+                com.supermetroid.editor.asm.AsmSelectorProjectionStatus.RECOGNIZED -> "Showing a recognized conversion proposal, not a buildable selector. "
+                else -> "Selector preview unavailable. "
+            }) +
+                "Visual selector edits and simulation are locked; ASM editing and saving remain available. $it",
+                color = MaterialTheme.colorScheme.error, fontSize = ROOM_INFO_BODY_FONT_SIZE)
+        }
+        if (opaqueRom) Text("This compiled ROM contains opaque predicates. Open its original source project/base ROM for state-resource editing; conditions cannot be imported or simulated visually.",
+            color = MaterialTheme.colorScheme.error, fontSize = ROOM_INFO_BODY_FONT_SIZE)
+        editorState.selectorConversionPreview?.let { preview ->
+            TextButton(onClick = { stateOperationError = null; selectorConversionReview = preview }) {
+                Text("Review recognized predicates…", fontSize = ROOM_INFO_BODY_FONT_SIZE)
+            }
+        }
+        selectorConversionReview?.let { preview ->
+            SelectorConversionDialog(preview, effectiveArea, stateOperationError,
+                onDismiss = { selectorConversionReview = null },
+                onConfirm = {
+                    if (editorState.convertRecognizedSelectors(preview)) {
+                        selectorConversionReview = null
+                        onWorkspaceChanged?.invoke()
+                    } else stateOperationError = editorState.statusMessage
+                })
+        }
         editorState.roomPropertiesPreviewProblem?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = ROOM_INFO_BODY_FONT_SIZE) }
         // ── Room Header (all 11 bytes editable) ──
         SectionHeader("Room Header")
@@ -462,7 +514,7 @@ fun RoomPropertiesPanel(
 
         // ── Room States ──
         SectionHeader(
-            title = "Room States (${states.size})",
+            title = "Room States (${states.size})" + if (selectorUnavailable) " · order unavailable" else "",
             onHelp = { helpTopic = RoomInfoHelpTopic.STATES },
             trailingContent = {
                 TextButton(
@@ -476,6 +528,17 @@ fun RoomPropertiesPanel(
         )
         if (helpTopic == RoomInfoHelpTopic.STATES) {
             RoomStatesHelpDialog(onDismiss = { helpTopic = null })
+        }
+        if (editorState.selectorProjectionStatus == com.supermetroid.editor.asm.AsmSelectorProjectionStatus.ASM_ONLY) {
+            Text("Managed in ASM · State selection uses custom code. Conditions, state structure and simulation are read-only here. " +
+                "Tiles, PLMs and other supported room data remain editable. Builds check placement and the calling interface, not gameplay behavior.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = ROOM_INFO_BODY_FONT_SIZE)
+            selectorsSourceLink?.let { open ->
+                TextButton(onClick = { open(selectedStateItem?.id?.takeIf { it in editorState.selectorAsmOnlyLabels }
+                    ?: editorState.selectorAsmOnlyLabels.keys.firstOrNull()) }) {
+                    Text("Open selector ASM", fontSize = ROOM_INFO_CAPTION_FONT_SIZE)
+                }
+            }
         }
         if (states.isEmpty()) {
             Text("No readable states found", fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.error)
@@ -496,9 +559,8 @@ fun RoomPropertiesPanel(
                         (snes and 0xFFFF).toString(16).uppercase().padStart(4, '0')
                 } ?: "new state"
                 Surface(
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = state.baseSourceStateIndex != null) {
-                        selectedStateId = state.id
-                        editorState.switchRoomState(state.id, romParser)
+                    modifier = Modifier.fillMaxWidth().clickable(enabled = state.baseSourceStateIndex != null && !opaqueRom) {
+                        if (editorState.currentStateId != state.id) editorState.switchRoomState(state.id, romParser)
                     },
                     shape = MaterialTheme.shapes.extraSmall,
                     color = if (selectedStateIdx == idx) {
@@ -510,7 +572,11 @@ fun RoomPropertiesPanel(
                     Column(Modifier.padding(horizontal = 7.dp, vertical = 5.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "$branchLabel ${projectConditionLabel(state.condition, room.area)}",
+                                when {
+                                    selectorUnavailable -> "State ${idx + 1} · selector unavailable"
+                                    state.id in opaqueSelectorLabels -> "$branchLabel Managed in ASM · ${selectorRoutineCaption(room.roomId, state.id, opaqueSelectorLabels.getValue(state.id))}"
+                                    else -> "$branchLabel ${projectConditionLabel(state.condition, room.area)}"
+                                },
                                 fontSize = ROOM_INFO_BODY_FONT_SIZE,
                                 fontWeight = if (selectedStateIdx == idx) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (state.baseSourceStateIndex == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
@@ -527,7 +593,7 @@ fun RoomPropertiesPanel(
                             }
                         }
                         if (showRomAddresses) {
-                            val engineCheck = if (state.condition.kind.isSmEditGeneratedPredicate()) {
+                            val engineCheck = if (selectorUnavailable) "selector mapping unavailable" else if (state.id in opaqueSelectorLabels) "authored predicate · condition unavailable" else if (state.condition.kind.isSmEditGeneratedPredicate()) {
                                 "generated typed check"
                             } else {
                                 "engine check \$${state.condition.routineCode.toString(16).uppercase().padStart(4, '0')}"
@@ -544,61 +610,16 @@ fun RoomPropertiesPanel(
             }
 
             val selectedIsDefault = selectedStateItem?.condition?.kind == ProjectRoomStateConditionKind.DEFAULT
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(1.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(
-                    onClick = {
-                        duplicateSelectedCondition = false
-                        showAddStateDialog = true
-                    },
-                    enabled = !editorState.hasManagedSelectors(),
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                    modifier = Modifier.height(26.dp),
-                ) { Text("+ Add", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
-                TextButton(
-                    onClick = {
-                        duplicateSelectedCondition = true
-                        showAddStateDialog = true
-                    },
-                    enabled = !editorState.hasManagedSelectors(),
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                    modifier = Modifier.height(26.dp),
-                ) { Text("Duplicate", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
-                TextButton(
-                    enabled = !selectedIsDefault && selectedStateIdx > 0,
-                    onClick = {
-                        selectedStateItem?.id?.let { editorState.moveRoomState(it, -1, romParser) }
-                    },
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                    modifier = Modifier.height(26.dp),
-                ) { Text("↑", fontSize = ROOM_INFO_BODY_FONT_SIZE) }
-                TextButton(
-                    enabled = !selectedIsDefault && selectedStateIdx in 0 until states.lastIndex - 1,
-                    onClick = {
-                        selectedStateItem?.id?.let { editorState.moveRoomState(it, 1, romParser) }
-                    },
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                    modifier = Modifier.height(26.dp),
-                ) { Text("↓", fontSize = ROOM_INFO_BODY_FONT_SIZE) }
-                TextButton(
-                    enabled = !selectedIsDefault && !editorState.hasManagedSelectors(),
-                    onClick = { showDeleteStateDialog = true },
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                    modifier = Modifier.height(26.dp),
-                ) { Text("Delete", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
-                TextButton(
-                    onClick = { showStateSimulator = true },
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp),
-                    modifier = Modifier.height(26.dp),
-                ) { Text("Simulate", fontSize = ROOM_INFO_COMPACT_FONT_SIZE) }
-            }
-            if (editorState.hasManagedSelectors()) Text("Source-owned selectors: condition edits and reordering are supported; adding/deleting states is not yet source-aware.", fontSize = ROOM_INFO_CAPTION_FONT_SIZE)
+            RoomStateActions(selectorsEditable, selectedIsDefault, selectedStateIdx, states.size,
+                onAdd = { duplicateSelectedCondition = false; stateOperationError = null; showAddStateDialog = true },
+                onDuplicate = { duplicateSelectedCondition = true; stateOperationError = null; showAddStateDialog = true },
+                onMove = { direction -> selectedStateItem?.id?.let { editorState.moveRoomState(it, direction, romParser) } },
+                onDelete = { stateOperationError = null; showDeleteStateDialog = true },
+                onSimulate = { showStateSimulator = true })
+            if (editorState.hasManagedSelectors() && selectorsEditable) Text("Source-owned selectors: state changes update all participating resources together. Undo is shared with ASM.", fontSize = ROOM_INFO_CAPTION_FONT_SIZE)
         }
 
-        if (showStateSimulator) {
+        if (showStateSimulator && selectorsEditable) {
             RoomStateSimulatorDialog(
                 states = states.map { it.id to it.condition },
                 area = room.area,
@@ -627,11 +648,13 @@ fun RoomPropertiesPanel(
                 existingConditions = states.map { it.condition },
                 onDismiss = { showAddStateDialog = false },
                 onAdd = { condition ->
-                    val newId = editorState.addRoomState(selectedStateItem.id, condition, romParser)
-                    selectedStateId = newId
-                    editorState.switchRoomState(newId, romParser)
-                    showAddStateDialog = false
+                    runCatching {
+                        val newId = editorState.addRoomState(selectedStateItem.id, condition, romParser)
+                        if (editorState.currentStateId != newId) editorState.switchRoomState(newId, romParser)
+                        showAddStateDialog = false
+                    }.onFailure { stateOperationError = it.message ?: "No state changes were applied." }
                 },
+                error = stateOperationError,
             )
         }
         if (showDeleteStateDialog && selectedStateItem != null) {
@@ -639,11 +662,13 @@ fun RoomPropertiesPanel(
                 stateName = projectConditionLabel(selectedStateItem.condition, room.area),
                 onDismiss = { showDeleteStateDialog = false },
                 onDelete = {
-                    val nextId = editorState.deleteRoomState(selectedStateItem.id, romParser)
-                    selectedStateId = nextId
-                    editorState.switchRoomState(nextId, romParser)
-                    showDeleteStateDialog = false
+                    runCatching {
+                        val nextId = editorState.deleteRoomState(selectedStateItem.id, romParser)
+                        if (editorState.currentStateId != nextId) editorState.switchRoomState(nextId, romParser)
+                        showDeleteStateDialog = false
+                    }.onFailure { stateOperationError = it.message ?: "No state changes were applied." }
                 },
+                error = stateOperationError,
             )
         }
         for (issue in stateInspection.issues) {
@@ -672,7 +697,13 @@ fun RoomPropertiesPanel(
             ?.takeIf { snesLoRomToPc(it) != null }
             ?.let { address -> asmLinkCallback?.let { navigate -> { navigate(address) } } }
 
-        val stateNames = states.map { projectConditionLabel(it.condition, room.area) }
+        val stateNames = states.map { state ->
+            when {
+                selectorUnavailable -> "${state.id} · selector unavailable"
+                state.id in opaqueSelectorLabels -> "Managed in ASM · ${selectorRoutineCaption(room.roomId, state.id, opaqueSelectorLabels.getValue(state.id))}"
+                else -> projectConditionLabel(state.condition, room.area)
+            }
+        }
         val defaultStateData = allStateData.lastOrNull().orEmpty()
         val stateDifferences = changedRoomStateSections(stateData, defaultStateData)
 
@@ -749,7 +780,7 @@ fun RoomPropertiesPanel(
             },
         )
 
-        if (editableCondition != null && editableCondition.kind != ProjectRoomStateConditionKind.DEFAULT) {
+        if (editableCondition != null && editableCondition.kind != ProjectRoomStateConditionKind.DEFAULT && selectorsEditable) {
             StateConditionEditor(
                 condition = editableCondition,
                 area = room.area,
@@ -763,7 +794,11 @@ fun RoomPropertiesPanel(
                 onOpenBuilder = { showConditionBuilder = true },
             )
         }
-        if (showConditionBuilder && editableCondition != null) {
+        if (editableCondition != null && !selectorsEditable && !selectorUnavailable) {
+            Text("Read-only selector preview: ${projectConditionLabel(editableCondition, room.area)}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = ROOM_INFO_CAPTION_FONT_SIZE)
+        }
+        if (showConditionBuilder && editableCondition != null && selectorsEditable) {
             ConditionBuilderDialog(
                 initialCondition = editableCondition,
                 area = room.area,

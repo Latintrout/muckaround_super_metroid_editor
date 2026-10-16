@@ -57,6 +57,8 @@ internal data class AsmCompiledBuildBase(
     /** Source-built input before GUI room materialization. State source identities
      * must be validated here, never against the already-rewritten selector graph. */
     val roomValidationRomBytes: ByteArray? = null,
+    /** Pinned across generated-input passes of one build; recomputed after authored source changes. */
+    val managedPredicateStart: Int? = null,
 )
 
 internal fun AsmCompiledBuildBase.copyForReuse(): AsmCompiledBuildBase = copy(
@@ -184,6 +186,7 @@ internal class AsmProjectCompiler(
         patchMaterialization: AsmPatchMaterialization = AsmPatchMaterialization.EMPTY,
         roomMaterialization: AsmRoomMaterialization = AsmRoomMaterialization.EMPTY,
         referenceRomBody: ByteArray? = null,
+        managedPredicateStart: Int? = null,
         onProgress: (String) -> Unit = {},
     ): AsmCompiledBuildBase {
         val workspace = workspaceRepository.loadForBuild(projectFilePath)
@@ -212,6 +215,7 @@ internal class AsmProjectCompiler(
             patchMaterialization = patchMaterialization,
             roomMaterialization = roomMaterialization,
             referenceRomBody = referenceRomBody,
+            managedPredicateStart = managedPredicateStart,
         )
         AsmCompiledBuildCache.get(cacheKey)?.let { cached ->
             val label = if (materialization.isEmpty && patchMaterialization.isEmpty && roomMaterialization.isEmpty) {
@@ -234,6 +238,8 @@ internal class AsmProjectCompiler(
 
         val reference: CompiledTree
         val project: CompiledTree
+        var predicateStart: Int? = null
+        var predicateClaims: List<AsmSourceOwnedRange> = emptyList()
         try {
             reference = if (referenceRomBody == null) {
                 onProgress("Compiling immutable ASM snapshot…")
@@ -245,6 +251,19 @@ internal class AsmProjectCompiler(
                 onProgress("Reusing immutable ASM snapshot…")
                 CompiledTree(referenceRomBody.copyOf(), emptyList(), ByteArray(0))
             }
+            val sourceText = File(workspace.workingDirectory, "src/$PLM_SOURCE_FILE").takeIf(File::isFile)?.readText().orEmpty()
+            val predicates = try { AsmRoomSelectorsSource(sourceText).managedPredicates() }
+            catch (error: Exception) {
+                throw AsmCompilationException("$PLM_SOURCE_FILE: ${error.message}")
+            }
+            if (predicates.isNotEmpty()) {
+                predicateStart = managedPredicateStart ?: run {
+                    onProgress("Finding verified space for managed room predicates…")
+                    val authored = compileTree(workspace.workingDirectory, asar,
+                        generatedPredicateSource = AsmManagedRoomPredicates.render(predicates, null))
+                    AsmManagedRoomPredicates.chooseStart(reference.rom, authored.rom, authored.symbols, predicates)
+                }
+            }
             onProgress("Compiling project ASM source…")
             project = compileTree(
                 sourceTree = workspace.workingDirectory,
@@ -252,7 +271,17 @@ internal class AsmProjectCompiler(
                 assetOverrides = materialization.assetOverrides,
                 generatedRoomSource = roomMaterialization.source,
                 generatedPatchSource = patchMaterialization.source,
+                generatedPredicateSource = AsmManagedRoomPredicates.render(predicates, predicateStart),
             )
+            if (predicateStart != null) {
+                predicateClaims = AsmManagedRoomPredicates.claims(predicates, predicateStart, reference.rom, project.rom, project.symbols)
+                val generatedClaims = materialization.claims.map { it.pcOffset until it.endExclusive } +
+                    roomMaterialization.claims.map { it.pcOffset until it.endExclusive } +
+                    patchMaterialization.claims.map { it.pcOffset until it.endExclusive }
+                if (predicateClaims.any { claim -> generatedClaims.any { range ->
+                    claim.pcOffset <= range.last && range.first < claim.pcOffset + claim.length
+                } }) throw AsmCompilationException("Generated room/assets/patches overlap managed predicate code; no ROM was produced.")
+            }
         } catch (problem: AsmCompilationException) {
             runCatching {
                 buildArtifacts.publishFailure(
@@ -303,12 +332,13 @@ internal class AsmProjectCompiler(
                     reference.rom,
                     project.rom,
                     listOf(SNES_CHECKSUM_RANGE) +
+                        predicateClaims.map { it.pcOffset until it.pcOffset + it.length } +
                         materialization.claims.map { it.pcOffset until it.endExclusive } +
                         roomMaterialization.claims.map { it.pcOffset until it.endExclusive } +
                         patchMaterialization.claims.map { it.pcOffset until it.endExclusive },
                 ),
                 symbols = project.symbols,
-            ),
+            ) + predicateClaims,
             generatedAssetClaims = materialization.claims,
             generatedRoomClaims = roomMaterialization.claims,
             generatedRoomIds = roomMaterialization.roomIds,
@@ -317,6 +347,7 @@ internal class AsmProjectCompiler(
             assemblerVersion = version.lineSequence().firstOrNull().orEmpty(),
             compilerOutput = (reference.output + project.output).distinct(),
             compilerSymbols = project.symbols,
+            managedPredicateStart = predicateStart,
         ).also { compiled ->
             runCatching {
                 buildArtifacts.publishSuccess(
@@ -349,6 +380,7 @@ internal class AsmProjectCompiler(
             patchMaterialization = AsmPatchMaterialization.EMPTY,
             roomMaterialization = AsmRoomMaterialization.EMPTY,
             referenceRomBody = null,
+            managedPredicateStart = null,
         )
     }
 
@@ -377,9 +409,11 @@ internal class AsmProjectCompiler(
         patchMaterialization: AsmPatchMaterialization,
         roomMaterialization: AsmRoomMaterialization,
         referenceRomBody: ByteArray?,
+        managedPredicateStart: Int?,
     ): String {
         val fingerprint = BuildFingerprint()
         fingerprint.addText(CACHE_FORMAT_VERSION)
+        fingerprint.addText("managed-predicate-start:$managedPredicateStart")
         fingerprint.addText(assemblerVersion)
         fingerprint.addFile("asar", asar)
         fingerprint.addBytes("loaded-rom", loadedRom)
@@ -428,6 +462,7 @@ internal class AsmProjectCompiler(
         assetOverrides: Map<String, ByteArray> = emptyMap(),
         generatedRoomSource: String = "",
         generatedPatchSource: String = "",
+        generatedPredicateSource: String = "",
     ): CompiledTree {
         require(File(sourceTree, "src/main.asm").isFile) { "ASM source tree has no src/main.asm: $sourceTree" }
         require(File(sourceTree, "data").isDirectory) { "ASM source tree has no extracted data: $sourceTree" }
@@ -437,6 +472,7 @@ internal class AsmProjectCompiler(
             copyTree(File(sourceTree, "data"), File(staging, "data"))
             applyAssetOverrides(File(staging, "data"), assetOverrides)
             AsmProjectModuleGateway.apply(File(staging, "src"))
+            applyGeneratedPredicateSource(File(staging, "src"), generatedPredicateSource)
             applyGeneratedRoomSource(File(staging, "src"), generatedRoomSource)
             applyGeneratedPatchSource(File(staging, "src"), generatedPatchSource)
             val rom = File(staging, "SM.sfc")
@@ -490,6 +526,18 @@ internal class AsmProjectCompiler(
                 "Generated ASM $description was not assembled at PC 0x${pcOffset.toString(16).uppercase()}"
             )
         }
+    }
+
+    private fun applyGeneratedPredicateSource(sourceRoot: File, source: String) {
+        if (source.isBlank()) return
+        val generated = File(sourceRoot, GENERATED_PREDICATE_FILE)
+        require(!generated.exists()) { "Project source uses reserved SMEDIT file name $GENERATED_PREDICATE_FILE" }
+        generated.writeText(source)
+        val main = File(sourceRoot, "main.asm")
+        val original = main.readText()
+        val include = "; SMEDIT managed room predicates\nincsrc \"$GENERATED_PREDICATE_FILE\"\n\n"
+        val marker = "print \"Assembly complete. Total bytes written: \", bytes"
+        main.writeText(if (marker in original) original.replaceFirst(marker, include + marker) else original + "\n" + include)
     }
 
     private fun applyGeneratedPatchSource(sourceRoot: File, source: String) {
@@ -573,7 +621,8 @@ internal class AsmProjectCompiler(
         const val ASM_ROM_SIZE = 3 * 1024 * 1024
         private const val GENERATED_ROOM_FILE = "__smedit_generated_rooms.asm"
         private const val GENERATED_PATCH_FILE = "__smedit_generated_patches.asm"
-        private const val CACHE_FORMAT_VERSION = "smedit-asm-build-cache-v5"
+        private const val GENERATED_PREDICATE_FILE = "__smedit_managed_predicates.asm"
+        private const val CACHE_FORMAT_VERSION = "smedit-asm-build-cache-v6"
 
         internal fun clearBuildCacheForTests() = AsmCompiledBuildCache.clear()
 

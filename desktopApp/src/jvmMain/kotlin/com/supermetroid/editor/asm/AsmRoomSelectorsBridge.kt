@@ -3,7 +3,14 @@ package com.supermetroid.editor.asm
 import com.supermetroid.editor.data.*
 import com.supermetroid.editor.rom.*
 
-internal data class AsmRoomSelectorsView(val resource: SourceRoomSelectors?, val problem: String?)
+internal enum class AsmSelectorProjectionStatus { CURRENT, ASM_ONLY, RECOGNIZED, STALE, UNAVAILABLE }
+internal data class AsmRoomSelectorsView(val resource: SourceRoomSelectors?, val problem: String?,
+                                       val conversion: AsmSelectorConversionPreview? = null) {
+    val status get() = if (conversion != null) AsmSelectorProjectionStatus.RECOGNIZED
+        else if (problem == null && resource?.routines?.isNotEmpty() == true) AsmSelectorProjectionStatus.ASM_ONLY
+        else if (problem == null && resource != null) AsmSelectorProjectionStatus.CURRENT
+        else if (resource != null) AsmSelectorProjectionStatus.STALE else AsmSelectorProjectionStatus.UNAVAILABLE
+}
 internal fun SourceRoomSelectors.projectInto(room: RoomEdits) {
     room.asmSelectorOrderProjection = order
     room.states.forEach { it.asmConditionProjection = conditions[it.id] }
@@ -22,10 +29,22 @@ internal class AsmRoomSelectorsBridge(private val catalog: AsmPlmSourceCatalog, 
         val value = source().resource(project().rooms.getValue(project().roomKey(roomId)))
         lastGood[roomId] = value
         AsmRoomSelectorsView(value, null)
-    } catch (error: Exception) { AsmRoomSelectorsView(lastGood[roomId], error.message ?: "Invalid selectors.") }
+    } catch (error: Exception) {
+        val room = project().rooms[project().roomKey(roomId)]
+        val recognized = runCatching { room?.let { source().conversionPreview(it) } }
+        val conversion = recognized.getOrNull()
+        if (conversion != null) AsmRoomSelectorsView(conversion.selectors,
+            "Handwritten predicates are recognized, but must be reviewed and converted before building or visual selector editing.", conversion)
+        else {
+            val ids = room?.states?.map { it.id }?.toSet()
+            AsmRoomSelectorsView(lastGood[roomId]?.takeIf { it.order.toSet() == ids },
+                recognized.exceptionOrNull()?.message ?: error.message ?: "Invalid selectors.")
+        }
+    }
     fun refreshAll() {
         project().rooms.values.forEach { room ->
-            if (isManaged(room.roomId)) view(room.roomId).resource?.projectInto(room)
+            val resource = if (isManaged(room.roomId)) view(room.roomId).resource else null
+            if (resource != null) resource.projectInto(room)
             else { room.asmSelectorOrderProjection = null; room.states.forEach { it.asmConditionProjection = null } }
         }
     }
@@ -67,6 +86,21 @@ internal class AsmRoomSelectorsBridge(private val catalog: AsmPlmSourceCatalog, 
         require(view(roomId).problem == null) { view(roomId).problem ?: "Invalid selectors." }
         val current = source()
         workspace.replaceProjectSource(PLM_SOURCE_FILE, current.text, current.editCondition(room, id, condition))
+        refreshAll()
+    }
+    fun convert(roomId: Int, preview: AsmSelectorConversionPreview, afterTransition: (Boolean) -> Unit = {}) {
+        val owner = project()
+        val room = owner.rooms.getValue(owner.roomKey(roomId))
+        val current = source()
+        require(roomId == preview.roomId && current.text == preview.sourceText && current.conversionPreview(room) == preview) {
+            "Selectors changed while the conversion preview was open. Review the new source before converting."
+        }
+        fun guard() = require(project() === owner && owner.rooms[owner.roomKey(roomId)] === room && room.asmStateSelectorsSourceVersion == 1) {
+            "The room's selector ownership changed; undo newer room changes before this conversion."
+        }
+        workspace.replaceProjectSources(mapOf(PLM_SOURCE_FILE to (current.text to current.convertPredicates(room))),
+            beforeUndo = { guard() }, beforeRedo = { guard() },
+            afterUndo = { afterTransition(true) }, afterRedo = { afterTransition(false) })
         refreshAll()
     }
     fun move(roomId: Int, id: String, direction: Int): Boolean {

@@ -372,6 +372,9 @@ internal class RomExporter(
             freeFillByteForBank = { bank ->
                 if (communitySamusArtifact != null && bank in 0xE0..0xFF) 0x00 else 0xFF
             },
+            excludedRanges = compiledAsmBase?.sourceOwnedRanges.orEmpty().map {
+                (headerSize + it.pcOffset) until (headerSize + it.pcOffset + it.length)
+            },
         )
         val roomsPatched = mutableSetOf<String>()
 

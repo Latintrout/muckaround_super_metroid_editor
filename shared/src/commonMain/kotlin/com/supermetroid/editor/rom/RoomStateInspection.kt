@@ -55,6 +55,7 @@ enum class RoomStateConditionKind {
     ESCAPE_ACTIVE,
     ALL_OF,
     ANY_OF,
+    ASM_ONLY,
 }
 
 enum class RoomStateConditionArgumentKind {
@@ -85,11 +86,13 @@ data class RoomStateCondition(
     val entrySizeBytes: Int,
     val negated: Boolean = false,
     val children: List<RoomStateCondition> = emptyList(),
+    val asmPredicateAddress: Int? = null,
 ) {
     val isDefault: Boolean get() = kind == RoomStateConditionKind.DEFAULT
 
     /** Compact condition name for places where the surrounding UI supplies the IF/ELSE context. */
     fun shortSummary(area: Int): String = when (kind) {
+        RoomStateConditionKind.ASM_ONLY -> "ASM-only predicate \$${hex(asmPredicateAddress, 6)} (condition unavailable)"
         RoomStateConditionKind.DEFAULT -> "Default"
         RoomStateConditionKind.INCOMING_DOOR ->
             if (negated) "Not entered through door \$${hex(argument, 4)}"
@@ -158,6 +161,7 @@ data class RoomStateCondition(
     }
 
     fun summary(area: Int): String = when (kind) {
+        RoomStateConditionKind.ASM_ONLY -> shortSummary(area)
         RoomStateConditionKind.DEFAULT -> "Default (always used if no earlier condition matches)"
         RoomStateConditionKind.INCOMING_DOOR -> shortSummary(area)
         RoomStateConditionKind.AREA_MAIN_BOSS_DEAD -> shortSummary(area)

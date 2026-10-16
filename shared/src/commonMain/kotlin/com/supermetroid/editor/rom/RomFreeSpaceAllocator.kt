@@ -14,6 +14,8 @@ class RomFreeSpaceAllocator(
     /** Vanilla banks use $FF; expanded formats may define a different erased byte. */
     private val freeFillByteForBank: (Int) -> Int = { 0xFF },
     private val onReserve: (RomAllocation) -> Unit = {},
+    /** Full live source ranges, including bytes which happen to equal erased fill. */
+    private val excludedRanges: List<IntRange> = emptyList(),
 ) {
     private class SessionState {
         val nextFreeByBank = mutableMapOf<Int, Int>()
@@ -29,7 +31,8 @@ class RomFreeSpaceAllocator(
         freeFillByteForBank: (Int) -> Int,
         onReserve: (RomAllocation) -> Unit,
         sessionState: SessionState,
-    ) : this(romData, snesToPc, pcToSnes, guardBytes, freeFillByteForBank, onReserve) {
+        excludedRanges: List<IntRange>,
+    ) : this(romData, snesToPc, pcToSnes, guardBytes, freeFillByteForBank, onReserve, excludedRanges) {
         this.sessionState = sessionState
     }
 
@@ -51,6 +54,7 @@ class RomFreeSpaceAllocator(
                 observer(allocation)
             },
             sessionState = sessionState,
+            excludedRanges = excludedRanges,
         )
 
     fun reserve(
@@ -120,7 +124,7 @@ class RomFreeSpaceAllocator(
         val cursor = alignUp(rawCursor, alignment)
         if (cursor + size > bankEndExclusive) return null
         for (pc in cursor until cursor + size) {
-            if ((romData[pc].toInt() and 0xFF) != freeFillByte) return null
+            if ((romData[pc].toInt() and 0xFF) != freeFillByte || excludedRanges.any { pc in it }) return null
         }
 
         sessionState.nextFreeByBank[bank] = cursor + size
@@ -138,6 +142,7 @@ class RomFreeSpaceAllocator(
         while (
             firstTrailingFree > bankStart &&
             (romData[firstTrailingFree - 1].toInt() and 0xFF) == freeFillByte
+            && excludedRanges.none { firstTrailingFree - 1 in it }
         ) {
             firstTrailingFree--
         }
