@@ -401,6 +401,7 @@ fun main() = application {
             typography = editorThemeState.fontSize.value.materialTypography(),
         ) {
             var emulatorEnabled by remember { mutableStateOf(false) }
+            var makerMode by remember { mutableStateOf(false) }
             val emulatorWorkspaceState = remember { EmulatorWorkspaceState() }
             var hexEditorEnabled by remember { mutableStateOf(false) }
             val hexEditorState = remember { HexEditorState() }
@@ -817,6 +818,14 @@ fun main() = application {
                                 pickProjectOrRom()?.let { file -> scope.launch { openProjectOrRom(file) } }
                             } },
                         ) { Text(if (romLoadInFlight) "Opening…" else "OPEN", fontSize = fs.body, softWrap = false) }
+                        Button(
+                            enabled = romParser != null && romEditable,
+                            shape = RoundedCornerShape(6.dp),
+                            onClick = {
+                                makerMode = !makerMode
+                                if (makerMode) leftTab = TAB_ROOMS
+                            },
+                        ) { Text(if (makerMode) "ADVANCED" else "MAKER", fontSize = fs.body, softWrap = false) }
                         if (romFileName != null) {
                             Text(
                                 "Loaded: $romFileName${if (romReadOnly) " (read-only)" else ""}",
@@ -1233,6 +1242,25 @@ fun main() = application {
                     val emulatorContainerSize = with(windowDensity) {
                         IntSize(maxWidth.roundToPx(), maxHeight.roundToPx())
                     }
+                    if (makerMode && romParser != null && romEditable) {
+                        MakerModeScreen(
+                            editorState = editorState,
+                            romParser = romParser,
+                            rooms = rooms,
+                            selectedRoom = selectedRoom,
+                            emulatorWorkspaceState = emulatorWorkspaceState,
+                            onRoomSelected = ::selectRoomFromNavigation,
+                            onWorkspaceChanged = {
+                                val selectedHandle = selectedRoom?.handle
+                                val workspace = editorState.prepareWorkspaceParser()
+                                romParser = workspace
+                                rooms = workspace.roomCatalog.rooms
+                                selectedRoom = rooms.firstOrNull { it.handle == selectedHandle } ?: selectedRoom
+                            },
+                            onPlay = ::runProjectInEmulator,
+                            onExit = { makerMode = false },
+                        )
+                    } else {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
@@ -1744,6 +1772,7 @@ fun main() = application {
                                 }
                             }
                         }
+                    }
                     }
 
                     // ── Floating emulator overlay ──
