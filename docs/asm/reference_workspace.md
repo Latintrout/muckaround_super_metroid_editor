@@ -1754,8 +1754,8 @@ source ownership boundary.
 
 Header/scalar ownership does **not** include dimensions or door pointers; selector
 ownership is a separate layer described below. Use **Resize** for dimensions. Joint minimap
-room moves and area reassignment are guarded after scalar adoption until they
-can commit map/door/source changes together; changing raw map/area scalars alone
+room drags remain guarded after scalar adoption; cross-area moves now commit
+map/door/source changes together as described below. Changing raw map/area scalars alone
 does not relocate minimap tiles or migrate area-specific records. Added-room
 projects remain guarded pending stable new-room source identities.
 
@@ -1835,9 +1835,10 @@ codec as described below; numeric legacy pointers retain their fixed-address gua
 
 Explicit boundaries: shared DoorDefs require a joint-owner workflow; adding,
 deleting, reordering or relocating connections is not yet supported. Added-room
-projects remain guarded. Resize of a destination with authored incoming doors
-and area reassignment involving authored doors require a future joint
-header/map/DoorDef/arrival-code transaction. Mother Brain exit retargeting that
+projects remain guarded. Resizing a destination with authored incoming doors
+still requires a future joint geometry/DoorDef/arrival-code transaction. Cross-area
+reassignment is supported through the coordinated area-move action below.
+Mother Brain exit retargeting that
 would require automatic arrival-code cleanup is refused rather than replacing
 custom code. Room reset already retires door ownership/source with compound undo.
 
@@ -1935,10 +1936,10 @@ into persisted room deltas.
 Room reset retires unreferenced arrival macros with the door declarations and
 restores both through Undo. External symbolic references retain the code and its
 transitive dependencies. Shared DoorDefs, structural door-list edits, added-room
-identities and joint resize/area remapping remain guarded; managed code placement
+identities and joint geometry remapping remain guarded; managed code placement
 does not make arbitrary routines safe to rewrite for new geometry.
 
-Manual smoke test: adopt Flyway's DoorDefs, then **Create managed arrival ASM…**
+Manual smoke test: choose **Create managed arrival ASM…** directly
 on its Bomb Torizo connection (the native empty arrival). Insert `nop` before
 `rts`, Build, and use **Edit room**. Change **Advanced → Distance** and check its
 DoorDef source still contains the same `_Entry` word. Test Undo from either bank
@@ -1951,15 +1952,82 @@ unbuilt symbol navigation, reciprocal field/history/reset/draft flows, and a rea
 Asar scenario with two arrivals plus a predicate, growth/relocation, moved native
 labels, headless reopen, unchanged-padding patch conflicts and ABI/oversize failures.
 
+## Coordinated ASM area moves
+
+In ASM source mode, **Room Info → Area** and the minimap's **Move to area** action
+can move an existing room even when its header, outgoing/incoming DoorDefs or
+save objects are already source-owned. No preliminary adoption or setup clicks
+are needed. The action stages everything before publishing one shared source,
+room-editor and minimap Undo/Redo transaction:
+
+- The header's area and collision-free destination map position; other header
+  scalars and every state's properties remain unchanged.
+- The room-owned visible map cells and station-reveal mask. Nested/shared source
+  rectangles keep their cells; the source-area view remains selected after Apply.
+- Only the cross-area `$40` flag of affected incoming/outgoing connections.
+  Other flags, geometry, identity, order and literal/symbolic arrival bindings survive.
+- Ordinary AreaSave records and every state's save PLM parameter, retaining the
+  high parameter byte and all seven spawn words, including door BTS and signed
+  positions. Allocation uses genuinely available preallocated slots, not another
+  room's live, reserved or source-claimed slot.
+
+Supported unowned headers and changed DoorDefs adopt automatically. Objects/save
+source adopts only when save migration is needed; independent state lists and
+sharing are retained. Authored literals, handwritten notes, custom arrival code
+and unrelated resources are preserved. The move does not interpret or rewrite
+arbitrary arrival routines, state logic or area-specific engine graphics behavior.
+Room index is preserved rather than guessed or renumbered.
+
+Schema 19 permits explicit all-zero historical save releases in earlier areas.
+Live save records must still match the owning room's current area, and historical
+releases must pass native slot ownership checks. The old and new fourteen-byte
+records retain complete build claims. JSON stores existing ownership/identity
+metadata only, not duplicate decoded values. Cold/headless readers and versioned
+projection caches obtain the current area from authored source, not a missing or
+stale GUI projection. Repeated moves preserve earlier releases without confusing
+equal slot numbers in different areas.
+
+Undo from either participating bank, the current room canvas, or the minimap
+restores the entire action. A newer source, map, room/slot-consumer edit or pending
+canvas/map stroke blocks restoration before any part changes. Source Undo also
+updates the minimap's history/view without navigating away from ASM. Moving another
+room leaves the active canvas state, geometry and session history untouched.
+Opening source, inspecting, or selecting an already-current area remains a no-op.
+
+Known boundaries: added-room projects, shared DoorDefs, engine-owned start/elevator
+load records, save-table expansion, and destinations without a free map rectangle
+remain guarded with an explanation. Within-area drags of authored headers and
+joint resize remain separate follow-ups. **Reset** refuses to restore a relocated
+header while leaving migrated map/neighbor/save state behind: Undo the relocation
+first. A future combined return-to-native/reset action can remove that extra step.
+Raw ASM header edits intentionally do not trigger hidden map/save migrations;
+authors making those changes directly must maintain their dependent data.
+
+Manual check: select **Frog Savestation**, make a small ordinary ASM/GUI edit if
+desired, then choose **Brinstar** from Room Info's Area selector or the minimap
+area action. It should disappear from Norfair's map and appear at a free Brinstar
+position, with its save index updated. Check the header/DoorDef/save source, Build,
+then Undo from `bank_83.asm`; the room, both maps, reveal cells, flags and save
+records should return together. Redo from the minimap should reproduce the build.
+
+`AsmRoomAreaMoveTest` covers first-use/owned data, private states, notes, repeated
+moves, cold source/cache/export, full rollback, source/map/GUI history, slot/map
+exhaustion, stale headers, shared definitions and reset guards. Real-Asar coverage
+moves Frog Savestation with authored incoming doors and a managed arrival, checks
+exact maps/flags/spawn words and stable identities, headless reopen/Undo/cache
+parity, and rejects a patch that attempts to reclaim the released save bytes.
+
 ## Room/source workflow safety contracts
 
 Room source links share the production `RoomAsmNavigation` router. Layout,
-header/state fields, selectors, doors, initial scrolls, FX, enemies/GFX and object-source
-adoption all follow the same rule: inspection is read-only; **Create editable
+header/state fields, selectors, initial scrolls, FX, enemies/GFX and object-source
+adoption follow the same rule: inspection is read-only; **Create editable
 source** is an explicit ownership/edit boundary. A verified native PLM placement
 opens its existing code directly without creating wrapper declarations. Save-spawn
 links preview before authoring a missing declaration or retiring legacy spawn
 metadata. Scroll-command links already refer to existing owned source.
+Door data instead opens in the normal editor with adoption on the first text
+change; area moves also adopt their supported dependencies within the one action.
 
 ASM-first authoring is available directly in **Source** and **Assets** through
 **Preview / make editable…**, in either Original (read-only) or Project views when
@@ -2369,8 +2437,9 @@ Follow-up work can now be incremental:
    Broader recognition and placement/scaffolding assistance can follow incrementally.
    Existing DoorDef fields now have reciprocal declarations with stable identities.
    Managed arrival ASM now shares checked placement with predicates and symbolic DoorDefs.
-   Next are structural connection edits and joint map/area
-   transactions. Asset-owned tileset/palette/separate-background authoring and
+   Cross-area header/map/door/save transactions now work from the existing GUI actions.
+   Next are structural connection edits, same-area source/map drags, and coordinated
+   geometry/reset workflows following relocation. Asset-owned tileset/palette/separate-background authoring and
    stable project-created room source identities follow those room workflows.
    Graphics, map, text, and sound encoders should follow the same
    project-owned `data/`/source boundary before Asar.

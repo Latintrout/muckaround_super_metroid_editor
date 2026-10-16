@@ -125,6 +125,7 @@ fun RoomPropertiesPanel(
     onNavigateToFx: ((String, Int?) -> Unit)? = null,
     onNavigateToEnemies: ((String, Boolean) -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
+    onReassignRoomArea: ((Int, Int) -> Unit)? = null,
     scrollState: ScrollState = rememberScrollState(),
 ) {
     val asmLinkCallback = editorState.projectAsmNavigation(onNavigateToAsm)
@@ -428,7 +429,8 @@ fun RoomPropertiesPanel(
         )
         PropertyRow("Room Index", "0x${(savedHeader?.index ?: room.index).toString(16).uppercase().padStart(2, '0')}")
         AreaDropdown(effectiveArea) { targetArea ->
-            editorState.reassignRoomArea(room.roomId, targetArea, romParser)
+            if (onReassignRoomArea != null) onReassignRoomArea(room.roomId, targetArea)
+            else editorState.reassignRoomArea(room.roomId, targetArea, romParser)
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),

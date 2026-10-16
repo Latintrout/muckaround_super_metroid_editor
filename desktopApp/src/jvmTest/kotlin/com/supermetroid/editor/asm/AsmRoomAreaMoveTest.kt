@@ -1,0 +1,363 @@
+package com.supermetroid.editor.asm
+
+import com.supermetroid.editor.data.*
+import com.supermetroid.editor.rom.*
+import com.supermetroid.editor.ui.*
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import org.junit.jupiter.api.io.TempDir
+import java.io.File
+import kotlin.test.*
+
+class AsmRoomAreaMoveTest {
+    @TempDir lateinit var directory: File
+    private data class Fixture(val editor: EditorState, val workspace: AsmWorkspaceState, val bridge: AsmPlmSourceBridge,
+                               val map: MinimapEditorState, val file: File) {
+        val project get() = editor.project
+        val parser get() = bridge.catalog.parser
+        fun model() = Json.encodeToString(SmEditProject.serializer(), project)
+        fun sources() = listOf(PLM_SOURCE_FILE, DOOR_SOURCE_FILE).associateWith(workspace::projectSourceText)
+        fun entries(id: Int) = editor.effectiveDoorsForRoom(id, parser)
+        fun move(area: Int = 1) = assertNotNull(map.reassignRoomArea(0x91F8, area, editor))
+        fun coldExport(): RomParser {
+            val cold = Json.decodeFromString<SmEditProject>(model())
+            val text = bridge.sourceText()
+            val objects = AsmRoomObjectSource(text, bridge.catalog.symbols)
+            val properties = AsmRoomPropertiesSource(text)
+            val doors = AsmDoorSource(bridge.doors.sourceText(), text, bridge.catalog.symbols)
+            val bytes = parser.copyRomData()
+            ProjectRoomExporter(cold, parser, bytes,
+                sourcePlmSets = cold.rooms.values.filter { it.asmPlmSourceVersion != 0 }.associate { it.roomId to objects.resources(it) },
+                sourceRoomProperties = cold.rooms.values.filter { it.asmRoomPropertiesSourceVersion != 0 }.associate { it.roomId to properties.resource(it) },
+                sourceDoors = cold.rooms.values.filter { it.asmDoorSourceVersion != 0 }.associate { it.roomId to doors.resource(it, parser) }).exportRooms()
+            return RomParser(bytes)
+        }
+    }
+
+    private suspend fun fixture(hasSave: Boolean = true, sharedDoor: Boolean = false): Fixture {
+        val src = File(directory, "reference/src").apply { mkdirs() }
+        val data = File(directory, "reference/data").apply { mkdirs() }
+        val macros = "macro PLMPopEntry(ID,X,Y,Param)\n dw <ID>\n db <X>,<Y>\n dw <Param>\nendmacro\n"
+        File(src, "main.asm").writeText("incsrc macros.asm\nincsrc bank_8F.asm\nincsrc bank_83.asm\n")
+        File(src, "macros.asm").writeText(macros)
+        File(src, PLM_SOURCE_FILE).writeText("; Native room and arrival code\nDoorASM_Custom: ;8F9000;\n lda.w ${'$'}1234\n rts\n")
+        File(src, DOOR_SOURCE_FILE).writeText("; Native connections and FX\n")
+        val reference = AsmReferenceWorkspace(src.parentFile,
+            AsmReferenceMetadata(AsmReferenceContract.REPOSITORY_URL, AsmReferenceContract.COMMIT, "test", "base.sfc", "ab".repeat(32), 0x300000, 0),
+            AsmSourceParser().parse(src, data, emptyList()))
+        val file = File(directory, "Test.smedit").apply { writeText("{}") }
+        val repository = AsmProjectWorkspaceRepository(emptyList(), emptyList())
+        repository.initialize(file.path, reference)
+        val workspace = AsmWorkspaceState(projectRepository = repository)
+        workspace.bindProject(file.path, true)
+        val rom = saveSourceTestRom()
+        fun word(pc: Int, value: Int) { rom[pc] = value.toByte(); rom[pc + 1] = (value ushr 8).toByte() }
+        val conversion = RomParser(rom)
+        for (area in 0..6) {
+            val address = MinimapData.AREA_MAP_ADDRESSES[area]
+            val pc = conversion.snesToPc(MinimapData.AREA_MAP_POINTER_TABLE) + area * 3
+            word(pc, address and 65535); rom[pc + 2] = (address ushr 16).toByte()
+            word(conversion.snesToPc(MinimapData.MAP_DATA_POINTER_TABLE) + area * 2, MinimapData.MAP_STATION_ADDRESSES[area] and 65535)
+        }
+        val level = ByteArray(2 + 32 * 32 * 3).also { it[1] = 8 }
+        LZ5Compressor.compress(level).copyInto(rom, 0x200000)
+        for (pc in listOf(0x791F8 + 18, 0x79300)) {
+            rom[pc + 1] = 0x80.toByte(); rom[pc + 2] = 0xC0.toByte()
+        }
+        rom[0x791FA] = 2; rom[0x791FB] = 3
+        word(0x78060, 0x8000); word(0x78062, 0x8010)
+        fun otherRoom(id: Int, area: Int, list: Int, x: Int, y: Int) {
+            val pc = 0x70000 + id
+            rom[pc + 1] = area.toByte(); rom[pc + 2] = x.toByte(); rom[pc + 3] = y.toByte()
+            rom[pc + 4] = 2; rom[pc + 5] = 2
+            word(pc + 9, list); word(pc + 11, 0xE5E6)
+            rom[pc + 14] = 0x80.toByte(); rom[pc + 15] = 0xC0.toByte(); word(pc + 13 + 20, 0x9000)
+        }
+        otherRoom(0xA000, 0, 0x8100, 10, 10)
+        otherRoom(0xA100, 1, 0x8120, 2, 3) // Force automatic collision-free target placement.
+        word(0x78100, 0x8020); word(0x78102, 0x8030)
+        word(0x78120, if (sharedDoor) 0x8020 else 0x8040); word(0x78122, 0x8050)
+        fun door(ptr: Int, destination: Int, flags: Int) {
+            val pc = 0x10000 + ptr
+            word(pc, destination); word(pc + 2, flags); word(pc + 8, 0x8000); word(pc + 10, 0x9000)
+        }
+        door(0x8000, 0xA000, 0x0081); door(0x8010, 0xA100, 0x00C1)
+        door(0x8020, 0x91F8, 0x0081); door(0x8030, 0xA100, 0x00C1)
+        door(0x8040, 0x91F8, 0x00C1); door(0x8050, 0xA000, 0x00C1)
+        val missile = RomParser.PlmEntry(0xEEDB, 2, 3, 5)
+        val save = RomParser.PlmEntry(0xB76F, 8, 8, 0x8001)
+        RomParser.serializePlmSet(if (hasSave) listOf(missile, save) else listOf(missile)).forEachIndexed { i, value -> rom[0x78000 + i] = value.toByte() }
+        word(0x79300 + 20, 0x8800)
+        RomParser.serializePlmSet(if (hasSave) listOf(save.copy(x = 9), missile.copy(param = 6)) else listOf(missile.copy(param = 6)))
+            .forEachIndexed { i, value -> rom[0x78800 + i] = value.toByte() }
+        word(0x44C5, 0) // Remove the synthetic gunship reference; this is an ordinary save room.
+        (if (hasSave) listOf(0x91F8, 0x8020, 0x77, 0x100, 0x100, 0xFFF0, 0xFFE0) else List(7) { 0 })
+            .forEachIndexed { i, value -> word(0x44C5 + 14 + i * 2, value) }
+        word(0x44C5 + 28 + 4, 0) // saveSourceTestRom has an unrelated demo field here.
+        word(0x45CF + 14, 0xA100) // Source index 1 is unavailable in the target area; use 0 instead.
+        val parser = RomParser(rom)
+        assertEquals(setOf(0x91F8, 0xA000, 0xA100), parser.roomCatalog.rooms.map { it.getRoomIdAsInt() }.toSet())
+        val project = SmEditProject(File(directory, "base.sfc").apply { writeBytes(rom) }.path).apply {
+            asmWorkspace.enabled = true; asmWorkspace.buildMode = ProjectRomBuildMode.ASM_SOURCE
+        }
+        val editor = EditorState().apply { testMode = true; initForProject(file, project) }
+        val bridge = editor.bindRoomSources(AsmPlmSourceCatalog("", macros, mapOf("DoorASM_Custom" to 0x9000), parser, emptyMap()), workspace)
+        editor.loadRoom(0x91F8, parser, requireNotNull(parser.readRoomHeader(0x91F8)))
+        persistMinimapData(parser, project, MinimapData.empty(0).withFill(2, 3, 3, 4, 0x0F))
+        persistMapStationData(parser, project, MapStationData.empty(0).withValue(2, 3, true))
+        val map = MinimapEditorState().apply { loadArea(parser, 0, editor, selectRoomId = 0x91F8) }
+        return Fixture(editor, workspace, bridge, map, file)
+    }
+
+    @Test fun `area move automatically adopts headers doors and state scoped saves as one cross bank action`() = runBlocking {
+        val f = fixture()
+        val beforeModel = f.model(); val beforeSources = f.sources()
+        val oldDoors = listOf(0x91F8, 0xA000, 0xA100).associateWith(f::entries)
+        val state = f.editor.currentStateIndex
+        val result = f.move()
+        assertTrue(result.success, result.message); assertEquals(4, result.updatedDoorCount)
+        val room = f.project.rooms.getValue("91F8")
+        assertEquals(1, f.editor.activeRoomAreaForEditing()); assertEquals(state, f.editor.currentStateIndex)
+        assertEquals(1, room.asmRoomPropertiesSourceVersion); assertEquals(1, room.asmDoorSourceVersion); assertEquals(1, room.asmPlmSourceVersion)
+        assertNull(room.roomHeaderChange); assertTrue(room.doorChanges.isEmpty()); assertTrue(room.plmChanges.isEmpty()); assertTrue(room.saveStationSpawns.isEmpty())
+        assertTrue(room.states.all { it.plmChanges.isEmpty() && it.stateDataChange == null })
+        val saves = f.bridge.saveResources(0x91F8)
+        assertTrue(saves.single { it.area == 0 }.cleared)
+        val live = saves.single { it.area == 1 }
+        assertEquals(0, live.slot); assertEquals(listOf(0x91F8, 0x8020, 0x77, 0x100, 0x100, 0xFFF0, 0xFFE0), live.words)
+        for (s in room.states) {
+            val view = f.bridge.managedView(0x91F8, s.id)
+            assertNull(view.problem, view.problem); assertEquals(0x8000, view.document!!.entries.single { it.id == 0xB76F }.param)
+        }
+        for ((id, entries) in oldDoors) {
+            val changed = f.entries(id)
+            entries.zip(changed).forEach { (before, after) ->
+                assertEquals(before.copy(bitflag = after.bitflag), after, "Every non-area field and DoorDef identity stays exact")
+                val crosses = (if (id == 0x91F8) 1 else f.parser.readRoomHeader(id)!!.area) !=
+                    (if (after.destRoomPtr == 0x91F8) 1 else f.parser.readRoomHeader(after.destRoomPtr)!!.area)
+                assertEquals(crosses, after.bitflag and 0x40 != 0)
+            }
+        }
+        assertNotEquals(2 to 3, result.destinationMapX to result.destinationMapY)
+        assertEquals(0x0F, effectiveMinimapData(f.parser, f.project, 1).getTile(result.destinationMapX!!, result.destinationMapY!!))
+        assertTrue(effectiveMapStationData(f.parser, f.project, 1).isRevealed(result.destinationMapX!!, result.destinationMapY!!))
+        assertEquals(1, f.map.undoStack.size); assertEquals(1, f.editor.undoStack.size)
+        val afterModel = f.model(); val afterSources = f.sources()
+        assertTrue(f.workspace.undoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
+        assertEquals(beforeModel, f.model()); assertEquals(beforeSources, f.sources())
+        assertEquals(0, f.editor.activeRoomAreaForEditing()); assertEquals(1, f.map.redoStack.size); assertTrue(f.map.undoStack.isEmpty())
+        f.map.redo(f.editor)
+        assertEquals(afterModel, f.model()); assertEquals(afterSources, f.sources())
+        assertTrue(f.editor.undo(), f.editor.statusMessage)
+        assertEquals(beforeModel, f.model()); assertEquals(beforeSources, f.sources())
+        f.map.redo(f.editor)
+        assertEquals(afterModel, f.model()); assertEquals(afterSources, f.sources())
+        val exported = f.coldExport()
+        assertEquals(1, exported.readRoomHeader(0x91F8)?.area)
+        assertEquals(List(7) { 0 }, exported.readSaveEntry(0, 1)!!.words())
+        assertEquals(live.words, exported.readSaveEntry(1, 0)!!.words())
+        assertEquals(f.editor.workingPlms, exported.parsePlmSet(exported.parseRoomStatesWithData(0x91F8)[state].plmSetPtr))
+    }
+
+    @Test fun `owned values private states notes and repeated area migrations survive cold source and projection reload`() = runBlocking {
+        val f = fixture()
+        val room = f.project.getOrCreateRoom(0x91F8).also { it.ensureStateManifest(f.parser) }
+        room.roomHeaderChange = RoomHeaderChange(index = 42, upScroller = 7)
+        room.states.first().stateDataChange = StateDataChange(musicTrack = 13)
+        f.editor.loadRoom(0x91F8, f.parser, f.parser.readRoomHeader(0x91F8)!!)
+        assertTrue(f.editor.ensureRoomPropertiesSource("Moved room"), f.editor.statusMessage)
+        assertTrue(f.editor.ensureCurrentPlmSource("Moved room"), f.editor.statusMessage)
+        assertTrue(f.editor.ensureDoorSource("Moved room"), f.editor.statusMessage)
+        val before = f.bridge.doors.sourceText()
+        val noted = before.replace("; Flags, direction", "; my connection note · Flags, direction").replace("\n", "\r\n")
+        f.workspace.replaceProjectSource(DOOR_SOURCE_FILE, before, noted)
+        f.editor.switchRoomState(room.states.first().id, f.parser)
+        val selected = f.editor.currentPlmStateId(); val stateIdentity = room.states.toList()
+        val originalNativeCode = f.bridge.sourceText().substringBefore("; SMEDIT")
+        val baseline = f.model(); val baselineSources = f.sources()
+        assertTrue(f.move().success, f.editor.statusMessage)
+        assertSame(room, f.project.rooms.getValue("91F8")); assertTrue(room.states.zip(stateIdentity).all { it.first === it.second })
+        assertEquals(selected, f.editor.currentPlmStateId())
+        assertEquals(42, room.effectiveHeaderChange?.index); assertEquals(7, room.effectiveHeaderChange?.upScroller)
+        assertEquals(13, room.states.first().effectiveStateDataChange?.musicTrack)
+        assertContains(f.bridge.doors.sourceText(), "; my connection note")
+        assertTrue(f.bridge.sourceText().startsWith(originalNativeCode), "Handwritten executable code is never rewritten")
+        assertTrue(f.move(0).success, f.editor.statusMessage)
+        assertTrue(f.move(1).success, f.editor.statusMessage)
+        assertEquals(selected, f.editor.currentPlmStateId())
+        val saves = f.bridge.saveResources(0x91F8)
+        assertEquals(1, saves.count { !it.cleared }); assertTrue(saves.filter { it.area == 0 }.all { it.cleared })
+        assertTrue(f.workspace.saveAllSources(), f.workspace.error); assertTrue(f.editor.saveProject())
+        val cold = Json.decodeFromString<SmEditProject>(f.model())
+        val coldRoom = cold.rooms.getValue("91F8")
+        assertNull(coldRoom.asmHeaderPropertiesProjection)
+        val fresh = AsmPlmSourceBridge(f.bridge.catalog, f.workspace, false) { cold }
+        coldRoom.states.forEach { assertNull(fresh.managedView(0x91F8, it.id).problem) }
+        val cache = AsmRoomProjectionRepository(File(directory, "cold-projections"))
+        repeat(2) {
+            val loaded = cache.load(f.bridge.sourceText(), f.workspace.projectSourceText("macros.asm"), listOf(coldRoom), f.bridge.catalog)
+            assertEquals(coldRoom.states.map { it.id }.toSet(), loaded.getValue(0x91F8).documents.keys)
+        }
+        // ASM-first edits after reopen must not require a GUI header projection to select the live area.
+        assertNull(coldRoom.asmHeaderPropertiesProjection)
+        val spawnSource = fresh.sourceText()
+        val spawn = fresh.saveResources(0x91F8).single { !it.cleared }
+        val adjusted = spawn.copy(words = spawn.words.toMutableList().apply { this[3] += 16 })
+        fresh.updateSaveSpawn(adjusted)
+        assertEquals(adjusted, fresh.saveSpawn(0x91F8, adjusted.area, adjusted.slot))
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertEquals(spawnSource, fresh.sourceText())
+        assertEquals(1, f.coldExport().readRoomHeader(0x91F8)?.area)
+        // Save independently enriches patch preconditions. Room history must leave those updates intact.
+        val expectedBaseline = Json.encodeToString(SmEditProject.serializer(), Json.decodeFromString<SmEditProject>(baseline)
+            .copy(patches = f.project.patches.toMutableList()))
+        repeat(3) { f.map.undo(f.editor) }
+        assertEquals(expectedBaseline, f.model()); assertEquals(baselineSources, f.sources())
+        assertEquals(selected, f.editor.currentPlmStateId())
+    }
+
+    @Test fun `newer source map edits and floating previews block every part of area undo until resolved`() = runBlocking {
+        val f = fixture()
+        val original = f.model(); val originalPlms = f.editor.workingPlms.toList()
+        assertTrue(f.move().success, f.editor.statusMessage)
+        val moved = f.model(); val sources = f.sources()
+        val latest83 = f.bridge.doors.sourceText() + "; new source edit\n"
+        f.workspace.replaceProjectSource(DOOR_SOURCE_FILE, sources.getValue(DOOR_SOURCE_FILE), latest83)
+        f.map.undo(f.editor)
+        assertEquals(moved, f.model()); assertEquals(1, f.map.undoStack.size)
+        assertEquals(latest83, f.bridge.doors.sourceText())
+        assertContains(f.editor.statusMessage, "newer")
+        assertTrue(f.workspace.undoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
+        f.map.selectedTile = 0x2F; f.map.paintTile(50, 20, f.editor)
+        val painted = f.model()
+        assertFalse(f.workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        assertContains(f.workspace.error.orEmpty(), "map edits")
+        assertEquals(painted, f.model()); assertEquals(sources, f.sources())
+        f.map.undo(f.editor) // Undo the ordinary map stroke, not the compound area move.
+        assertEquals(moved, f.model())
+        f.map.pendingStroke = f.map.mapData.withTile(50, 20, 0x10)
+        assertFalse(f.workspace.undoSourceEdit(PLM_SOURCE_FILE)); assertContains(f.workspace.error.orEmpty(), "map stroke")
+        assertEquals(moved, f.model()); assertEquals(sources, f.sources())
+        f.map.pendingStroke = null
+        f.map.undo(f.editor)
+        assertEquals(original, f.model()); assertEquals(originalPlms, f.editor.workingPlms)
+        f.map.redo(f.editor)
+        assertEquals(moved, f.model())
+    }
+
+    @Test fun `failed moves never attach staged headers doors objects maps or history`() = runBlocking {
+        val failures: List<Pair<String, (Fixture) -> Unit>> = listOf(
+            "map space" to { f -> persistMinimapData(f.parser, f.project, MinimapData.empty(1).withFill(0, 0, 63, 30, 0x0F)) },
+            "save space" to { f ->
+                val other = f.project.getOrCreateRoom(0xA100)
+                for (slot in 0..7) other.saveStationSpawns += SaveStationSpawnChange(1, slot, 0xA100, 0x8050, 0, 0, 0, 0)
+            },
+            "retained incoming source" to { f -> val before = f.bridge.doors.sourceText(); f.workspace.replaceProjectSource(DOOR_SOURCE_FILE, before,
+                before + "  MACRO SmeditDoors_A000_Door_0()\nendmacro\n") },
+            "orphan GUI door override" to { f -> f.project.getOrCreateRoom(0xA000).doorChanges +=
+                DoorChange(99, 0x91F8, 0x81, 0, 0, 0, 0x8000, 0x9000) },
+            "invalid owned header" to { f -> assertTrue(f.editor.ensureRoomPropertiesSource("Room")); val before = f.bridge.sourceText()
+                f.workspace.replaceProjectSource(PLM_SOURCE_FILE, before, before.replace("db ${'$'}00 ; Area", "db ${'$'}FF ; Area")) },
+            "invalid save PLM source" to { f -> assertTrue(f.editor.ensureCurrentPlmSource("Room")); val before = f.bridge.sourceText()
+                f.workspace.replaceProjectSource(PLM_SOURCE_FILE, before, before.replace("${'$'}B76F, ${'$'}08, ${'$'}08, ${'$'}8001", "${'$'}B76F, ${'$'}08, ${'$'}08, ${'$'}8009")) })
+        for ((name, change) in failures) {
+            val f = fixture(); change(f)
+            val model = f.model(); val source = f.sources(); val revision = f.workspace.sourceBufferRevision
+            val history = f.editor.undoStack.toList(); val mapHistory = f.map.undoStack.toList()
+            val result = f.move()
+            assertFalse(result.success, "$name: ${result.message}")
+            assertEquals(model, f.model(), name); assertEquals(source, f.sources(), name); assertEquals(revision, f.workspace.sourceBufferRevision, name)
+            assertEquals(history, f.editor.undoStack, name); assertEquals(mapHistory, f.map.undoStack, name)
+        }
+    }
+
+    @Test fun `reset after relocation explains the joint dependency and undo restores reset availability`() = runBlocking {
+        val f = fixture(); assertTrue(f.move().success, f.editor.statusMessage)
+        val moved = f.model(); val source = f.sources()
+        assertFalse(f.editor.resetCurrentRoomToOriginal(f.parser))
+        assertContains(f.editor.statusMessage, "area/map move")
+        assertEquals(moved, f.model()); assertEquals(source, f.sources())
+        f.map.undo(f.editor)
+        assertFalse(f.editor.hasManagedRoomProperties())
+        assertEquals(0, f.editor.activeRoomAreaForEditing())
+    }
+
+    @Test fun `shared native DoorDefs fail the entire area move without acquiring any owners`() = runBlocking {
+        val f = fixture(sharedDoor = true)
+        val model = f.model(); val source = f.sources(); val revision = f.workspace.sourceBufferRevision
+        val result = f.move()
+        assertFalse(result.success); assertContains(result.message, "shared")
+        assertEquals(model, f.model()); assertEquals(source, f.sources()); assertEquals(revision, f.workspace.sourceBufferRevision)
+        assertTrue(f.editor.undoStack.isEmpty()); assertTrue(f.map.undoStack.isEmpty())
+    }
+
+    @Test fun `the current authored area and incoming targets are read before deciding whether to move`() = runBlocking {
+        val f = fixture(hasSave = false)
+        assertTrue(f.editor.ensureRoomPropertiesSource("Room"))
+        val room = f.project.rooms.getValue("91F8")
+        val before = f.bridge.sourceText()
+        val properties = AsmRoomPropertiesSource(before)
+        val changed = properties.editHeader(room, properties.resource(room).header.copy(area = 1))
+        f.workspace.replaceProjectSource(PLM_SOURCE_FILE, before, changed) // Do not refresh the GUI's last projection first.
+        val model = f.model(); val source = f.sources(); val revision = f.workspace.sourceBufferRevision
+        val noOp = f.move(1)
+        assertTrue(noOp.success, noOp.message); assertEquals(1, noOp.sourceArea); assertEquals(1, noOp.targetArea)
+        assertEquals(model, f.model()); assertEquals(source, f.sources()); assertEquals(revision, f.workspace.sourceBufferRevision)
+        assertTrue(f.map.undoStack.isEmpty())
+        val moved = f.move(2)
+        assertTrue(moved.success, moved.message); assertEquals(1, moved.sourceArea)
+        assertEquals(0, room.asmPlmSourceVersion, "A room without save migration does not acquire unrelated PLM ownership")
+        assertEquals(2, f.coldExport().readRoomHeader(0x91F8)?.area)
+    }
+
+    @Test fun `a map driven area move does not change another canvas state geometry or undo history`() = runBlocking {
+        val f = fixture()
+        f.editor.loadRoom(0xA000, f.parser, f.parser.readRoomHeader(0xA000)!!)
+        f.editor.applyBulkEdits("Unrelated canvas edit", listOf(TileEdit(5, 5, 0, 0x8123)))
+        val working = f.editor.workingLevelData!!.copyOf()
+        val history = f.editor.undoStack.toList(); val selected = f.editor.currentPlmStateId()
+        val model = f.model(); val sources = f.sources()
+        val result = f.move()
+        assertTrue(result.success, result.message)
+        assertEquals(0xA000, f.editor.currentRoomId); assertEquals(selected, f.editor.currentPlmStateId())
+        assertContentEquals(working, f.editor.workingLevelData); assertEquals(history, f.editor.undoStack)
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertEquals(model, f.model()); assertEquals(sources, f.sources())
+        assertContentEquals(working, f.editor.workingLevelData); assertEquals(history, f.editor.undoStack)
+        assertTrue(f.editor.undo(), f.editor.statusMessage); assertEquals(0, f.editor.readBlockWord(5, 5))
+    }
+
+    @Test fun `Room Info can initialize map history without opening the map and restore the shared move`() = runBlocking {
+        val f = fixture()
+        val unopenedMap = MinimapEditorState()
+        val model = f.model(); val sources = f.sources()
+        // The production Room Info callback uses the same lazy initialization and command as Map.
+        unopenedMap.initIfNeeded(f.parser, f.editor)
+        val moved = assertNotNull(unopenedMap.reassignRoomArea(0x91F8, 1, f.editor))
+        assertTrue(moved.success, moved.message); assertEquals(1, unopenedMap.undoStack.size)
+        assertEquals(0x91F8, f.editor.currentRoomId)
+        assertTrue(f.editor.undo(), f.editor.statusMessage)
+        assertEquals(model, f.model()); assertEquals(sources, f.sources())
+        assertTrue(unopenedMap.undoStack.isEmpty()); assertEquals(1, unopenedMap.redoStack.size)
+        unopenedMap.redo(f.editor)
+        assertEquals(1, f.editor.activeRoomAreaForEditing()); assertEquals(1, unopenedMap.undoStack.size)
+    }
+
+    @Test fun `only zero releases may remain outside the current save area and foreign slots cannot be cleared`() = runBlocking {
+        val f = fixture(); assertTrue(f.move().success, f.editor.statusMessage)
+        val current = f.bridge.sourceText()
+        val old = f.bridge.saveResources(0x91F8).single { it.area == 0 }
+        val revived = AsmRoomObjectSource(current).withSave(old.copy(words = f.parser.readSaveEntry(0, 1)!!.words()))
+        f.workspace.replaceProjectSource(PLM_SOURCE_FILE, current, revived)
+        assertNotNull(f.bridge.managedView(0x91F8, f.editor.currentPlmStateId()!!).problem)
+        assertFails { f.coldExport() }
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        val foreign = SourceSaveResource(AsmSaveStationSource.name(0x91F8, 1, 1), 0x91F8, 1, 1, List(7) { 0 })
+        val stolen = AsmRoomObjectSource(current).withSave(foreign)
+        f.workspace.replaceProjectSource(PLM_SOURCE_FILE, current, stolen)
+        assertNotNull(f.bridge.managedView(0x91F8, f.editor.currentPlmStateId()!!).problem)
+        assertFails { f.coldExport() }
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertNull(f.bridge.managedView(0x91F8, f.editor.currentPlmStateId()!!).problem)
+    }
+}

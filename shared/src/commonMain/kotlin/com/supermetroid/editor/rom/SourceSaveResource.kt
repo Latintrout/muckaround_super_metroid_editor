@@ -51,7 +51,7 @@ fun validateSourceSaveOwnership(resource: SourceSaveResource, parser: RomParser)
 fun validateSourceSaveLinks(roomId: Int, area: Int, entries: List<RomParser.PlmEntry>, saves: List<SourceSaveResource>,
                             legacy: List<SaveStationSpawnChange>, parser: RomParser) {
     saves.forEach {
-        require(it.area == area && it.ownerRoomId == roomId) { "Save source area/room ownership changed." }
+        require((it.cleared || it.area == area) && it.ownerRoomId == roomId) { "Save source area/room ownership changed." }
         require(legacy.none { old -> old.area == it.area && old.saveIndex == it.slot }) { "Save record has both GUI and source owners." }
         validateSourceSaveOwnership(it, parser)
     }

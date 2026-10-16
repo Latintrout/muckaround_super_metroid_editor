@@ -239,6 +239,8 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             "Custom scroll commands cannot be mixed with authored object lists yet."
         }
         val saves = saveResources(room.roomId)
+        val activeArea = if (room.asmRoomPropertiesSourceVersion != 0 && saves.isNotEmpty()) AsmRoomPropertiesSource(text).area(room.roomId)
+            else room.effectiveHeaderChange?.area
         require(saves.none { save -> room.saveStationSpawns.any { it.area == save.area && it.saveIndex == save.slot } }) {
             "Save records have both GUI overrides and authored source."
         }
@@ -249,7 +251,8 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             }.toMap()
             for (entry in table.document.entries.filter { it.id == 0xB76F }) {
                 require((entry.param and 255) in 0..7) { "Save PLM indices must be 0–7; the engine masks with \$0007." }
-                require(saves.none { it.slot == (entry.param and 255) && it.cleared }) { "Save PLM references a released spawn record." }
+                require(saves.none { it.slot == (entry.param and 255) && it.cleared &&
+                    (activeArea == null || it.area == activeArea) }) { "Save PLM references a released spawn record." }
             }
             state.id to SourcePlmResource(table.resource.name, table.document.entries, references, saves)
         }
@@ -307,11 +310,31 @@ internal class AsmRoomObjectSource(val text: String, private val symbols: Map<St
             .flatMap { table(room.roomId, it).document.entries }.filter(remove).filter { it.id == 0xB76F }
             .map { it.param and 255 }.filter { it !in activeSlots }
         for (slot in removedSlots) {
-            val save = source.saveResources(room.roomId).singleOrNull { it.slot == slot }
+            val area = if (room.asmRoomPropertiesSourceVersion != 0) AsmRoomPropertiesSource(result).area(room.roomId) else room.effectiveHeaderChange?.area
+            val save = source.saveResources(room.roomId).singleOrNull { it.slot == slot && (area == null || it.area == area) }
             if (save != null) result = AsmRoomObjectSource(result, symbols).withSave(save.copy(words = List(7) { 0 }))
         }
         AsmRoomObjectSource(result, symbols).resources(room)
         return result
+    }
+
+    /** Change save indices in place across every state, preserving list sharing, row order and notes. */
+    fun remapSaveParameters(room: RoomEdits, replacements: Map<RomParser.PlmEntry, Int>, externalReferences: Set<String>): String {
+        val source = AsmRoomObjectSource(tidy(room, externalReferences), symbols)
+        val edits = linkedMapOf<IntRange, String>()
+        for (table in room.states.map { source.table(room.roomId, it.id) }.distinctBy { it.resource.name }) {
+            for (record in table.document.records.filter { it.entry.id == 0xB76F }) {
+                val param = replacements[record.entry] ?: continue
+                if (param == record.entry.param) continue
+                require(param in 0..65535 && (param and 255) in 0..7) { "Invalid destination save index." }
+                val field = record.fields[3]
+                require(AsmPlmDocument.literal(source.text.substring(field)) != null) {
+                    "A save PLM parameter is symbolic; update that binding in ASM before moving its room."
+                }
+                edits[field] = "\$${param.toString(16).uppercase().padStart(4, '0')}"
+            }
+        }
+        return source.replaceRanges(edits.toList())
     }
 
     fun scrollResource(roomId: Int, name: String, screenCount: Int = 128): SourceScrollResource {

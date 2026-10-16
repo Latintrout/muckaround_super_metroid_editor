@@ -43,6 +43,7 @@ internal class AsmPlmSourceBridge(
     val layouts = AsmRoomLayoutBridge(catalog, workspace, project) { onMetadataChanged() }
     val properties = AsmRoomPropertiesBridge(catalog, workspace, project) { onMetadataChanged() }
     val doors = AsmDoorSourceBridge(catalog, workspace, project) { onMetadataChanged() }
+    val areaMoves = AsmRoomAreaMove(catalog, workspace, project, properties, ::requireObjectAdoptionAvailable) { onMetadataChanged() }
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
     private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
@@ -183,11 +184,15 @@ internal class AsmPlmSourceBridge(
 
     fun saveResources(roomId: Int): List<SourceSaveResource> = managedSource().saveResources(roomId)
 
+    private fun saveArea(room: com.supermetroid.editor.data.RoomEdits): Int =
+        if (room.asmRoomPropertiesSourceVersion != 0) AsmRoomPropertiesSource(sourceText()).area(room.roomId)
+        else room.effectiveHeaderChange?.area ?: requireNotNull(catalog.parser.readRoomHeader(room.roomId)).area
+
     fun saveSpawn(roomId: Int, area: Int, slot: Int): SourceSaveResource? {
         val save = saveResources(roomId).singleOrNull { it.area == area && it.slot == slot } ?: return null
         validateSourceSaveOwnership(save, catalog.parser)
-        require(save.area == (project().rooms[project().roomKey(roomId)]?.effectiveHeaderChange?.area ?: catalog.parser.readRoomHeader(roomId)?.area)) {
-            "Save source area changed; cross-area migration is not source-aware yet."
+        require(save.cleared || save.area == saveArea(project().rooms.getValue(project().roomKey(roomId)))) {
+            "Live save source area changed; use the compound area move."
         }
         return save
     }
@@ -209,7 +214,7 @@ internal class AsmPlmSourceBridge(
         val candidate = room.copy(saveStationSpawns = room.saveStationSpawns.filterNot { it in retired }.toMutableList())
         val checked = AsmRoomObjectSource(result, catalog.symbols)
         val checkedResources = checked.resources(candidate)
-        validateSourceSaveLinks(roomId, candidate.effectiveHeaderChange?.area ?: catalog.parser.readRoomHeader(roomId)!!.area,
+        validateSourceSaveLinks(roomId, saveArea(candidate),
             checkedResources.values.flatMap { it.entries }, checked.saveResources(roomId), candidate.saveStationSpawns, catalog.parser)
         checked.saveResources(roomId).forEach { validateSourceSaveOwnership(it, catalog.parser) }
         project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.flatMap { checked.saveResources(it.roomId) }
@@ -305,10 +310,10 @@ internal class AsmPlmSourceBridge(
         val source = managedSource()
         val (width, height) = dimensions(roomId)
         val inputs = source.resources(room, width * height)
-        validateSourceSaveLinks(roomId, room.effectiveHeaderChange?.area ?: catalog.parser.readRoomHeader(roomId)!!.area,
+        validateSourceSaveLinks(roomId, saveArea(room),
             inputs.values.flatMap { it.entries }, source.saveResources(roomId), room.saveStationSpawns, catalog.parser)
         source.saveResources(roomId).forEach { save ->
-            require(save.area == (room.effectiveHeaderChange?.area ?: catalog.parser.readRoomHeader(roomId)?.area)) { "Save source area ownership changed." }
+            require(save.cleared || save.area == saveArea(room)) { "Save source area ownership changed." }
             validateSourceSaveOwnership(save, catalog.parser)
         }
         val documents = room.states.associate { it.id to source.table(roomId, it.id).document }
@@ -382,7 +387,7 @@ internal class AsmPlmSourceBridge(
         }
         val resources = source.resources(room, width * height)
         val saves = source.saveResources(roomId)
-        validateSourceSaveLinks(roomId, room.effectiveHeaderChange?.area ?: catalog.parser.readRoomHeader(roomId)!!.area,
+        validateSourceSaveLinks(roomId, saveArea(room),
             resources.values.flatMap { it.entries }, saves, room.saveStationSpawns, catalog.parser)
         saves.forEach { validateSourceSaveOwnership(it, catalog.parser) }
         project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.flatMap { source.saveResources(it.roomId) }
@@ -463,7 +468,7 @@ internal class AsmPlmSourceBridge(
         val resources = finalObjects.resources(staged, width * height)
         val saves = finalObjects.saveResources(roomId)
         saves.forEach { validateSourceSaveOwnership(it, catalog.parser) }
-        validateSourceSaveLinks(roomId, room.effectiveHeaderChange?.area ?: header.area,
+        validateSourceSaveLinks(roomId, saveArea(room),
             resources.values.flatMap { it.entries }, saves, staged.saveStationSpawns, catalog.parser)
         text = finalObjects.withComments(roomId, describePlm)
         if (room.asmLayoutSourceVersion != 0 && layoutEdits.isNotEmpty()) {
@@ -517,6 +522,14 @@ internal class AsmPlmSourceBridge(
         require(owner.asmWorkspace.enabled && owner.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE) { "Room source requires ASM mode." }
         require(owner.newRooms.isEmpty()) { "Source-aware reset for projects with added rooms needs stable source identities first." }
         val room = owner.rooms.getValue(owner.roomKey(roomId))
+        val native = requireNotNull(catalog.parser.readRoomHeader(roomId))
+        val header = if (room.asmRoomPropertiesSourceVersion != 0) AsmRoomPropertiesSource(sourceText()).resource(room).header else room.effectiveHeaderChange
+        val effectiveArea = header?.area ?: native.area
+        require(effectiveArea == native.area &&
+            ((header?.mapX ?: native.mapX) == native.mapX && (header?.mapY ?: native.mapY) == native.mapY ||
+                owner.minimapEdits[effectiveArea.toString()].isNullOrEmpty() && owner.mapStationEdits[effectiveArea.toString()].isNullOrEmpty())) {
+            "Undo the room's area/map move before resetting it. Reset cannot restore its old header while leaving migrated map, incoming doors or save slots behind."
+        }
         val sources = linkedMapOf(PLM_SOURCE_FILE to sourceText())
         if (room.asmDoorSourceVersion != 0 || room.asmFxSourceVersion != 0) sources[FX_SOURCE_FILE] = workspace.projectSourceText(FX_SOURCE_FILE)
         if (room.asmEnemySourceVersion != 0) sources[ENEMY_SOURCE_FILE] = workspace.projectSourceText(ENEMY_SOURCE_FILE)
@@ -677,7 +690,7 @@ internal class AsmPlmSourceBridge(
         val inputs = objects.resources(staged, width * height)
         val saves = objects.saveResources(roomId)
         saves.forEach { validateSourceSaveOwnership(it, catalog.parser) }
-        validateSourceSaveLinks(roomId, room.effectiveHeaderChange?.area ?: native.area,
+        validateSourceSaveLinks(roomId, saveArea(room),
             inputs.values.flatMap { it.entries }, saves, staged.saveStationSpawns, catalog.parser)
         text = objects.withScrollComments(staged, width, height)
         val resizedGrids = AsmInitialScrollSource(text, catalog.symbols).resources(staged, width, height)

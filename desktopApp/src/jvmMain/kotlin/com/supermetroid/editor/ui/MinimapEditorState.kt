@@ -443,6 +443,11 @@ class MinimapEditorState {
     fun undo(editorState: EditorState) {
         if (moveBuffer != null) { cancelMove(editorState); return }
         if (undoStack.isEmpty()) return
+        undoStack.last().sourceHistory?.let {
+            runCatching { check(it.undo()) { "Cannot undo this area move; undo newer source/model edits first." } }
+                .onFailure { problem -> editorState.postStatus(problem.message ?: "Area move undo is unavailable.") }
+            return
+        }
         val parser = loadedParser ?: return
         if (!canRestoreHeaders(undoStack.last(), editorState)) return
         redoStack.add(captureSnapshot(editorState))
@@ -451,6 +456,11 @@ class MinimapEditorState {
 
     fun redo(editorState: EditorState) {
         if (redoStack.isEmpty()) return
+        redoStack.last().sourceHistory?.let {
+            runCatching { check(it.redo()) { "Cannot redo this area move; restore its source/model history first." } }
+                .onFailure { problem -> editorState.postStatus(problem.message ?: "Area move redo is unavailable.") }
+            return
+        }
         val parser = loadedParser ?: return
         if (!canRestoreHeaders(redoStack.last(), editorState)) return
         undoStack.add(captureSnapshot(editorState))
@@ -590,7 +600,9 @@ class MinimapEditorState {
         areaReassignmentError = result.message.takeUnless { result.success }
         observedEditorEditVersion = editorState.editVersion
         if (result.success && result.sourceArea != result.targetArea) {
-            undoStack.add(before)
+            val history = result.sourceHistory
+            val marker = before.copy(sourceHistory = history)
+            undoStack.add(marker)
             if (undoStack.size > 100) undoStack.removeAt(0)
             redoStack.clear()
             // Stay on the source area so the reassignment has immediate,
@@ -598,6 +610,25 @@ class MinimapEditorState {
             // room list and map. The user can select the destination area to
             // continue editing it there.
             loadArea(parser, result.sourceArea, editorState, resetHistory = false)
+            if (history != null) {
+                val owner = editorState.project
+                val after = captureSnapshot(editorState)
+                history.beforeTransition = {
+                    if (editorState.project === owner && loadedParser === parser) require(pendingStroke == null && moveBuffer == null) {
+                        "Finish the map stroke or Apply/Cancel the floating room before restoring this area move."
+                    }
+                }
+                history.onTransition = { undo ->
+                    if (editorState.project === owner && loadedParser === parser &&
+                        (undoStack.any { it === marker } || redoStack.any { it === marker })) {
+                        undoStack.removeAll { it === marker }; redoStack.removeAll { it === marker }
+                        if (undo) redoStack.add(marker) else undoStack.add(marker)
+                        val view = if (undo) before else after
+                        observedEditorEditVersion = editorState.editVersion
+                        loadArea(parser, view.selectedArea, editorState, resetHistory = false, selectRoomId = view.selectedRoomId)
+                    }
+                }
+            }
         }
         return result
     }
@@ -633,6 +664,11 @@ class MinimapEditorState {
     )
 
     private fun canRestoreHeaders(snapshot: MinimapProjectSnapshot, editorState: EditorState): Boolean {
+        if (editorState.project.rooms.any { (key, room) -> room.asmPlmSourceVersion != 0 &&
+                (snapshot.plmChanges[key].orEmpty() != room.plmChanges || snapshot.saveStationSpawns[key].orEmpty() != room.saveStationSpawns) }) {
+            editorState.postStatus("Undo newer object/save-source changes before restoring this map edit.")
+            return false
+        }
         if (editorState.project.rooms.any { (key, room) ->
                 room.asmDoorSourceVersion != 0 && snapshot.doorChanges[key].orEmpty().isNotEmpty()
             }) {
@@ -695,6 +731,7 @@ internal data class MinimapProjectSnapshot(
     val doorChanges: Map<String, List<DoorChange>>,
     val plmChanges: Map<String, List<PlmChange>>,
     val saveStationSpawns: Map<String, List<SaveStationSpawnChange>>,
+    val sourceHistory: com.supermetroid.editor.asm.AsmRoomAreaMoveHistory? = null,
 )
 
 /** Floating move buffer: holds lifted tiles while the user repositions a room on the minimap. */

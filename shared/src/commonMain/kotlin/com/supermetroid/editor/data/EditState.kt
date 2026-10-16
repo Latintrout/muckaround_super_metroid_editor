@@ -963,7 +963,7 @@ data class SmEditProject(
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
-        const val CURRENT_PROJECT_FORMAT_VERSION = 18
+        const val CURRENT_PROJECT_FORMAT_VERSION = 19
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

@@ -258,7 +258,8 @@ cross-bank action when necessary. Full record/list/header-pointer claims include
 unchanged bytes. Invalid drafts lock only door editing/building, not unrelated
 room resources. Native exceptional geometry is preserved, while new geometry is
 validated. Shared DoorDefs, structural list edits, added-room source identities
-and joint incoming-door resize/area changes remain guarded. See
+and joint incoming-door resize changes remain guarded. Cross-area moves now use
+the coordinated source/map/save transaction described below. See
 [door connection authoring](../asm/reference_workspace.md#reciprocal-door-connections).
 
 Schema 18 adds checked symbolic arrival references: marked bank-$8F routine bodies
@@ -270,6 +271,23 @@ history group. Only the arrival address is managed in ASM; ordinary connection
 fields remain reciprocal. Initial-scroll diagnostics explicitly omit authored
 arrival execution, and room-only JSON export refuses to discard its source/code
 dependencies. See [managed arrival ASM](../asm/reference_workspace.md#managed-arrival-asm-and-symbolic-connections).
+
+Schema 19 supports coordinated existing-room area moves in ASM source mode.
+Room Info and minimap area actions automatically adopt supported headers and
+affected DoorDefs, then publish header/map placement, visible/reveal map cells,
+incoming/outgoing cross-area flags and ordinary save migration as one shared
+source/canvas/minimap Undo/Redo action. Save PLMs in every state retain their
+independent lists and high parameter bytes; spawn records retain all seven words.
+All-zero historical save releases may remain in earlier areas, but live records
+must match the authored current area and every slot still passes native ownership
+checks. Cold exports and projection caches derive that area from source, never
+from transient GUI projections. No duplicate decoded values are persisted.
+Custom arrival code, other connection fields, room index and state logic remain
+unchanged. Added rooms, shared DoorDefs, special load records, slot expansion,
+within-area source-owned drags and joint geometry changes remain separate work.
+Reset after relocation is guarded until the move is undone; raw header ASM edits
+do not trigger hidden map/save migrations. See
+[coordinated ASM area moves](../asm/reference_workspace.md#coordinated-asm-area-moves).
 
 **Room Info → Layout → ASM** adopts effective L1/BTS/L2 into editable decoded
 `dw`/`db` macros, retiring JSON tile deltas with one undo boundary. Painting and

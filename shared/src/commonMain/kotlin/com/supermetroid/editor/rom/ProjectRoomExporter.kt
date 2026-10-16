@@ -416,8 +416,8 @@ class ProjectRoomExporter(
             }
             if (roomEdits.asmPlmSourceVersion != 0) {
                 for (save in sourcePlmSets.getValue(roomId).values.flatMap(SourcePlmResource::saves).distinct()) {
-                    require(save.ownerRoomId == roomId && save.area == (roomEdits.effectiveHeaderChange?.area ?: room.area)) {
-                        "Save source area/room ownership changed; cross-area save migration needs a compound source operation."
+                    require(save.ownerRoomId == roomId && (save.cleared || save.area == (roomEdits.effectiveHeaderChange?.area ?: room.area))) {
+                        "Live save source area/room ownership changed; use the compound area move."
                     }
                     require(roomEdits.saveStationSpawns.none { it.area == save.area && it.saveIndex == save.slot }) {
                         "Save slot has both GUI overrides and authored source."

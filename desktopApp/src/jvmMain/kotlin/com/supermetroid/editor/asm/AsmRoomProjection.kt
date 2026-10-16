@@ -43,7 +43,7 @@ internal class AsmRoomProjectionRepository(
     fun load(text: String, macros: String, rooms: List<RoomEdits>, catalog: AsmPlmSourceCatalog): Map<Int, AsmRoomProjection> {
         catalog.requireStandardMacro(macros)
         val dependencies = AsmVerifiedCache.fingerprint(mapOf(
-            "format" to "room-projection-v3-saves", "source" to text, "macros" to macros,
+            "format" to "room-projection-v4-area-saves", "source" to text, "macros" to macros,
             "symbols" to catalog.sourceFingerprint, "base-rom" to catalog.romFingerprint,
         ))
         val source by lazy { decode(text, catalog.symbols) }
@@ -51,6 +51,8 @@ internal class AsmRoomProjectionRepository(
             for (room in rooms) runCatching {
                 val identity = roomObjectIdentity(room)
                 val header = requireNotNull(catalog.parser.readRoomHeader(room.roomId))
+                val area = if (room.asmRoomPropertiesSourceVersion != 0) AsmRoomPropertiesSource(text).area(room.roomId)
+                    else room.effectiveHeaderChange?.area ?: header.area
                 val screens = (room.effectiveHeaderChange?.width ?: header.width) * (room.effectiveHeaderChange?.height ?: header.height)
                 fun Snapshot.documents(): Map<String, AsmPlmDocument> {
                     require(roomId == room.roomId && this.identity == identity)
@@ -62,7 +64,7 @@ internal class AsmRoomProjectionRepository(
                     val saves = names.map { name ->
                         val body = authoredMacroBody(text, name)
                         val save = AsmSaveStationSource.parse(name, body, catalog.symbols)
-                        require(save.area == (room.effectiveHeaderChange?.area ?: header.area))
+                        require(save.cleared || save.area == area)
                         require(room.saveStationSpawns.none { it.area == save.area && it.saveIndex == save.slot })
                         com.supermetroid.editor.rom.validateSourceSaveOwnership(save, catalog.parser)
                         save
@@ -74,7 +76,7 @@ internal class AsmRoomProjectionRepository(
                             AsmPlmDocument.validateEntry(entry)
                             if (entry.id == 0xB76F) {
                                 require((entry.param and 255) in 0..7)
-                                require(saves.none { it.slot == (entry.param and 255) && it.cleared })
+                                require(saves.none { it.area == area && it.slot == (entry.param and 255) && it.cleared })
                             }
                             require(row.fields.size == 4)
                             val expected = listOf(row.id, row.x, row.y, row.param)
@@ -88,7 +90,7 @@ internal class AsmRoomProjectionRepository(
                             }
                             AsmPlmDocument.Record(entry, fields, row.scrollResource)
                         }
-                        com.supermetroid.editor.rom.validateSourceSaveLinks(roomId, room.effectiveHeaderChange?.area ?: header.area,
+                        com.supermetroid.editor.rom.validateSourceSaveLinks(roomId, area,
                             records.map { it.entry }, saves, room.saveStationSpawns, catalog.parser)
                         records.mapNotNull { it.scrollResource }.distinct().forEach { name ->
                             require(name.startsWith(AsmRoomObjectSource.prefix(roomId) + "Scroll_"))

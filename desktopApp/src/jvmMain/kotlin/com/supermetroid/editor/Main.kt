@@ -1335,6 +1335,12 @@ fun main() = application {
                                             onNavigateToSelectors = editorSelectorsLink,
                                             onNavigateToFx = editorFxLink,
                                             onNavigateToEnemies = editorEnemiesLink,
+                                            onReassignRoomArea = { roomId, targetArea ->
+                                                romParser?.let { parser ->
+                                                    minimapEditorState.initIfNeeded(parser, editorState)
+                                                    minimapEditorState.reassignRoomArea(roomId, targetArea, editorState)
+                                                }
+                                            },
                                             onKeyboardNavigatorChanged = { roomKeyboardNavigator = it },
                                             modifier = Modifier.fillMaxSize(),
                                         )

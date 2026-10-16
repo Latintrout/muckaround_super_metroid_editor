@@ -59,7 +59,9 @@ fun validateSourceRoomDoors(room: RoomEdits, source: SourceRoomDoors, parser: Ro
         // normalize them. Only the original geometry in the original-sized destination is exempt.
         val baseline = native[door.change.doorIndex]
         val nativeTarget = parser.readRoomHeader(door.change.destRoomPtr)?.let { it.width to it.height }
-        if (target == nativeTarget && door.entry() == baseline.copy(distFromDoor = door.change.distFromDoor, entryCode = door.change.entryCode)) continue
+        if (target == nativeTarget && door.entry() == baseline.copy(
+                bitflag = (baseline.bitflag and 0x40.inv()) or (door.change.bitflag and 0x40),
+                distFromDoor = door.change.distFromDoor, entryCode = door.change.entryCode)) continue
         require(door.change.screenX < target.first && door.change.screenY < target.second) { "Door ${door.change.doorIndex + 1}: arrival screen is outside the destination room." }
         // Blue-door and escape-gate closures both use the cap coordinates.
         if (door.change.bitflag ushr 8 >= 4) require((door.change.doorCapCode and 255) < target.first * 16 &&

@@ -45,6 +45,98 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `source owned area moves preserve arrival code migrate saves and build exact undo redo maps and door flags`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState(sourceIndexLoader = { com.supermetroid.editor.asm.AsmProjectWorkspaceRepository().loadRoomWorkspace(it) })
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project) }
+        val bridge = editor.bindRoomSources(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace)
+        val native = assertNotNull(parser.readRoomHeader(0xB167)) // Frog Savestation, an ordinary save rather than a load/elevator record.
+        editor.loadRoom(native.roomId, parser, native)
+        assertTrue(editor.ensureRoomPropertiesSource(native.name), editor.statusMessage)
+        assertTrue(editor.ensureCurrentPlmSource(native.name), editor.statusMessage)
+        assertTrue(editor.createManagedDoorArrival(0), editor.statusMessage)
+        val arrival = assertNotNull(editor.doorArrivalBindings[0]).label
+        val arrivalBody = authoredMacroBody(bridge.sourceText(), arrival.removeSuffix("_Entry"))
+        val savePlm = editor.workingPlms.single { it.id == 0xB76F }
+        val oldSave = assertNotNull(parser.readSaveEntry(native.area, savePlm.param and 255))
+        val nativeRooms = parser.roomCatalog.rooms.mapNotNull { parser.readRoomHeader(it.getRoomIdAsInt()) }.associateBy { it.roomId }
+        val incoming = nativeRooms.values.filter { parser.parseDoorList(it.doorOut).any { door -> door.destRoomPtr == native.roomId } }
+        val neighbor = incoming.first()
+        project.getOrCreateRoom(neighbor.roomId).ensureStateManifest(parser)
+        bridge.doors.migrate(neighbor.roomId, neighbor.name) // Include an already-authored incoming connection.
+        val map = MinimapEditorState().apply { loadArea(parser, native.area, editor, selectRoomId = native.roomId) }
+        val json = kotlinx.serialization.json.Json
+        val beforeModel = json.encodeToString(SmEditProject.serializer(), project)
+        val before8F = bridge.sourceText(); val before83 = bridge.doors.sourceText()
+        val result = assertNotNull(map.reassignSelectedRoomArea(1, editor))
+        assertTrue(result.success, result.message)
+        assertEquals(arrivalBody, authoredMacroBody(bridge.sourceText(), arrival.removeSuffix("_Entry")))
+        assertEquals(arrival, editor.doorArrivalBindings[0]?.label)
+        val liveSave = bridge.saveResources(native.roomId).single { !it.cleared }
+        assertEquals(1, liveSave.area); assertEquals(oldSave.words(), liveSave.words)
+        val afterModel = json.encodeToString(SmEditProject.serializer(), project)
+        val after8F = bridge.sourceText(); val after83 = bridge.doors.sourceText()
+        val logs = mutableListOf<String>()
+        suspend fun build(): RomBuildResult? {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            logs.clear()
+            val reopened = json.decodeFromString<SmEditProject>(json.encodeToString(SmEditProject.serializer(), project))
+            return ProjectFileService.buildRom(reopened, parser, logs::add, logs::add, fixture.projectFile.path)
+        }
+        val moved = assertNotNull(build(), logs.joinToString("\n"))
+        val built = RomParser(moved.resultRom)
+        val header = assertNotNull(built.readRoomHeader(native.roomId))
+        assertEquals(1, header.area); assertEquals(result.destinationMapX, header.mapX); assertEquals(result.destinationMapY, header.mapY)
+        assertEquals(List(7) { 0 }, built.readSaveEntry(native.area, savePlm.param and 255)!!.words())
+        assertEquals(oldSave.words(), built.readSaveEntry(1, liveSave.slot)!!.words())
+        assertEquals((savePlm.param and 0xFF00) or liveSave.slot, built.getAllPlmEntriesForRoom(native.roomId).single { it.id == 0xB76F }.param)
+        val labels = assertNotNull(AsmBuildArtifactRepository().load(fixture.projectFile.path)).symbols.labels
+        assertEquals(labels.getValue(arrival) and 65535, built.parseDoorList(native.doorOut)[0].entryCode)
+        for (source in nativeRooms.values) {
+            val old = parser.parseDoorList(source.doorOut)
+            val current = built.parseDoorList(source.doorOut)
+            old.zip(current).forEachIndexed { index, (before, after) ->
+                assertEquals(before.doorDefPtr, after.doorDefPtr)
+                val expectedArrival = if (source.roomId == native.roomId && index == 0) labels.getValue(arrival) and 65535 else before.entryCode
+                assertEquals(before.copy(bitflag = after.bitflag, entryCode = expectedArrival), after)
+                if (source.roomId == native.roomId || before.destRoomPtr == native.roomId) {
+                    val sourceArea = if (source.roomId == native.roomId) 1 else source.area
+                    val target = nativeRooms[before.destRoomPtr] ?: return@forEachIndexed
+                    val destinationArea = if (target.roomId == native.roomId) 1 else target.area
+                    assertEquals(sourceArea != destinationArea, after.bitflag and 0x40 != 0)
+                    assertEquals(before.bitflag and 0x40.inv(), after.bitflag and 0x40.inv())
+                }
+            }
+        }
+        for (area in listOf(native.area, 1)) {
+            assertContentEquals(effectiveMinimapData(parser, project, area).tiles, built.readMinimapTiles(area).tiles)
+            assertContentEquals(effectiveMapStationData(parser, project, area).revealed, built.readMapStationData(area).revealed)
+        }
+        for (slot in listOf(oldSave.pcOffset, parser.readSaveEntry(1, liveSave.slot)!!.pcOffset)) {
+            for (pc in slot until slot + 14) assertTrue(moved.writeReport.writes.any { pc in it.offset..it.endInclusive }, "Every released/live save byte must be claimed")
+        }
+        assertTrue(workspace.undoSourceEdit(FX_SOURCE_FILE), workspace.error)
+        assertEquals(beforeModel, json.encodeToString(SmEditProject.serializer(), project))
+        assertEquals(before8F, bridge.sourceText()); assertEquals(before83, bridge.doors.sourceText())
+        val undone = assertNotNull(build(), logs.joinToString("\n"))
+        assertEquals(native.area, RomParser(undone.resultRom).readRoomHeader(native.roomId)?.area)
+        map.redo(editor)
+        assertEquals(afterModel, json.encodeToString(SmEditProject.serializer(), project))
+        assertEquals(after8F, bridge.sourceText()); assertEquals(after83, bridge.doors.sourceText())
+        assertContentEquals(moved.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        val sourceSavePc = oldSave.pcOffset
+        project.patches += SmPatch("released-save-conflict", "Cannot reclaim the old AreaSave slot", enabled = true,
+            writes = mutableListOf(PatchWrite(sourceSavePc.toLong(), listOf(1), expectedBytes = listOf(0))))
+        assertNull(build()); assertTrue(logs.any { "conflict" in it.lowercase() }, logs.joinToString("\n"))
+        project.patches.removeLast()
+        assertContentEquals(moved.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
+
     @Test fun `source owned door connections assemble exact fields with reciprocal GUI history identities and patch guards`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)

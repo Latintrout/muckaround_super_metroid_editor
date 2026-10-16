@@ -181,7 +181,9 @@ data class RoomAreaReassignmentResult(
     val updatedDoorCount: Int = 0,
     val destinationMapX: Int? = null,
     val destinationMapY: Int? = null,
-)
+) {
+    internal var sourceHistory: com.supermetroid.editor.asm.AsmRoomAreaMoveHistory? = null
+}
 
 data class NewRoomCreationRequest(
     val name: String,
@@ -209,11 +211,12 @@ data class ProjectRoomDeletionPreview(
     val canDelete: Boolean get() = blockers.isEmpty()
 }
 
-private data class AreaSaveMigrationPlan(
+internal data class AreaSaveMigrationPlan(
     val plmReplacements: List<Pair<RomParser.PlmEntry, Int>> = emptyList(),
     val spawnOverrides: List<SaveStationSpawnChange> = emptyList(),
     val migratedSlotCount: Int = 0,
     val reconstructedSlotCount: Int = 0,
+    val sourceRecords: List<SourceSaveResource> = emptyList(),
 )
 
 private data class AreaSaveMigrationPlanning(
@@ -498,7 +501,7 @@ class EditorState(
                 _workingDoors.clear()
                 _workingDoors.addAll(effectiveDoors)
                 _workingPlms.clear()
-                _workingPlms.addAll(effectiveRoomPlms(currentRoomId, romParser))
+                _workingPlms.addAll(effectiveCurrentStatePlms(romParser))
             }
         }
         editVersion++
@@ -7667,16 +7670,35 @@ class EditorState(
      * entries are migrated into an unused preallocated destination slot.
      */
     private fun effectiveRoomPlms(roomId: Int, romParser: RomParser): List<RomParser.PlmEntry> {
-        val effective = romParser.getAllPlmEntriesForRoom(roomId).toMutableList()
-        for (change in project.rooms[project.roomKey(roomId)]?.plmChanges.orEmpty()) {
-            when (change.action) {
-                "add" -> effective.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
-                "remove" -> effective.removeAll {
-                    it.id == change.plmId && it.x == change.x && it.y == change.y
+        val room = project.rooms[project.roomKey(roomId)]
+        if ((room?.asmPlmSourceVersion ?: 0) != 0) {
+            val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the authored object source." }
+            return room!!.states.flatMap { state ->
+                val view = bridge.managedView(roomId, state.id)
+                require(view.problem == null) { "Room ${roomId.toString(16)} objects: ${view.problem}" }
+                requireNotNull(view.document).entries
+            }.distinct()
+        }
+        val snapshot = com.supermetroid.editor.asm.snapshotRoomForResize(room ?: RoomEdits(roomId)).also { it.ensureStateManifest(romParser) }
+        val runtime = romParser.parseRoomStatesWithData(roomId)
+        return snapshot.states.flatMap { state ->
+            val effective = romParser.parsePlmSet(runtime[requireNotNull(state.baseSourceStateIndex())].plmSetPtr).toMutableList()
+            for (change in snapshot.plmChanges + state.plmChanges) {
+                when (change.action) {
+                    "add" -> effective.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
+                    "remove" -> effective.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
                 }
             }
-        }
-        return effective.distinctBy { listOf(it.id, it.x, it.y, it.param) }
+            effective
+        }.distinct()
+    }
+
+    private fun effectiveCurrentStatePlms(parser: RomParser): List<RomParser.PlmEntry> {
+        val edits = project.rooms[project.roomKey(currentRoomId)]
+        val state = selectedStateEdits(edits)
+        if (hasManagedPlms()) return state?.let { asmPlmSourceBridge?.managedView(currentRoomId, it.id)?.document?.entries }.orEmpty()
+        val native = parser.parseRoomStatesWithData(currentRoomId).getOrNull(state?.baseSourceStateIndex() ?: currentStateIndex) ?: return emptyList()
+        return applyPlmChanges(applyPlmChanges(parser.parsePlmSet(native.plmSetPtr), edits?.plmChanges.orEmpty()), state?.plmChanges.orEmpty())
     }
 
     private fun effectiveIncomingDoorPtr(roomId: Int, romParser: RomParser): Int? {
@@ -7700,7 +7722,12 @@ class EditorState(
         effectiveRooms: List<Room>,
         romParser: RomParser,
     ): AreaSaveMigrationPlanning {
-        val allOverrides = project.rooms.values.flatMap { it.saveStationSpawns }
+        val authored = asmPlmSourceBridge?.let { bridge -> project.rooms.values.filter { it.asmPlmSourceVersion != 0 }
+            .flatMap { bridge.saveResources(it.roomId) } }.orEmpty()
+        val authoredBySlot = authored.associateBy { it.area to it.slot }
+        val allOverrides = project.rooms.values.flatMap { it.saveStationSpawns } + authored.map { save ->
+            SaveStationSpawnChange(save.area, save.slot, save.words[0], save.words[1], save.words[3], save.words[4], save.words[5], save.words[6], clearSlot = save.cleared)
+        }
         val overridesBySlot = allOverrides.groupBy { it.area to it.saveIndex }
         val duplicateSlot = overridesBySlot.entries.firstOrNull { (_, entries) -> entries.size > 1 }
         if (duplicateSlot != null) {
@@ -7854,6 +7881,8 @@ class EditorState(
         for ((sourceIndex, _) in sourceSlots) {
             val candidates = (0 until romParser.saveStationSlotCount(targetArea)).filter { index ->
                 if (index in targetPlmIndices || index in allocated) return@filter false
+                if (authored.any { it.area == targetArea && it.slot == index && it.ownerRoomId != roomId }) return@filter false
+                if (romParser.readSaveEntry(targetArea, index)?.roomId !in listOf(0, roomId)) return@filter false
                 val slot = effectiveSlot(targetArea, index) ?: return@filter false
                 slot.clearSlot || slot.roomId == 0
             }
@@ -7906,6 +7935,14 @@ class EditorState(
                 spawnOverrides = overrides,
                 migratedSlotCount = sourceIndicesToClear.size,
                 reconstructedSlotCount = reconstructedSlotCount,
+                sourceRecords = overrides.map { spawn ->
+                    val sourceIndex = destinationBySource.entries.singleOrNull { it.value == spawn.saveIndex }?.key
+                    val sourceWords = sourceIndex?.let { authoredBySlot[sourceArea to it]?.words ?: romParser.readSaveEntry(sourceArea, it)?.words() }
+                    val words = if (spawn.clearSlot) List(7) { 0 } else listOf(spawn.roomId, spawn.doorPtr,
+                        if (reconstructedSlotCount > 0) 0 else requireNotNull(sourceWords)[2],
+                        spawn.scrollX, spawn.scrollY, spawn.samusY, spawn.samusX)
+                    SourceSaveResource(com.supermetroid.editor.asm.AsmSaveStationSource.name(roomId, spawn.area, spawn.saveIndex), roomId, spawn.area, spawn.saveIndex, words)
+                },
             ),
         )
     }
@@ -7934,26 +7971,42 @@ class EditorState(
     ): RoomAreaReassignmentResult {
         val baseRoom = romParser.readRoomHeader(roomId)
             ?: return RoomAreaReassignmentResult(false, "Room 0x${roomId.toString(16).uppercase()} could not be read.", -1, targetArea)
-        val sourceArea = applyHeaderChanges(baseRoom).area
+        var sourceArea = applyHeaderChanges(baseRoom).area
         if (targetArea !in 0 until com.supermetroid.editor.rom.MinimapData.NUM_AREAS) {
             return RoomAreaReassignmentResult(false, "Area $targetArea is invalid; rooms must use Crateria through Ceres.", sourceArea, targetArea)
         }
-        if (sourceArea == targetArea) {
-            return RoomAreaReassignmentResult(true, "${baseRoom.name} is already in ${com.supermetroid.editor.rom.MinimapData.AREA_NAMES[targetArea]}.", sourceArea, targetArea)
+        val sourceMove = project.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE || project.rooms.values.any {
+            it.asmRoomPropertiesSourceVersion != 0 || it.asmDoorSourceVersion != 0 || it.asmPlmSourceVersion != 0
         }
-        if (hasManagedRoomProperties(roomId) || hasManagedDoors(roomId) || project.rooms.values.any { it.asmDoorSourceVersion != 0 &&
-                asmPlmSourceBridge?.doors?.view(it.roomId)?.let { view -> view.problem != null } != false } || project.rooms.values.any { it.asmDoorSourceVersion != 0 &&
-                effectiveDoorsForRoom(it.roomId, romParser).any { door -> door.destRoomPtr == roomId } }) {
-            val message = "Area reassignment with source-owned headers or doors needs a joint header/map/door transaction; it is not supported yet."
+        if (sourceMove) runCatching {
+            require(asmNavigationEnabled && project.newRooms.isEmpty()) { "Use the existing-room ASM workspace for this move; added-room source identities are not supported yet." }
+            val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the ASM workspace." }
+            require(bridge.catalog.parser === romParser) { "The room ROM changed; wait for the current ASM link." }
+            bridge.properties.refreshAll(); bridge.doors.refreshAll()
+            for (room in project.rooms.values) {
+                if (room.asmRoomPropertiesSourceVersion != 0) require(bridge.properties.view(room.roomId).problem == null) { "Repair the authored header/state fields for ${room.roomId.toString(16)} before moving areas." }
+                if (room.asmDoorSourceVersion != 0) require(bridge.doors.view(room.roomId).problem == null) { "Repair the authored doors for ${room.roomId.toString(16)} before moving areas." }
+            }
+        }.onFailure {
+            val message = "Cannot move ${baseRoom.name}: ${it.message}"
             postStatus(message)
             return RoomAreaReassignmentResult(false, message, sourceArea, targetArea)
+        }
+        sourceArea = applyHeaderChanges(baseRoom).area
+        if (sourceArea == targetArea) {
+            return RoomAreaReassignmentResult(true, "${baseRoom.name} is already in ${MinimapData.AREA_NAMES[targetArea]}.", sourceArea, targetArea)
         }
 
         val effectiveRooms = romParser.roomCatalog.rooms.mapNotNull { info ->
             val id = info.getRoomIdAsInt()
             romParser.readRoomHeader(id)?.let(::applyHeaderChanges)
         }
-        val areaSavePlanning = planAreaSaveMigration(roomId, sourceArea, targetArea, effectiveRooms, romParser)
+        val areaSavePlanning = runCatching { planAreaSaveMigration(roomId, sourceArea, targetArea, effectiveRooms, romParser) }
+            .getOrElse {
+                val message = "Cannot move ${baseRoom.name}: ${it.message}"
+                postStatus(message)
+                return RoomAreaReassignmentResult(false, message, sourceArea, targetArea)
+            }
         if (areaSavePlanning.error != null) {
             val message = "Cannot move ${baseRoom.name}: ${areaSavePlanning.error}"
             postStatus(message)
@@ -8000,9 +8053,11 @@ class EditorState(
             movingRoom.height,
             sourceOwnership,
         )
+        val mapPlan = project.copy(minimapEdits = project.minimapEdits.mapValuesTo(linkedMapOf()) { it.value.toMutableList() },
+            mapStationEdits = project.mapStationEdits.mapValuesTo(linkedMapOf()) { it.value.toMutableList() })
         persistMinimapData(
             romParser,
-            project,
+            mapPlan,
             clearRoomTiles(
                 sourceMap,
                 movingRoom.mapX,
@@ -8014,7 +8069,7 @@ class EditorState(
         )
         persistMinimapData(
             romParser,
-            project,
+            mapPlan,
             placeRoomTilesNonEmpty(
                 destinationMap,
                 destinationX,
@@ -8026,7 +8081,7 @@ class EditorState(
         )
         persistMapStationData(
             romParser,
-            project,
+            mapPlan,
             clearMapStationRect(
                 sourceStation,
                 movingRoom.mapX,
@@ -8038,19 +8093,16 @@ class EditorState(
         )
         persistMapStationData(
             romParser,
-            project,
+            mapPlan,
             placeMapStationRect(destinationStation, destinationX, destinationY, stationRect),
         )
 
-        val roomEdits = project.getOrCreateRoom(roomId)
-        val updatedHeader = (roomEdits.effectiveHeaderChange ?: RoomHeaderChange()).copy(
+        val updatedHeader = (project.rooms[project.roomKey(roomId)]?.effectiveHeaderChange ?: RoomHeaderChange()).copy(
             area = targetArea.takeIf { it != baseRoom.area },
             mapX = destinationX.takeIf { it != baseRoom.mapX },
             mapY = destinationY.takeIf { it != baseRoom.mapY },
         )
-        roomEdits.roomHeaderChange = updatedHeader.takeUnless { it == RoomHeaderChange() }
-        applyAreaSaveMigration(roomId, areaSavePlan)
-
+        val doorUpdates = linkedMapOf<Int, MutableList<DoorChange>>()
         var updatedDoors = 0
         for (sourceRoom in effectiveRooms) {
             val sourceId = sourceRoom.roomId
@@ -8072,6 +8124,7 @@ class EditorState(
                     doorDefPtr = romDoor.doorDefPtr,
                 )
                 val destination = effectiveRooms.firstOrNull { it.roomId == door.destRoomPtr } ?: continue
+                if (sourceId != roomId && destination.roomId != roomId) continue
                 val effectiveDestinationArea = if (destination.roomId == roomId) targetArea else destination.area
                 val desiredBitflag = if (effectiveSourceArea != effectiveDestinationArea) {
                     door.bitflag or 0x40
@@ -8079,8 +8132,6 @@ class EditorState(
                     door.bitflag and 0x40.inv()
                 }
                 if (desiredBitflag == door.bitflag) continue
-                val sourceEdits = project.getOrCreateRoom(sourceId)
-                sourceEdits.doorChanges.removeAll { it.doorIndex == doorIndex }
                 val updatedDoor = DoorChange(
                     doorIndex = doorIndex,
                     destRoomPtr = door.destRoomPtr,
@@ -8091,19 +8142,38 @@ class EditorState(
                     distFromDoor = door.distFromDoor,
                     entryCode = door.entryCode,
                 )
-                val matchesRom = updatedDoor.destRoomPtr == romDoor.destRoomPtr &&
-                    updatedDoor.bitflag == romDoor.bitflag &&
-                    updatedDoor.doorCapCode == romDoor.doorCapCode &&
-                    updatedDoor.screenX == romDoor.screenX &&
-                    updatedDoor.screenY == romDoor.screenY &&
-                    updatedDoor.distFromDoor == romDoor.distFromDoor &&
-                    updatedDoor.entryCode == romDoor.entryCode
-                if (!matchesRom) sourceEdits.doorChanges.add(updatedDoor)
+                doorUpdates.getOrPut(sourceId) { mutableListOf() }.add(updatedDoor)
                 updatedDoors++
             }
         }
 
-        notifyProjectMutation(romParser)
+        val sourceHistory = if (sourceMove) runCatching {
+            val bridge = requireNotNull(asmPlmSourceBridge)
+            val plan = bridge.areaMoves.plan(roomId, updatedHeader.copy(area = targetArea, mapX = destinationX, mapY = destinationY),
+                doorUpdates, areaSavePlan, mapPlan.minimapEdits, mapPlan.mapStationEdits, ::isEditorItemPlm, bridge.describePlm)
+            applySourceAreaMove(roomId, romParser, plan)
+        }.getOrElse {
+            val message = "Cannot move ${baseRoom.name}: ${it.message}"
+            postStatus(message)
+            return RoomAreaReassignmentResult(false, message, sourceArea, targetArea)
+        } else {
+            project.minimapEdits.clear(); project.minimapEdits.putAll(mapPlan.minimapEdits)
+            project.mapStationEdits.clear(); project.mapStationEdits.putAll(mapPlan.mapStationEdits)
+            project.getOrCreateRoom(roomId).roomHeaderChange = updatedHeader.takeUnless { it == RoomHeaderChange() }
+            applyAreaSaveMigration(roomId, areaSavePlan)
+            for ((id, changes) in doorUpdates) {
+                val edits = project.getOrCreateRoom(id)
+                val native = romParser.parseDoorList(requireNotNull(romParser.readRoomHeader(id)).doorOut)
+                for (change in changes) {
+                    edits.doorChanges.removeAll { it.doorIndex == change.doorIndex }
+                    val original = native[change.doorIndex]
+                    if (change != DoorChange(change.doorIndex, original.destRoomPtr, original.bitflag, original.doorCapCode,
+                            original.screenX, original.screenY, original.distFromDoor, original.entryCode)) edits.doorChanges.add(change)
+                }
+            }
+            notifyProjectMutation(romParser)
+            null
+        }
         val repositioned = destinationX != movingRoom.mapX || destinationY != movingRoom.mapY
         val placementMessage = if (repositioned) {
             " and placed it at the nearest free map position ($destinationX, $destinationY)"
@@ -8126,7 +8196,49 @@ class EditorState(
             updatedDoorCount = updatedDoors,
             destinationMapX = destinationX,
             destinationMapY = destinationY,
-        )
+        ).also { it.sourceHistory = sourceHistory }
+    }
+
+    private fun requireAreaMoveIdle() {
+        require(pendingEdits.isEmpty() && pendingSourcePattern == null && floatingSelection == null &&
+            pendingPlmAdds.isEmpty() && pendingPlmRemoves.isEmpty() && pendingLayoutEditScope == null) {
+            "Finish the current tile stroke, selection or scope choice before moving or restoring a room."
+        }
+    }
+
+    private fun applySourceAreaMove(roomId: Int, parser: RomParser, plan: com.supermetroid.editor.asm.AsmRoomAreaMovePlan): com.supermetroid.editor.asm.AsmRoomAreaMoveHistory {
+        val bridge = requireNotNull(asmPlmSourceBridge)
+        val activeRoom = currentRoomId
+        val operation = EditOperation("Move room to another area")
+        var recorded = false
+        return bridge.areaMoves.apply(plan, beforeTransition = {
+            requireAreaMoveIdle()
+            require(asmPlmSourceBridge?.catalog?.parser === parser) { "The room ROM changed; reopen its current ASM workspace." }
+        }, afterTransition = { undo ->
+            bridge.properties.refreshAll(); bridge.doors.refreshAll()
+            if (!hasManagedPlms() && currentRomParser === parser) {
+                _workingPlms.clear(); _workingPlms.addAll(effectiveCurrentStatePlms(parser))
+            }
+            refreshLinkedPlms()
+            currentRomParser?.takeIf { it === parser }?.readRoomHeader(currentRoomId)?.let { native ->
+                currentArea = applyHeaderChanges(native).area
+                refreshVanillaSaveIndices(parser)
+                currentAreaSaveEntryCount = parser.saveEntryCount(currentArea)
+                currentAreaRomSaveEntries = (0 until currentAreaSaveEntryCount.coerceAtMost(RomParser.SAVE_STATION_SLOT_COUNT))
+                    .mapNotNull { index -> parser.readSaveEntry(currentArea, index)?.let { index to it } }.toMap()
+                if (!hasManagedDoors()) doorEntries = effectiveDoorsForRoom(currentRoomId, parser)
+            }
+            if (currentRoomId == activeRoom && activeRoom == roomId) {
+                if (!recorded) {
+                    recordManagedRoomOperation(operation, plan.replacements.getValue(PLM_SOURCE_FILE).first, bridge)
+                    recorded = true
+                } else if (undoStack.any { it === operation } || redoStack.any { it === operation }) {
+                    undoStack.removeAll { it === operation }; redoStack.removeAll { it === operation }
+                    if (undo) redoStack.add(operation) else undoStack.add(operation)
+                }
+            }
+            dirty = true; undoVersion++; editVersion++
+        })
     }
 
     /**

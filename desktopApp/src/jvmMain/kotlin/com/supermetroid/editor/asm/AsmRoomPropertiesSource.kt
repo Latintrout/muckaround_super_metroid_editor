@@ -61,6 +61,10 @@ internal class AsmRoomPropertiesSource(val text: String) {
         SourceRoomProperties(header, current.states)
         return replace(headerName(room.roomId), listOf(header.index!!, header.area!!, header.mapX!!, header.mapY!!, header.upScroller!!, header.downScroller!!, header.creBitflag!!))
     }
+    /** Area-dependent save lenses need the current header even before a GUI projection is loaded. */
+    fun area(roomId: Int): Int = values(headerName(roomId), List(7) { 1 })[1].also {
+        require(it in 0..6) { "Invalid authored room area." }
+    }
     fun editStates(room: RoomEdits, replacements: Map<String, StateDataChange>): String {
         val current = resource(room)
         require(current.states.keys.containsAll(replacements.keys)) { "Unknown room-property states." }
