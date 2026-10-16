@@ -283,11 +283,35 @@ must match the authored current area and every slot still passes native ownershi
 checks. Cold exports and projection caches derive that area from source, never
 from transient GUI projections. No duplicate decoded values are persisted.
 Custom arrival code, other connection fields, room index and state logic remain
-unchanged. Added rooms, shared DoorDefs, special load records, slot expansion,
-within-area source-owned drags and joint geometry changes remain separate work.
+unchanged. Added rooms, shared DoorDefs, special load records, slot expansion
+and joint geometry changes remain separate work.
 Reset after relocation is guarded until the move is undone; raw header ASM edits
 do not trigger hidden map/save migrations. See
 [coordinated ASM area moves](../asm/reference_workspace.md#coordinated-asm-area-moves).
+
+Same-area room drags now use the same atomic source/map history. An applied move
+automatically adopts a supported header if needed and changes Map X/Y, visible
+map cells and station-reveal cells together, leaving doors, saves, dimensions and
+code untouched. Preview/cancel/no-motion operations never adopt or dirty source.
+Authored positions are read before hit testing; stale geometry/map/build-mode
+previews, occupied destinations and pending strokes are checked before commit.
+Private state metadata and handwritten source are preserved. Source/canvas/map
+Undo/Redo composes with area reassignment without duplicate JSON header values.
+See [same-area map dragging](../asm/reference_workspace.md#same-area-map-dragging).
+
+Ordinary header/state-scalar ASM links now open directly in the editable source
+pane, just like DoorDefs. Before first typing, planned declarations are an
+editor-only view: inspecting, selecting, saving, searching and building do not
+adopt them. The first text change and room-wide scalar ownership/GUI override
+retirement share one source/canvas Undo/Redo boundary. Invalid first drafts stay
+saveable with last-good previews; ownership Undo restores the legacy tileset,
+scrolling and selected-state preview without reloading the canvas. ASM-first
+edits preserve unrelated canvases/history and undo absent room identities too.
+Complete scalar byte claims also retain native-valued/comment-only ownership in
+headless builds and reject competing ROM patches, including on unchanged fields.
+Selector conditions/code, structural dimensions/pointers and map migrations
+remain independent workflows; no source values are duplicated in JSON. See
+[header/state fields](../asm/reference_workspace.md#reciprocal-room-headerstate-fields).
 
 **Room Info → Layout → ASM** adopts effective L1/BTS/L2 into editable decoded
 `dw`/`db` macros, retiring JSON tile deltas with one undo boundary. Painting and

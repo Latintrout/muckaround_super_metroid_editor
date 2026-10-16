@@ -108,8 +108,9 @@ class RoomAsmNavigationTest {
             assertTrue(f.navigation.open(request), "$kind: ${f.editor.statusMessage}")
             val inspection = assertNotNull(f.workspace.roomSourceInspection, kind.name)
             assertEquals(kind.fileId, f.workspace.selectedFileId)
-            assertEquals(kind == RoomAsmSourceKind.DOORS, f.workspace.isProjectSourceEditable)
-            f.workspace.updateSourceEditText(kind.fileId, if (kind == RoomAsmSourceKind.DOORS) f.workspace.sourceEditorText(kind.fileId)
+            val automatic = kind in setOf(RoomAsmSourceKind.DOORS, RoomAsmSourceKind.PROPERTIES)
+            assertEquals(automatic, f.workspace.isProjectSourceEditable)
+            f.workspace.updateSourceEditText(kind.fileId, if (automatic) f.workspace.sourceEditorText(kind.fileId)
                 else "This must not replace the preview or source")
             assertEquals(model, f.model(), kind.name); assertEquals(sources, f.sources(), kind.name)
             assertEquals(revision, f.workspace.sourceBufferRevision, kind.name)
@@ -260,7 +261,7 @@ class RoomAsmNavigationTest {
         val state = f.editor.currentPlmStateId()!!
         f.editor.setRoomStateFxChange(state, FxChange(fxType = 2), f.parser)
         assertEquals(2, f.editor.effectiveFxEntries(0x91F8, f.parser).last().fxType)
-        assertTrue(f.navigation.open(f.request(RoomAsmSourceKind.PROPERTIES)))
+        assertTrue(f.navigation.open(f.request(RoomAsmSourceKind.SELECTORS)))
         val preview = assertNotNull(f.workspace.roomSourceInspection)
         assertFalse(f.workspace.undoSourceEdit(FX_SOURCE_FILE), "Read-only pane shortcuts cannot edit a hidden bank")
         f.editor.loadRoomForCanvas(0x91F8, f.parser, f.parser.readRoomHeader(0x91F8)!!)
@@ -284,7 +285,10 @@ class RoomAsmNavigationTest {
         assertTrue(f.navigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.FX, requested)))
         val fxPreview = assertNotNull(f.workspace.roomSourceInspection)
         assertEquals(requested, fxPreview.stateId)
-        assertTrue(f.workspace.canGoBack); f.workspace.goBack(); assertSame(headerPreview, f.workspace.roomSourceInspection)
+        assertTrue(f.workspace.canGoBack); f.workspace.goBack()
+        val reopened = assertNotNull(f.workspace.roomSourceInspection)
+        assertEquals(headerPreview.stateId, reopened.stateId); assertEquals(headerPreview.text, reopened.text)
+        assertNotNull(reopened.automaticEdit, "Editable overlays are replanned on Back rather than reusing stale callbacks")
         assertTrue(f.workspace.canGoForward); f.workspace.goForward(); assertSame(fxPreview, f.workspace.roomSourceInspection)
         f.workspace.bindProject(File(directory, "Other.smedit").path, false)
         assertNull(f.workspace.roomSourceInspection)
@@ -380,6 +384,62 @@ class RoomAsmNavigationTest {
         assertTrue(f.workspace.redoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
         assertEquals(1, f.project.rooms.getValue("91F8").asmDoorSourceVersion)
         assertEquals(0, f.editor.currentRoomId); assertNull(f.editor.roomSourceParser); assertTrue(f.editor.undoStack.isEmpty())
+    }
+
+    @Test fun `automatic header and state source can edit an absent room without replacing another canvas or its history`() = runBlocking {
+        for (loadCanvas in listOf(false, true)) {
+            val f = fixture("automatic-properties-$loadCanvas", secondRoom = true)
+            if (loadCanvas) {
+                f.editor.loadRoom(0xA000, f.parser, f.parser.readRoomHeader(0xA000)!!)
+                f.editor.applyBulkEdits("Keep my canvas", listOf(TileEdit(5, 5, 0, 0x8123)))
+            } else {
+                f.editor.initForProject(f.file, f.project)
+                f.editor.bindRoomSources(f.bridge.catalog, f.workspace)
+            }
+            f.project.rooms.remove("91F8")
+            val model = f.model(); val sources = f.sources(); val history = f.editor.undoStack.toList()
+            val roomId = f.editor.currentRoomId; val state = f.editor.currentPlmStateId()
+            val working = f.editor.workingLevelData?.copyOf()
+            val link = AsmRoomSourceLink(0x91F8, "Test room", RoomAsmSourceKind.PROPERTIES, sourceStateIndex = 0)
+            assertTrue(f.navigation.openFromAsm(link), f.editor.statusMessage)
+            assertFalse(f.project.rooms.containsKey("91F8")); assertEquals(model, f.model()); assertEquals(sources, f.sources())
+            val planned = f.workspace.sourceEditorText(PLM_SOURCE_FILE)
+            assertEquals(AsmRoomPropertiesSource(planned).line(0x91F8, "state-1"), f.workspace.selectedLineIndex)
+            val edited = planned.replace("; Music track", "; My state field note")
+            assertNotEquals(planned, edited)
+            assertTrue(f.workspace.updateSourceEditText(PLM_SOURCE_FILE, edited), f.editor.statusMessage)
+            assertEquals(1, f.project.rooms.getValue("91F8").asmRoomPropertiesSourceVersion)
+            assertEquals(history, f.editor.undoStack); assertEquals(roomId, f.editor.currentRoomId); assertEquals(state, f.editor.currentPlmStateId())
+            assertContentEquals(working, f.editor.workingLevelData)
+            assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+            assertEquals(model, f.model()); assertEquals(sources, f.sources()); assertFalse(f.project.rooms.containsKey("91F8"))
+            assertEquals(history, f.editor.undoStack); assertContentEquals(working, f.editor.workingLevelData)
+            assertTrue(f.workspace.redoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+            assertEquals(edited, f.workspace.projectSourceText(PLM_SOURCE_FILE)); assertEquals(history, f.editor.undoStack)
+        }
+    }
+
+    @Test fun `stale automatic property views never adopt after source model state mode parser or project changes`() = runBlocking {
+        val changes: List<Pair<String, (Fixture) -> Unit>> = listOf(
+            "model" to { it.project.getOrCreateRoom(0x91F8).fxChange = FxChange(fxType = 2) },
+            "source" to { it.workspace.replaceProjectSource(FX_SOURCE_FILE, it.bridge.fx.sourceText(), "; Newer source\n") },
+            "state" to { f -> val room = f.project.getOrCreateRoom(0x91F8).also { it.ensureStateManifest(f.parser) }; f.editor.switchRoomState(room.states.first().id, f.parser) },
+            "mode" to { it.project.asmWorkspace.buildMode = ProjectRomBuildMode.PATCHED_ROM },
+            "parser" to { f -> f.editor.loadRoom(0x91F8, RomParser(f.parser.copyRomData()), f.parser.readRoomHeader(0x91F8)!!) },
+            "project" to { it.editor.initForProject(File(directory, "Other.smedit"), SmEditProject("other.sfc")) },
+            "view" to { it.workspace.openSource(FX_SOURCE_FILE) })
+        for ((name, change) in changes) {
+            val f = fixture("stale-properties-$name")
+            assertTrue(f.navigation.open(f.request(RoomAsmSourceKind.PROPERTIES)), f.editor.statusMessage)
+            val draft = assertNotNull(f.workspace.roomSourceInspection?.automaticEdit)
+            change(f)
+            val model = f.model(); val source = f.sources(); val revision = f.workspace.sourceBufferRevision
+            val history = f.editor.undoStack.toList(); val dirty = f.editor.dirty
+            assertFalse(draft.apply(draft.text + "; My first edit\n"), name)
+            assertContains(f.editor.statusMessage, "reopen", message = name)
+            assertEquals(model, f.model(), name); assertEquals(source, f.sources(), name); assertEquals(revision, f.workspace.sourceBufferRevision, name)
+            assertEquals(history, f.editor.undoStack, name); assertEquals(dirty, f.editor.dirty, name)
+        }
     }
 
     @Test fun `ASM adoption of another room uses its geometry and leaves the active room state and GUI undo intact`() = runBlocking {

@@ -109,6 +109,158 @@ class AsmRoomAreaMoveTest {
         return Fixture(editor, workspace, bridge, map, file)
     }
 
+    @Test fun `same area previews cancelled drops and no motion never adopt or dirty source`() = runBlocking {
+        val f = fixture()
+        val model = f.model(); val source = f.sources(); val revision = f.workspace.sourceBufferRevision
+        val dirty = f.editor.dirty
+        val stroke = f.map.mapData.withTile(50, 20, 0x0F)
+        f.map.pendingStroke = stroke
+        assertFalse(f.map.beginPrimaryRoomDrag(2, 3, f.editor)); assertSame(stroke, f.map.pendingStroke)
+        f.map.pendingStroke = null
+        assertTrue(f.map.beginPrimaryRoomDrag(3, 4, f.editor)) // Preserve the grab offset inside the room.
+        f.map.updatePointerRoomMove(4, 4)
+        assertEquals(3, f.map.moveBuffer?.currentX)
+        assertEquals(model, f.model()); assertEquals(source, f.sources()); assertEquals(revision, f.workspace.sourceBufferRevision)
+        f.map.undo(f.editor) // Escape/Undo cancels the preview, not an earlier project edit.
+        assertNull(f.map.moveBuffer)
+        assertTrue(f.map.beginPrimaryRoomDrag(2, 3, f.editor))
+        f.map.endPrimaryRoomDrag(2, 3, f.editor)
+        assertEquals(model, f.model()); assertEquals(source, f.sources()); assertEquals(revision, f.workspace.sourceBufferRevision)
+        assertEquals(dirty, f.editor.dirty); assertTrue(f.map.undoStack.isEmpty()); assertTrue(f.editor.undoStack.isEmpty())
+    }
+
+    @Test fun `same area arrow move adopts only the header and shares exact map reveal and canvas undo`() = runBlocking {
+        val f = fixture()
+        val model = f.model(); val source = f.sources(); val selected = f.editor.currentStateIndex
+        val plms = f.editor.workingPlms.toList(); val level = f.editor.workingLevelData!!.copyOf()
+        val map = f.map.mapData; val stations = f.map.stationData
+        f.map.moveRoom(1, 0, f.editor) // A partially overlapping source/destination must work.
+        assertTrue(f.map.applyMove(f.editor), f.editor.statusMessage)
+        val moved = f.model(); val movedSource = f.sources()
+        val room = f.project.rooms.getValue("91F8")
+        assertEquals(1, room.asmRoomPropertiesSourceVersion); assertEquals(0, room.asmDoorSourceVersion); assertEquals(0, room.asmPlmSourceVersion)
+        assertNull(room.roomHeaderChange); assertEquals(3, room.effectiveHeaderChange?.mapX); assertEquals(3, room.effectiveHeaderChange?.mapY)
+        assertEquals(source.getValue(DOOR_SOURCE_FILE), f.bridge.doors.sourceText())
+        assertNull(f.workspace.sourceUndoHead(DOOR_SOURCE_FILE), "A position-only move must not anchor unrelated bank history")
+        assertEquals(selected, f.editor.currentStateIndex); assertEquals(plms, f.editor.workingPlms); assertContentEquals(level, f.editor.workingLevelData)
+        val expectedMap = placeRoomTilesNonEmpty(clearRoomTiles(map, 2, 3, 2, 2), 3, 3, 2, 2, extractRoomTiles(map, 2, 3, 2, 2))
+        assertEquals(expectedMap, f.map.mapData)
+        assertFalse(f.map.stationData.isRevealed(2, 3)); assertTrue(f.map.stationData.isRevealed(3, 3))
+        assertEquals(1, f.map.undoStack.size); assertEquals("Move room on map", f.editor.undoStack.single().description)
+        val built = f.coldExport()
+        assertEquals(3, built.readRoomHeader(0x91F8)?.mapX)
+        assertEquals(f.parser.readSaveEntry(0, 1)!!.words(), built.readSaveEntry(0, 1)!!.words())
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertEquals(model, f.model()); assertEquals(source, f.sources()); assertEquals(map, f.map.mapData); assertEquals(stations, f.map.stationData)
+        f.map.redo(f.editor)
+        assertEquals(moved, f.model()); assertEquals(movedSource, f.sources())
+        assertTrue(f.editor.undo(), f.editor.statusMessage)
+        assertEquals(model, f.model()); assertEquals(source, f.sources())
+        f.map.redo(f.editor)
+        assertEquals(moved, f.model()); assertEquals(movedSource, f.sources())
+    }
+
+    @Test fun `same area middle drag preserves authored notes private state data saves doors and another canvas`() = runBlocking {
+        val f = fixture()
+        assertTrue(f.editor.ensureRoomPropertiesSource("Room")); assertTrue(f.editor.ensureCurrentPlmSource("Room")); assertTrue(f.editor.ensureDoorSource("Room"))
+        val original = f.bridge.sourceText()
+        val noted = original.replace("; Map X", "; hand-authored position · Map X").replace("\n", "\r\n")
+        f.workspace.replaceProjectSource(PLM_SOURCE_FILE, original, noted)
+        f.editor.loadRoom(0xA000, f.parser, f.parser.readRoomHeader(0xA000)!!)
+        f.editor.applyBulkEdits("Other canvas", listOf(TileEdit(5, 5, 0, 0x8123)))
+        val working = f.editor.workingLevelData!!.copyOf(); val canvasHistory = f.editor.undoStack.toList()
+        val model = f.model(); val source = f.sources()
+        val states = f.project.rooms.getValue("91F8").states.toList()
+        val properties = AsmRoomPropertiesSource(noted)
+        val room = f.project.rooms.getValue("91F8")
+        val expected = properties.editHeader(room, properties.resource(room).header.copy(mapX = 5))
+        f.map.activateTool(MinimapTool.PAINT, f.editor)
+        assertTrue(f.map.beginMiddleRoomDrag(3, 4, f.editor))
+        f.map.endMiddleRoomDrag(6, 4, f.editor)
+        assertNull(f.map.moveBuffer); assertNull(f.map.selectedRoom); assertEquals(MinimapTool.PAINT, f.map.tool)
+        assertEquals(expected, f.bridge.sourceText()); assertEquals(source.getValue(DOOR_SOURCE_FILE), f.bridge.doors.sourceText())
+        assertTrue(room.states.zip(states).all { it.first === it.second })
+        assertEquals(0xA000, f.editor.currentRoomId); assertContentEquals(working, f.editor.workingLevelData); assertEquals(canvasHistory, f.editor.undoStack)
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE), f.workspace.error)
+        assertEquals(model, f.model()); assertEquals(source, f.sources()); assertEquals(canvasHistory, f.editor.undoStack)
+        assertTrue(f.editor.undo()); assertEquals(0, f.editor.readBlockWord(5, 5))
+    }
+
+    @Test fun `same area move refuses stale previews occupied drops and invalid drafts without publishing anything`() = runBlocking {
+        val failures: List<Pair<String, (Fixture) -> Unit>> = listOf(
+            "occupied room" to { f -> f.map.moveRoom(5, 7, f.editor) }, // Destination (10,10), occupied by A000.
+            "new map data" to { f -> persistMinimapData(f.parser, f.project, effectiveMinimapData(f.parser, f.project, 0).withTile(5, 3, 0x0F)) },
+            "new reveal data" to { f -> persistMapStationData(f.parser, f.project, effectiveMapStationData(f.parser, f.project, 0).withValue(5, 3, true)) },
+            "new header position" to { f -> val before = f.bridge.sourceText(); val room = f.project.rooms.getValue("91F8"); val source = AsmRoomPropertiesSource(before)
+                f.workspace.replaceProjectSource(PLM_SOURCE_FILE, before, source.editHeader(room, source.resource(room).header.copy(mapX = 4))) },
+            "invalid header" to { f -> val before = f.bridge.sourceText(); f.workspace.replaceProjectSource(PLM_SOURCE_FILE, before, before.replace("db ${'$'}00 ; Area", "db ${'$'}FF ; Area")) },
+            "pending canvas edit" to { f -> f.editor.brush = TileBrush.single(42, blockType = 8); f.editor.beginStroke(); f.editor.paintAt(5, 5) },
+            "changed mode" to { f -> f.project.asmWorkspace.buildMode = ProjectRomBuildMode.PATCHED_ROM })
+        for ((name, modify) in failures) {
+            val f = fixture(); assertTrue(f.editor.ensureRoomPropertiesSource("Room"))
+            f.map.moveRoom(3, 0, f.editor); modify(f)
+            val model = f.model(); val source = f.sources(); val revision = f.workspace.sourceBufferRevision
+            val canvasHistory = f.editor.undoStack.toList(); val mapHistory = f.map.undoStack.toList()
+            val working = f.editor.workingLevelData!!.copyOf()
+            assertFalse(f.map.applyMove(f.editor), "$name: ${f.editor.statusMessage}")
+            assertEquals(model, f.model(), name); assertEquals(source, f.sources(), name); assertEquals(revision, f.workspace.sourceBufferRevision, name)
+            assertEquals(canvasHistory, f.editor.undoStack, name); assertEquals(mapHistory, f.map.undoStack, name)
+            assertContentEquals(working, f.editor.workingLevelData, name)
+            f.map.cancelMove(f.editor)
+            assertEquals(effectiveMinimapData(f.parser, f.project, 0), f.map.mapData)
+        }
+    }
+
+    @Test fun `same area history composes with cross area save migration and blocks newer edits before undo`() = runBlocking {
+        val f = fixture()
+        val model = f.model(); val source = f.sources()
+        f.map.moveRoom(1, 0, f.editor); assertTrue(f.map.applyMove(f.editor), f.editor.statusMessage)
+        val first = f.model(); val firstSource = f.sources()
+        assertTrue(f.move().success, f.editor.statusMessage)
+        f.map.openRoom(f.parser, 0x91F8, f.editor)
+        f.map.moveRoom(1, 0, f.editor); assertTrue(f.map.applyMove(f.editor), f.editor.statusMessage)
+        val final = f.model(); val finalSource = f.sources()
+        val current = f.bridge.sourceText()
+        f.workspace.replaceProjectSource(PLM_SOURCE_FILE, current, current + "; Newer source\n")
+        f.map.undo(f.editor)
+        assertEquals(final, f.model()); assertContains(f.editor.statusMessage, "newer")
+        assertTrue(f.workspace.undoSourceEdit(PLM_SOURCE_FILE))
+        f.map.selectedTile = 0x2F; f.map.paintTile(50, 20, f.editor)
+        val painted = f.model()
+        assertFalse(f.workspace.undoSourceEdit(PLM_SOURCE_FILE)); assertEquals(painted, f.model()); assertEquals(finalSource, f.sources())
+        f.map.undo(f.editor); assertEquals(final, f.model())
+        repeat(2) { f.map.undo(f.editor) }
+        assertEquals(first, f.model()); assertEquals(firstSource, f.sources())
+        f.map.undo(f.editor)
+        assertEquals(model, f.model()); assertEquals(source, f.sources())
+        repeat(3) { f.map.redo(f.editor) }
+        assertEquals(final, f.model()); assertEquals(finalSource, f.sources())
+        assertEquals(1, f.coldExport().readRoomHeader(0x91F8)?.area)
+    }
+
+    @Test fun `same area moves preserve nested room cells and reject occupied reveals and padding row`() = runBlocking {
+        val f = fixture()
+        f.project.getOrCreateRoom(0xA000).roomHeaderChange = RoomHeaderChange(mapX = 2, mapY = 3, width = 1, height = 1)
+        f.map.loadArea(f.parser, 0, f.editor, selectRoomId = 0x91F8)
+        val model = f.model(); val source = f.sources()
+        f.map.moveRoom(4, 0, f.editor)
+        assertTrue(f.map.applyMove(f.editor), f.editor.statusMessage)
+        assertEquals(0x0F, f.map.mapData.getTile(2, 3)); assertTrue(f.map.stationData.isRevealed(2, 3))
+        assertTrue(isEmptyMinimapTile(f.map.mapData.getTile(6, 3))); assertFalse(f.map.stationData.isRevealed(6, 3))
+        assertEquals(0x0F, f.map.mapData.getTile(7, 3))
+        f.map.undo(f.editor)
+        assertEquals(model, f.model()); assertEquals(source, f.sources())
+        persistMapStationData(f.parser, f.project, f.map.stationData.withValue(6, 3, true))
+        f.map.moveRoom(4, 0, f.editor)
+        val occupied = f.model()
+        assertFalse(f.map.applyMove(f.editor)); assertEquals(occupied, f.model()); assertEquals(source, f.sources())
+        f.map.cancelMove(f.editor)
+        f.map.moveRoom(100, 100, f.editor)
+        assertEquals(62, f.map.moveBuffer?.currentX); assertEquals(29, f.map.moveBuffer?.currentY)
+        assertTrue(f.map.applyMove(f.editor), f.editor.statusMessage)
+        assertEquals(29, f.project.rooms.getValue("91F8").effectiveHeaderChange?.mapY)
+    }
+
     @Test fun `area move automatically adopts headers doors and state scoped saves as one cross bank action`() = runBlocking {
         val f = fixture()
         val beforeModel = f.model(); val beforeSources = f.sources()

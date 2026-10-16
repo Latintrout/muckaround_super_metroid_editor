@@ -30,6 +30,8 @@ data class ProjectRoomExportResult(
     /** Complete fixed records, including unchanged words, must have one source owner. */
     val sourceSaveClaims: List<Pair<Int, String>> = emptyList(),
     val sourceDoorClaims: List<Pair<Int, Int>> = emptyList(),
+    /** Scalar source owns unchanged bytes too, not dimensions, pointers or selector instructions. */
+    val sourceRoomPropertyClaims: List<Pair<Int, Int>> = emptyList(),
 )
 
 /**
@@ -66,6 +68,7 @@ class ProjectRoomExporter(
     private val allocations = mutableListOf<RomAllocation>()
     private val sourceSaveClaims = mutableListOf<Pair<Int, String>>()
     private val sourceDoorClaims = mutableListOf<Pair<Int, Int>>()
+    private val sourceRoomPropertyClaims = mutableListOf<Pair<Int, Int>>()
     private var stateGraphRedirectRoutinePtr: Int? = null
     private var statePredicateRoutinePtr: Int? = null
     private var stateExpressionInterpreterPtr: Int? = null
@@ -391,6 +394,19 @@ class ProjectRoomExporter(
                 applyExistingStateEdits(roomKey, roomId, roomEdits, rewrittenStateOffsets)
                 roomsPatched.add(roomKey)
             }
+            if (roomId in sourceRoomProperties) {
+                val headerPc = romParser.snesToPc(0x8F0000 or roomId)
+                sourceRoomPropertyClaims += headerPc to 4 // Index, area, Map X/Y.
+                sourceRoomPropertyClaims += headerPc + 6 to 3 // Scrollers and CRE; not dimensions/door pointer.
+                val nativeStates = if (rewrittenStateOffsets.isEmpty()) romParser.inspectRoomStates(roomId).states else emptyList()
+                for (state in roomEdits.states) {
+                    val statePc = rewrittenStateOffsets[state.id]
+                        ?: state.sourceStateIndex?.let { nativeStates.getOrNull(it)?.stateDataPcOffset }
+                        ?: failExport("Room 0x$roomKey state '${state.id}' has no scalar source record")
+                    sourceRoomPropertyClaims += statePc + 3 to 3 // Tileset, music data/track.
+                    sourceRoomPropertyClaims += statePc + 12 to 2 // BG scrolling.
+                }
+            }
             if (roomEdits.asmLayoutSourceVersion != 0) {
                 applySourceLayouts(roomKey, roomId, roomEdits, rewrittenStateOffsets, effectiveWidth, effectiveHeight)
                 roomsPatched.add(roomKey)
@@ -446,6 +462,7 @@ class ProjectRoomExporter(
             newRoomDoorDefPtrs = materialized.doorDefPtrsByProjectId,
             sourceSaveClaims = sourceSaveClaims,
             sourceDoorClaims = sourceDoorClaims,
+            sourceRoomPropertyClaims = sourceRoomPropertyClaims,
         )
     }
 

@@ -106,7 +106,7 @@ internal class CommunitySamusCatalogRepository(
     fun isDownloaded(snapshot: CommunitySamusCatalogSnapshot, sprite: MapRandoSamusSprite): Boolean =
         cachedFile(snapshot, sprite).isFile
 
-    /** Decode only the representative poses retained by the catalog card. */
+    /** Decode all pose images from the downloaded community sprite sheet. */
     fun loadShowcase(
         snapshot: CommunitySamusCatalogSnapshot,
         sprite: MapRandoSamusSprite,
@@ -114,7 +114,7 @@ internal class CommunitySamusCatalogRepository(
         val file = cachedFile(snapshot, sprite)
         if (!file.isFile) return null
         val sheet = decoder.decode(file).sheet ?: return null
-        val images = SHOWCASE_IMAGE_NAMES.mapNotNull(sheet.images::get)
+        val images = sheet.images.values.toList()
         return if (images.isEmpty()) null else CommunitySamusCatalogShowcase(images)
     }
 

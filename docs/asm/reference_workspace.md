@@ -1728,10 +1728,15 @@ fork and restored sharing, checking decoded bytes and state-specific resources.
 
 ## Reciprocal room header/state fields
 
-In ASM source mode, **Room Info → Header → ASM** previews the existing room's
-ordinary header/state fields without changing the project. **Create editable
-source** explicitly adopts them into project `bank_8F.asm`. **State fields → ASM**
-opens the selected state's declaration. This is a general room-editing workflow;
+In ASM source mode, **Room Info → Header → ASM** opens ordinary header/state fields
+directly in the editable source pane, without a **Create editable source** step.
+**State fields → ASM** opens the selected state's declaration. Like doors, an
+unowned room initially uses a staged full-bank editor view: opening, selecting,
+finding, saving or navigating away does not adopt source or add `BUILD*`.
+The first actual text change adopts the room's supported header/state-scalar
+family and retires legacy scalar overrides in the same undoable source edit.
+The staged declarations never leak into Save, Build or project-wide replacement
+before that change. This is a general room-editing workflow;
 generation is not required. The source pane's **Edit room** returns to the exact
 state without needing a build.
 
@@ -1746,23 +1751,37 @@ encoder's checked placement plan, rather than invoking them at an arbitrary `org
 Project schema 15 records source ownership, not duplicate scalar values. Adoption
 preserves earlier GUI overrides in the source, retires the JSON overrides and
 supports reciprocal undo. Invalid drafts remain saveable, retain a last-valid
-preview, and block GUI writes and builds. Fresh loads without a valid source
+preview even when the first keystroke is incomplete, and block GUI writes and builds.
+Undo of first typing restores legacy metadata, the earlier source, selected-state
+tileset/scroll preview and GUI history together, then reopens an untouched editor
+overlay with Redo available. ASM-first typing can attach an absent room without
+loading a canvas or disturbing another room's state/history. Stale model/source,
+project/mode/ROM or view changes reject adoption before any write; retained
+declarations require review rather than being overwritten. Existing bank bytes,
+notes, line endings, state identities and independent field values survive.
+Builds claim all seven owned header bytes and five bytes per state, including
+unchanged values, at their actual native/relocated record addresses. This keeps
+comment-only first edits and native-valued ownership buildable and prevents a
+ROM patch from silently overriding those source fields. Dimensions, pointers and
+selector instructions are not included in scalar claims.
+Fresh loads without a valid source
 projection show an unavailable-source warning instead of presenting native room
 data as the authored preview. The engine's debug/unused area 7 remains outside
 the existing writable-room contract. Clone-state, themes, resize and reset preserve the
 source ownership boundary.
 
 Header/scalar ownership does **not** include dimensions or door pointers; selector
-ownership is a separate layer described below. Use **Resize** for dimensions. Joint minimap
-room drags remain guarded after scalar adoption; cross-area moves now commit
-map/door/source changes together as described below. Changing raw map/area scalars alone
+ownership is a separate layer described below. Use **Resize** for dimensions.
+Minimap room drags now commit positions, map tiles and reveal cells together;
+cross-area moves also coordinate doors and saves as described below. Changing raw map/area scalars alone
 does not relocate minimap tiles or migrate area-specific records. Added-room
 projects remain guarded pending stable new-room source identities.
 
 Manual round trip:
 
 1. Open an existing room such as Flyway, select a state in **Room Info**, and
-   open **State fields → ASM**, then **Create editable source** on first adoption.
+   open **State fields → ASM**. It should already be editable, without changing
+   the project or build status just by opening it.
 2. Change its music-track `db` literal, for example `$05` to `$07`. Use
    **Edit room** and confirm that state's Music Track control changed.
 3. Change Music Track back using the GUI, then reopen **State fields → ASM**
@@ -1770,10 +1789,13 @@ Manual round trip:
 4. Open **Header → ASM**, change the CRE-flags byte to `$01`, and return to
    Room Info to inspect the flags. Check Undo/Redo, save/reopen and Build.
 
-`AsmRoomPropertiesSourceTest` covers adoption, literal preservation, raw/GUI
-edits, invalid drafts, reopen/export, navigation, clone-state, resize/themes/reset
+`AsmRoomPropertiesSourceTest` covers pure first-edit overlays, reciprocal ownership
+Undo/Redo, GUI/native preview restoration, inherited scalar overrides, CRLF/notes,
+incomplete first drafts, stale/no-write guards, adoption, raw/GUI edits,
+reopen/export, navigation, clone-state, resize/themes/reset
 and structural-edit guards. The real-Asar `room header and state source fields`
-integration builds Flyway after raw edits and undo, checking all eleven scalar
+integration types through the production automatic-header entry point, then
+builds headlessly after GUI/raw edits and ownership Undo/Redo, checking all eleven scalar
 fields and retaining state geometry, PLMs, enemies, FX and scripts.
 The literal-format test also round-trips the native fields of every writable
 vanilla catalog room.
@@ -1996,8 +2018,8 @@ Opening source, inspecting, or selecting an already-current area remains a no-op
 
 Known boundaries: added-room projects, shared DoorDefs, engine-owned start/elevator
 load records, save-table expansion, and destinations without a free map rectangle
-remain guarded with an explanation. Within-area drags of authored headers and
-joint resize remain separate follow-ups. **Reset** refuses to restore a relocated
+remain guarded with an explanation. Joint resize remains a separate follow-up.
+**Reset** refuses to restore a relocated
 header while leaving migrated map/neighbor/save state behind: Undo the relocation
 first. A future combined return-to-native/reset action can remove that extra step.
 Raw ASM header edits intentionally do not trigger hidden map/save migrations;
@@ -2017,17 +2039,59 @@ moves Frog Savestation with authored incoming doors and a managed arrival, check
 exact maps/flags/spawn words and stable identities, headless reopen/Undo/cache
 parity, and rejects a patch that attempts to reclaim the released save bytes.
 
+### Same-area map dragging
+
+In ASM mode, the existing Select-tool drag, middle-button drag and arrow-key
+Apply/Cancel controls work for both unowned and already-authored room headers.
+Only an applied move adopts the header/state-scalar family if needed. Previewing,
+cancelling, clicking without moving, and clamped no-motion drops do not write
+source, create history or dirty the project. Existing authored scalar values,
+private state data, notes and line endings survive.
+
+Apply stages the header's Map X/Y literals, visible map cells and station-reveal
+cells in the same source/model transaction used by area moves. Partial overlap
+with the room's old footprint works; nested/ambiguous source cells stay with their
+existing owners. Destination rooms, art and reveal cells cannot be overwritten,
+and room positions stay within logical rows 0–30 rather than the padding row.
+A room without pause-map art receives the existing automatic outline only on
+Apply. Dimensions, area, room index, doors, PLMs, saves and executable code do not
+change; a position-only action does not anchor the door bank's unrelated history.
+
+Hit testing refreshes authored positions first. Apply also verifies the preview's
+project/ROM/build mode, effective room rectangles and original map/reveal data.
+Changed positions/dimensions, invalid header drafts or map contents refuse the stale
+drop before any persistent write. Pointer rejection restores the current map;
+an arrow-key preview remains available to Cancel. Pending canvas/map strokes
+cannot be silently committed by a room move.
+
+Source, current-room canvas and map Undo/Redo share one identity and compose with
+cross-area moves. Newer conflicting edits block every part together; moving a
+different room preserves the current canvas and its earlier history. Reset after
+relocation still asks to Undo the move first, and raw ASM position edits still
+do not trigger an implicit tile migration.
+
+Manual check: drag **Frog Savestation** to an empty position in Norfair (or select
+it and use arrow keys then Apply), inspect its header Map X/Y, then Build. Undo
+from `bank_8F.asm` and Redo from Map should move both the outline and its art/reveal
+cells together. Check that its save index, spawn and arrival ASM stay unchanged.
+Synthetic tests cover previews, stale/no-write failures, nested/occupied/bounded
+drops, authored notes/private states and mixed move history; a real-Asar test
+checks exact maps, every room's non-position fields/doors, save words, preserved
+arrival code and headless build/Undo/Redo ROM parity.
+
 ## Room/source workflow safety contracts
 
 Room source links share the production `RoomAsmNavigation` router. Layout,
-header/state fields, selectors, initial scrolls, FX, enemies/GFX and object-source
+selectors, initial scrolls, FX, enemies/GFX and object-source
 adoption follow the same rule: inspection is read-only; **Create editable
 source** is an explicit ownership/edit boundary. A verified native PLM placement
 opens its existing code directly without creating wrapper declarations. Save-spawn
 links preview before authoring a missing declaration or retiring legacy spawn
 metadata. Scroll-command links already refer to existing owned source.
-Door data instead opens in the normal editor with adoption on the first text
-change; area moves also adopt their supported dependencies within the one action.
+Door data and ordinary header/state scalar fields instead open in the normal
+editor with adoption on the first text change; area/map moves also adopt their
+supported dependencies within the one action. State-selector/code conversion
+remains a separate workflow, not part of scalar ownership.
 
 ASM-first authoring is available directly in **Source** and **Assets** through
 **Preview / make editable…**, in either Original (read-only) or Project views when
@@ -2037,7 +2101,8 @@ Whole-file layout `incbin` declarations resolve through the asset manifest, so
 searching `LevelData_Flyway` in Source or `LevelData_Flyway.bin` in Assets leads to
 the same preview/adoption workflow. Shared addresses list their room/state consumers
 explicitly. Opening a preview never adopts data or dirties the build; Create editable
-source performs the conversion, and already-owned resources open directly.
+source performs explicit conversions for the remaining families. Header/state
+scalars and doors use first-edit adoption; already-owned resources open directly.
 
 No visual room needs to have been loaded. Preview/adoption of another room leaves
 the active canvas, selected state and GUI history untouched; the source document
@@ -2438,7 +2503,8 @@ Follow-up work can now be incremental:
    Existing DoorDef fields now have reciprocal declarations with stable identities.
    Managed arrival ASM now shares checked placement with predicates and symbolic DoorDefs.
    Cross-area header/map/door/save transactions now work from the existing GUI actions.
-   Next are structural connection edits, same-area source/map drags, and coordinated
+   Same-area source/map drags now share header/map/reveal history without door/save changes.
+   Next are structural connection edits and coordinated
    geometry/reset workflows following relocation. Asset-owned tileset/palette/separate-background authoring and
    stable project-created room source identities follow those room workflows.
    Graphics, map, text, and sound encoders should follow the same

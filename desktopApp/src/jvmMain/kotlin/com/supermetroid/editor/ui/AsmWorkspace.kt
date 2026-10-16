@@ -2922,7 +2922,7 @@ private fun AsmSourceCanvas(
         }, closeFind)
         if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
             state.roomSourceInspection?.takeIf { it.fileId == source.id && it.automaticEdit != null }?.let {
-                Text("Door data is ready to edit and syncs with the room editor. Opening this view changes nothing.",
+                Text("This room data is ready to edit and syncs with the visual editor. Opening this view changes nothing.",
                     fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
             }

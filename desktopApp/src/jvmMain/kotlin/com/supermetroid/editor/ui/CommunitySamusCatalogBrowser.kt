@@ -6,7 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -212,56 +211,35 @@ internal fun CommunitySamusCatalogBrowser(
 
             Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
             Column(
-                Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(22.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
             ) {
-                Spacer(Modifier.height(12.dp))
+                // ── Info header (always visible at top) ──
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(0.9f).widthIn(max = 780.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
-                        Modifier.fillMaxWidth().padding(24.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        when {
-                            showcase != null -> CommunitySamusShowcase(showcase!!, selected.displayName)
-                            showcaseLoading -> ShowcaseLoading()
-                            else -> {
-                                Box(
-                                    Modifier.size(110.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        selected.displayName.take(1).uppercase(),
-                                        fontSize = fs.display,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                                Text(
-                                    if (selectedDownloaded) "Saved preview unavailable" else "Download to see representative in-game poses",
-                                    fontSize = fs.detail,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(3.dp))
-                        Text(selected.displayName, fontSize = fs.display, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(selected.displayName, fontSize = fs.heading, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         Text("by ${selected.authors.joinToString()}", fontSize = fs.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            "${selected.category} · catalog v${selected.version}",
-                            fontSize = fs.detail,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(selected.name, fontSize = fs.detail, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        CatalogBadge(
-                            if (romReadyCatalog) "VERIFIED ROM PATCH AVAILABLE" else "SOURCE PREVIEW ONLY",
-                            if (romReadyCatalog) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                        Spacer(Modifier.height(5.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "${selected.category} · v${selected.version}",
+                                fontSize = fs.detail,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            CatalogBadge(
+                                if (romReadyCatalog) "ROM-READY" else "PREVIEW",
+                                if (romReadyCatalog) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
                         if (!selectedDownloaded) {
                             CatalogAction(
                                 if (downloadingName == selected.name) "Downloading & validating…" else "Download Preview",
@@ -301,69 +279,75 @@ internal fun CommunitySamusCatalogBrowser(
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    "Artwork downloads directly from MapRandoSprites only when requested and stays in SMEDIT’s local cache.",
-                    fontSize = fs.detail,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(18.dp))
+
+                // ── All sprite poses (flowing grid, full width) ──
+                when {
+                    showcase != null -> CommunitySamusShowcase(showcase!!, selected.displayName)
+                    showcaseLoading -> ShowcaseLoading()
+                    else -> {
+                        Box(
+                            Modifier.fillMaxWidth().height(120.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (selectedDownloaded) "Saved preview unavailable" else "Download to see all in-game poses",
+                                fontSize = fs.detail,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun CommunitySamusShowcase(
     showcase: CommunitySamusCatalogShowcase,
     displayName: String,
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
-    val bitmaps = remember(showcase) { showcase.images.map { it.toCatalogImageBitmap() } }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columns = showcaseColumnCount(maxWidth.value)
-        val rows = (bitmaps.size + columns - 1) / columns
-        val showcaseHeight = (rows * SHOWCASE_CELL_SIZE + (rows - 1).coerceAtLeast(0) * SHOWCASE_GAP + 24).dp
-        Box(
-            Modifier.fillMaxWidth().height(showcaseHeight)
-                .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(SHOWCASE_GAP.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                bitmaps.indices.chunked(columns).forEach { indices ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(SHOWCASE_GAP.dp)) {
-                        indices.forEach { index ->
-                            Surface(
-                                modifier = Modifier.requiredSize(SHOWCASE_CELL_SIZE.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(6.dp),
-                            ) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                                    Image(
-                                        bitmap = bitmaps[index],
-                                        contentDescription = "$displayName ${showcase.images[index].name}",
-                                        modifier = Modifier.fillMaxSize().padding(7.dp),
-                                        contentScale = ContentScale.Fit,
-                                        filterQuality = FilterQuality.None,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if (!showcase.hasVisiblePixels) {
+    val bitmaps = remember(showcase) { showcase.images.map { it to it.toCatalogImageBitmap() } }
+    Box(
+        Modifier.fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 10.dp, vertical = 12.dp),
+    ) {
+        if (!showcase.hasVisiblePixels) {
+            Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                 Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f), shape = RoundedCornerShape(5.dp)) {
                     Text(
-                        "Representative gameplay poses are transparent",
+                        "All poses are transparent for this sprite",
                         fontSize = fs.body,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
+                }
+            }
+        } else {
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(SHOWCASE_GAP.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(SHOWCASE_GAP.dp),
+            ) {
+                bitmaps.forEach { (image, bitmap) ->
+                    Surface(
+                        modifier = Modifier.requiredSize(SHOWCASE_CELL_SIZE.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(6.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                            Image(
+                                bitmap = bitmap,
+                                contentDescription = "$displayName ${image.name}",
+                                modifier = Modifier.fillMaxSize().padding(7.dp),
+                                contentScale = ContentScale.Fit,
+                                filterQuality = FilterQuality.None,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -373,44 +357,17 @@ private fun CommunitySamusShowcase(
 @Composable
 private fun ShowcaseLoading() {
     val fs = LocalEditorTheme.current.fontSize.value
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columns = showcaseColumnCount(maxWidth.value)
-        val rows = (SHOWCASE_ITEM_COUNT + columns - 1) / columns
-        val showcaseHeight = (rows * SHOWCASE_CELL_SIZE + (rows - 1) * SHOWCASE_GAP + 24).dp
-        Box(
-            Modifier.fillMaxWidth().height(showcaseHeight)
-                .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(SHOWCASE_GAP.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                repeat(rows) { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(SHOWCASE_GAP.dp)) {
-                        repeat(minOf(columns, SHOWCASE_ITEM_COUNT - row * columns)) {
-                            Box(
-                                Modifier.requiredSize(SHOWCASE_CELL_SIZE.dp)
-                                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp)),
-                            )
-                        }
-                    }
-                }
-            }
-            Text("Building downloaded pose preview…", fontSize = fs.body, color = MaterialTheme.colorScheme.primary)
-        }
+    Box(
+        Modifier.fillMaxWidth().height(200.dp)
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Building all pose previews…", fontSize = fs.body, color = MaterialTheme.colorScheme.primary)
     }
 }
 
-private fun showcaseColumnCount(availableWidthDp: Float): Int =
-    (((availableWidthDp - 20f) + SHOWCASE_GAP) / (SHOWCASE_CELL_SIZE + SHOWCASE_GAP))
-        .toInt()
-        .coerceIn(1, SHOWCASE_MAX_COLUMNS)
-
-private const val SHOWCASE_MAX_COLUMNS = 4
-private const val SHOWCASE_ITEM_COUNT = 16
-private const val SHOWCASE_CELL_SIZE = 104
-private const val SHOWCASE_GAP = 7
+private const val SHOWCASE_CELL_SIZE = 90
+private const val SHOWCASE_GAP = 5
 
 @Composable
 internal fun CommunitySamusCatalogStatus(

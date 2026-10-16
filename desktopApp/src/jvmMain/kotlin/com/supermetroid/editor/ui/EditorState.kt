@@ -77,6 +77,7 @@ import com.supermetroid.editor.procgen.TilesetProfile
 import com.supermetroid.editor.procgen.TilesetProfileCache
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.MinimapData
+import com.supermetroid.editor.rom.MapStationData
 import com.supermetroid.editor.rom.PaletteEffects
 import com.supermetroid.editor.rom.NspcRenderer
 import com.supermetroid.editor.rom.NspcSequence
@@ -708,7 +709,7 @@ class EditorState(
             "Finish the current tile stroke or selection before creating arrival ASM."
         }
         val name = requireNotNull(currentRomParser?.readRoomHeader(currentRoomId)) { "Select a current room first." }.name
-        recordDoorSourceOperation(currentRoomId, "Create managed arrival ASM") { bridge, undo, redo ->
+        recordRoomSourceOperation(currentRoomId, "Create managed arrival ASM") { bridge, undo, redo ->
             bridge.doors.createManagedArrival(currentRoomId, index, name, undo, redo)
         }
         true
@@ -743,17 +744,30 @@ class EditorState(
         require(pendingEdits.isEmpty() && pendingSourcePattern == null && floatingSelection == null) {
             "Finish the current tile stroke or selection before editing door source."
         }
-        recordDoorSourceOperation(roomId, "Edit door source", afterUndo, afterRedo) { bridge, undo, redo ->
+        recordRoomSourceOperation(roomId, "Edit door source", afterUndo, afterRedo) { bridge, undo, redo ->
             bridge.doors.editUnmanaged(roomId, name, expected, replacement, undo, redo)
         }
         true
     }.getOrElse { postStatus("Door source edit blocked: ${it.message}"); false }
 
+    internal fun editInspectedRoomPropertiesSource(roomId: Int, name: String, expected: String, replacement: String,
+                                                   afterUndo: () -> Unit, afterRedo: () -> Unit): Boolean = runCatching {
+        require(pendingEdits.isEmpty() && pendingSourcePattern == null && floatingSelection == null &&
+            pendingPlmAdds.isEmpty() && pendingPlmRemoves.isEmpty() && pendingLayoutEditScope == null) {
+            "Finish the current tile stroke, selection or scope choice before editing room-property source."
+        }
+        recordRoomSourceOperation(roomId, "Edit room header/state source", afterUndo, afterRedo, PLM_SOURCE_FILE) { bridge, undo, redo ->
+            bridge.properties.editUnmanaged(roomId, name, expected, replacement, undo, redo)
+        }
+        true
+    }.getOrElse { postStatus("Room-property source edit blocked: ${it.message}"); false }
+
     /** Keep the visible GUI and source histories aligned for one action, including automatic ownership. */
-    private fun recordDoorSourceOperation(roomId: Int, description: String, afterUndo: () -> Unit = {}, afterRedo: () -> Unit = {},
+    private fun recordRoomSourceOperation(roomId: Int, description: String, afterUndo: () -> Unit = {}, afterRedo: () -> Unit = {},
+                                          fileId: String = DOOR_SOURCE_FILE,
                                           action: (AsmPlmSourceBridge, () -> Unit, () -> Unit) -> Unit) {
         val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the project ASM workspace." }
-        val before = bridge.doors.sourceText()
+        val before = if (fileId == DOOR_SOURCE_FILE) bridge.doors.sourceText() else bridge.sourceText()
         val owner = project
         val operation = EditOperation(description)
         var recorded = false
@@ -767,11 +781,11 @@ class EditorState(
         }
         action(bridge, {
                 moveHistory(true)
-                if (roomId == currentRoomId) currentRomParser?.let { doorEntries = effectiveDoorsForRoom(roomId, it) }
+                if (fileId == DOOR_SOURCE_FILE && roomId == currentRoomId) currentRomParser?.let { doorEntries = effectiveDoorsForRoom(roomId, it) }
                 refreshLinkedPlms(); afterUndo()
             }, { moveHistory(false); refreshLinkedPlms(); afterRedo() })
         if (roomId == currentRoomId) {
-            recordManagedRoomOperation(operation, before, bridge, DOOR_SOURCE_FILE)
+            recordManagedRoomOperation(operation, before, bridge, fileId)
             recorded = true
         }
         refreshLinkedPlms()
@@ -882,6 +896,7 @@ class EditorState(
     }.getOrElse { postStatus("Room properties blocked: ${it.message}"); false }
 
     private fun refreshRoomProperties() {
+        val wasManaged = currentRoomId in roomPropertiesPreviewRevision
         asmPlmSourceBridge?.properties?.refreshAll()
         val projections = project.rooms.values.filter { it.asmRoomPropertiesSourceVersion != 0 }.associate {
             it.roomId to (it.asmHeaderPropertiesProjection to it.states.map { state -> state.asmStatePropertiesProjection })
@@ -890,12 +905,23 @@ class EditorState(
             roomPropertiesPreviewRevision = projections
             _editVersionState.value++ // Plain transient projections must still invalidate Compose consumers.
         }
-        if (!hasManagedRoomProperties()) { roomPropertiesPreviewProblem = null; return }
+        if (!hasManagedRoomProperties()) {
+            roomPropertiesPreviewProblem = null
+            // Ownership Undo must also restore the legacy state/graphics preview, without reloading the canvas/history.
+            if (wasManaged) currentRomParser?.let { parser -> parser.readRoomHeader(currentRoomId)?.let { native ->
+                val state = applyCurrentStateData(native, parser)
+                applyRoomPropertiesPreview(applyHeaderChanges(native).area, state.bgScrolling, state.tileset)
+            } }
+            return
+        }
         val view = asmPlmSourceBridge?.properties?.view(currentRoomId)
         roomPropertiesPreviewProblem = view?.problem ?: if (view == null) "Room properties are loading…" else null
         val resource = view?.resource ?: return
         val state = currentPlmStateId()?.let { resource.states[it] } ?: return
-        val area = requireNotNull(resource.header.area)
+        applyRoomPropertiesPreview(requireNotNull(resource.header.area), requireNotNull(state.bgScrolling), requireNotNull(state.tileset))
+    }
+
+    private fun applyRoomPropertiesPreview(area: Int, bgScrolling: Int, tileset: Int) {
         if (currentArea != area) {
             currentArea = area
             currentRomParser?.let { parser ->
@@ -905,10 +931,10 @@ class EditorState(
                     .mapNotNull { index -> parser.readSaveEntry(area, index)?.let { index to it } }.toMap()
             }
         }
-        currentBgScrolling = requireNotNull(state.bgScrolling)
+        currentBgScrolling = bgScrolling
         if (!canEditEmbeddedLayer2()) activeRoomLayer = RoomEditLayer.LAYER1
-        if (currentTilesetId != state.tileset) {
-            currentTilesetId = requireNotNull(state.tileset)
+        if (currentTilesetId != tileset) {
+            currentTilesetId = tileset
             currentRomParser?.let(::reloadCurrentRoomTileGraphics)
         }
     }
@@ -8151,7 +8177,7 @@ class EditorState(
             val bridge = requireNotNull(asmPlmSourceBridge)
             val plan = bridge.areaMoves.plan(roomId, updatedHeader.copy(area = targetArea, mapX = destinationX, mapY = destinationY),
                 doorUpdates, areaSavePlan, mapPlan.minimapEdits, mapPlan.mapStationEdits, ::isEditorItemPlm, bridge.describePlm)
-            applySourceAreaMove(roomId, romParser, plan)
+            applySourceRoomMove(roomId, romParser, plan)
         }.getOrElse {
             val message = "Cannot move ${baseRoom.name}: ${it.message}"
             postStatus(message)
@@ -8206,10 +8232,43 @@ class EditorState(
         }
     }
 
-    private fun applySourceAreaMove(roomId: Int, parser: RomParser, plan: com.supermetroid.editor.asm.AsmRoomAreaMovePlan): com.supermetroid.editor.asm.AsmRoomAreaMoveHistory {
+    /** Read authored positions before hit testing or checking room/map ownership. This is inspection only. */
+    internal fun refreshRoomMapHeaders(parser: RomParser) {
+        val owned = project.rooms.values.filter { it.asmRoomPropertiesSourceVersion != 0 }
+        if (owned.isEmpty()) return
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the authored room headers." }
+        require(bridge.catalog.parser === parser) { "The room ROM changed; reopen its current ASM workspace." }
+        bridge.properties.refreshAll()
+        for (room in owned) require(bridge.properties.view(room.roomId).problem == null) {
+            "Repair the authored header/state fields for ${room.roomId.toString(16)} before moving rooms on the map."
+        }
+    }
+
+    internal fun applySourceRoomMapMove(buffer: RoomMoveBuffer, parser: RomParser, map: MinimapData,
+                                      stations: MapStationData): com.supermetroid.editor.asm.AsmRoomAreaMoveHistory {
+        require(asmNavigationEnabled && project.newRooms.isEmpty()) {
+            "Use the existing-room ASM workspace for this move; added-room source identities are not supported yet."
+        }
+        val bridge = requireNotNull(asmPlmSourceBridge) { "Wait for the ASM workspace." }
+        require(bridge.catalog.parser === parser) { "The room ROM changed; wait for the current ASM link." }
+        refreshRoomMapHeaders(parser)
+        val room = applyHeaderChanges(requireNotNull(parser.readRoomHeader(buffer.roomId)))
+        require(room.area == map.area && stations.area == map.area && room.mapX == buffer.origX && room.mapY == buffer.origY &&
+            room.width == buffer.width && room.height == buffer.height) { "The room's map position or dimensions changed; cancel and start this move again." }
+        val planned = project.copy(minimapEdits = project.minimapEdits.toMutableMap(), mapStationEdits = project.mapStationEdits.toMutableMap())
+        persistMinimapData(parser, planned, map)
+        persistMapStationData(parser, planned, stations)
+        val plan = bridge.areaMoves.plan(buffer.roomId,
+            RoomHeaderChange(area = room.area, mapX = buffer.currentX, mapY = buffer.currentY), emptyMap(), AreaSaveMigrationPlan(),
+            planned.minimapEdits, planned.mapStationEdits, ::isEditorItemPlm, bridge.describePlm)
+        return applySourceRoomMove(buffer.roomId, parser, plan, "Move room on map")
+    }
+
+    private fun applySourceRoomMove(roomId: Int, parser: RomParser, plan: com.supermetroid.editor.asm.AsmRoomAreaMovePlan,
+                                    description: String = "Move room to another area"): com.supermetroid.editor.asm.AsmRoomAreaMoveHistory {
         val bridge = requireNotNull(asmPlmSourceBridge)
         val activeRoom = currentRoomId
-        val operation = EditOperation("Move room to another area")
+        val operation = EditOperation(description)
         var recorded = false
         return bridge.areaMoves.apply(plan, beforeTransition = {
             requireAreaMoveIdle()

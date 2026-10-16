@@ -325,7 +325,7 @@ internal class AsmWorkspaceState(
     val sourceStatusSummary: String
         get() {
             roomSourceInspection?.takeIf { it.fileId == selectedFileId }?.let {
-                return if (it.automaticEdit != null) "Door source · editable · project changes on first edit"
+                return if (it.automaticEdit != null) "Room source · editable · project changes on first edit"
                 else "Room source · read-only preview · not adopted"
             }
             if (browserMode == AsmBrowserMode.GENERATED_ROOMS) {

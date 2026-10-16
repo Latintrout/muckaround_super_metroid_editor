@@ -45,6 +45,77 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `same area room drags build exact maps and reciprocal header history without rewriting saves or arrival code`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState(sourceIndexLoader = { com.supermetroid.editor.asm.AsmProjectWorkspaceRepository().loadRoomWorkspace(it) })
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project) }
+        val bridge = editor.bindRoomSources(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace)
+        val native = assertNotNull(parser.readRoomHeader(0xB167)) // Frog Savestation exercises saves and executable arrivals too.
+        editor.loadRoom(native.roomId, parser, native)
+        assertTrue(editor.ensureCurrentPlmSource(native.name), editor.statusMessage)
+        val savePlm = editor.workingPlms.single { it.id == 0xB76F }
+        assertTrue(editor.ensureSaveSpawnSource(savePlm), editor.statusMessage)
+        assertTrue(editor.createManagedDoorArrival(0), editor.statusMessage)
+        val arrival = assertNotNull(editor.doorArrivalBindings[0]).label
+        val arrivalBody = authoredMacroBody(bridge.sourceText(), arrival.removeSuffix("_Entry"))
+        val save = bridge.saveResources(native.roomId).single()
+        val logs = mutableListOf<String>()
+        val json = kotlinx.serialization.json.Json
+        suspend fun build(): RomBuildResult? {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            logs.clear()
+            val headless = json.decodeFromString<SmEditProject>(json.encodeToString(SmEditProject.serializer(), project))
+            return ProjectFileService.buildRom(headless, parser, logs::add, logs::add, fixture.projectFile.path)
+        }
+        val baseline = assertNotNull(build(), logs.joinToString("\n"))
+        val baselineRom = RomParser(baseline.resultRom)
+        val map = MinimapEditorState().apply { loadArea(parser, native.area, editor, selectRoomId = native.roomId) }
+        val beforeModel = json.encodeToString(SmEditProject.serializer(), project)
+        val before8F = bridge.sourceText(); val before83 = bridge.doors.sourceText()
+        val ownership = roomMapOwnershipMask(native, map.areaRooms)
+        val cleared = clearRoomTiles(map.mapData, native.mapX, native.mapY, native.width, native.height, ownership)
+        val clearedReveal = clearMapStationRect(map.stationData, native.mapX, native.mapY, native.width, native.height, ownership)
+        val target = assertNotNull(findAvailableRoomMapPosition(cleared, clearedReveal,
+            map.areaRooms.filter { it.roomId != native.roomId }, native.width, native.height, 50, 25))
+        assertNotEquals(native.mapX to native.mapY, target)
+        assertTrue(map.beginPrimaryRoomDrag(native.mapX, native.mapY, editor))
+        map.endPrimaryRoomDrag(target.first, target.second, editor)
+        assertNull(map.moveBuffer); assertNull(map.selectedRoom)
+        assertEquals(1, project.rooms.getValue(project.roomKey(native.roomId)).asmRoomPropertiesSourceVersion)
+        assertEquals(before83, bridge.doors.sourceText()); assertEquals(arrivalBody, authoredMacroBody(bridge.sourceText(), arrival.removeSuffix("_Entry")))
+        assertEquals(save, bridge.saveResources(native.roomId).single())
+        val afterModel = json.encodeToString(SmEditProject.serializer(), project)
+        val after8F = bridge.sourceText()
+        val moved = assertNotNull(build(), logs.joinToString("\n"))
+        val built = RomParser(moved.resultRom)
+        assertEquals(target.first, built.readRoomHeader(native.roomId)?.mapX); assertEquals(target.second, built.readRoomHeader(native.roomId)?.mapY)
+        assertEquals(native.area, built.readRoomHeader(native.roomId)?.area)
+        for (info in parser.roomCatalog.rooms) {
+            val old = assertNotNull(baselineRom.readRoomHeader(info.getRoomIdAsInt()))
+            val current = assertNotNull(built.readRoomHeader(info.getRoomIdAsInt()))
+            assertEquals(old.copy(mapX = if (old.roomId == native.roomId) target.first else old.mapX,
+                mapY = if (old.roomId == native.roomId) target.second else old.mapY), current)
+            assertEquals(baselineRom.parseDoorList(old.doorOut), built.parseDoorList(current.doorOut))
+        }
+        assertEquals(save.words, built.readSaveEntry(save.area, save.slot)!!.words())
+        assertContentEquals(effectiveMinimapData(parser, project, native.area).tiles, built.readMinimapTiles(native.area).tiles)
+        assertContentEquals(effectiveMapStationData(parser, project, native.area).revealed, built.readMapStationData(native.area).revealed)
+        assertEquals(after8F, bridge.sourceText(), "Build must not reauthor the dragged room")
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertEquals(beforeModel, json.encodeToString(SmEditProject.serializer(), project)); assertEquals(before8F, bridge.sourceText())
+        assertContentEquals(baseline.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        map.redo(editor)
+        assertEquals(afterModel, json.encodeToString(SmEditProject.serializer(), project)); assertEquals(after8F, bridge.sourceText())
+        assertContentEquals(moved.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertEquals(beforeModel, json.encodeToString(SmEditProject.serializer(), project))
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
+
     @Test fun `source owned area moves preserve arrival code migrate saves and build exact undo redo maps and door flags`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)
@@ -954,12 +1025,23 @@ class AsmBuildPipelineIntegrationTest {
         val project = sourceProject(fixture)
         val workspace = AsmWorkspaceState()
         workspace.bindProject(fixture.projectFile.path, true, progressive = true)
-        val bridge = AsmPlmSourceBridge(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace) { project }
-        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project); asmPlmSourceBridge = bridge }
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project) }
+        val bridge = editor.bindRoomSources(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace)
         val native = parser.readRoomHeader(0x9879)!!
         val nativeStates = parser.parseRoomStatesWithData(native.roomId)
         editor.loadRoom(native.roomId, parser, native)
-        assertTrue(editor.ensureRoomPropertiesSource(native.name), editor.statusMessage)
+        val json = kotlinx.serialization.json.Json
+        val originalModel = json.encodeToString(SmEditProject.serializer(), project)
+        val originalSource = bridge.sourceText(); val revision = workspace.sourceBufferRevision
+        val navigation = RoomAsmNavigation(editor, workspace, { native.name })
+        assertTrue(navigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.PROPERTIES)), editor.statusMessage)
+        assertTrue(workspace.isProjectSourceEditable); assertNotNull(workspace.roomSourceInspection?.automaticEdit)
+        assertEquals(originalModel, json.encodeToString(SmEditProject.serializer(), project)); assertEquals(originalSource, bridge.sourceText())
+        assertEquals(revision, workspace.sourceBufferRevision)
+        val planned = workspace.sourceEditorText(PLM_SOURCE_FILE)
+        val adoptedText = planned.replace("; Room index", "; Room index / first automatic edit")
+        assertTrue(workspace.updateSourceEditText(PLM_SOURCE_FILE, adoptedText), editor.statusMessage)
+        assertNull(workspace.roomSourceInspection); assertEquals(1, editor.undoStack.size)
         val room = project.rooms.getValue("9879")
         val selected = editor.currentPlmStateId()!!
         editor.setRoomStateDataChange(selected, com.supermetroid.editor.data.StateDataChange(musicData = 0x18, musicTrack = 5, bgScrolling = 0x0201), parser)
@@ -974,7 +1056,8 @@ class AsmBuildPipelineIntegrationTest {
             assertTrue(workspace.saveAllSources(), workspace.error)
             val authored = if (room.asmRoomPropertiesSourceVersion == 0) null else com.supermetroid.editor.asm.AsmRoomPropertiesSource(bridge.sourceText()).resource(room)
             val logs = mutableListOf<String>()
-            val result = assertNotNull(ProjectFileService.buildRom(project, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
+            val headless = json.decodeFromString<SmEditProject>(json.encodeToString(SmEditProject.serializer(), project))
+            val result = assertNotNull(ProjectFileService.buildRom(headless, parser, logs::add, logs::add, fixture.projectFile.path), logs.joinToString("\n"))
             val built = RomParser(result.resultRom)
             val h = built.readRoomHeader(native.roomId)!!
             assertEquals(authored?.header?.index ?: native.index, h.index)
@@ -1010,6 +1093,11 @@ class AsmBuildPipelineIntegrationTest {
         assertTrue(editor.undo(), editor.statusMessage) // GUI state fields.
         assertTrue(editor.undo(), editor.statusMessage) // Source adoption.
         assertEquals(0, room.asmRoomPropertiesSourceVersion)
+        assertEquals(originalModel, json.encodeToString(SmEditProject.serializer(), project)); assertEquals(originalSource, bridge.sourceText())
+        assertNotNull(workspace.roomSourceInspection?.automaticEdit)
+        buildAndVerify()
+        assertTrue(workspace.redoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertNull(workspace.roomSourceInspection); assertEquals(adoptedText, bridge.sourceText())
         buildAndVerify()
     }
 

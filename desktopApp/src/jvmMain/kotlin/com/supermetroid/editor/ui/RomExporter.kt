@@ -524,6 +524,9 @@ internal class RomExporter(
                         for ((pcOffset, size) in roomExportResult.sourceDoorClaims) {
                             writePlan.claimCurrentRange(owner, "Authored DoorDef / connection identity", pcOffset - writePlan.headerSize, size, RomWriteKind.ROOM)
                         }
+                        for ((pcOffset, size) in roomExportResult.sourceRoomPropertyClaims) {
+                            writePlan.claimCurrentRange(owner, "Authored room header/state scalars", pcOffset - writePlan.headerSize, size, RomWriteKind.ROOM)
+                        }
                     }
                 }
             } catch (e: ProjectRoomExportException) {

@@ -2,6 +2,7 @@ package com.supermetroid.editor.asm
 
 import com.supermetroid.editor.data.*
 import com.supermetroid.editor.rom.*
+import kotlinx.serialization.json.Json
 
 internal data class AsmRoomPropertiesView(val resource: SourceRoomProperties?, val problem: String?)
 
@@ -62,6 +63,75 @@ internal class AsmRoomPropertiesBridge(
         upScroller = override?.upScroller ?: upScroller, downScroller = override?.downScroller ?: downScroller,
         creBitflag = override?.creBitflag ?: creBitflag)
 
+    private fun adoptScalars(room: RoomEdits, resource: SourceRoomProperties) {
+        room.roomHeaderChange = room.roomHeaderChange?.let { RoomHeaderChange(width = it.width, height = it.height, doorOut = it.doorOut) }
+            ?.takeUnless { it == RoomHeaderChange() }
+        room.stateDataChange = null; room.states.forEach { it.stateDataChange = null }
+        room.asmRoomPropertiesSourceVersion = 1
+        resource.projectInto(room)
+    }
+
+    /** A full editor document, but not a source/model mutation until the first actual text change. */
+    fun automaticSource(room: RoomEdits, name: String): String {
+        val owner = project()
+        require(owner.asmWorkspace.enabled && owner.asmWorkspace.buildMode == ProjectRomBuildMode.ASM_SOURCE && owner.newRooms.isEmpty()) {
+            "Room properties require existing-room ASM source mode."
+        }
+        require(!isManaged(room.roomId)) { "Room-property ownership changed; reopen its source." }
+        val before = workspace.projectSourceText(PLM_SOURCE_FILE)
+        require(!Regex("(?im)^[ \\t]*macro[ \\t]+${Regex.escape(AsmRoomPropertiesSource.prefix(room.roomId))}").containsMatchIn(before)) {
+            "Retained room-property declarations need review before adoption."
+        }
+        val resource = effectiveProperties(room)
+        val staged = snapshotRoomForResize(room).also { adoptScalars(it, resource) }
+        val newline = if (before.contains("\r\n")) "\r\n" else "\n"
+        val separator = if (before.isEmpty() || before.endsWith(newline + newline)) "" else if (before.endsWith(newline)) newline else newline + newline
+        val after = before + separator + AsmRoomPropertiesSource.render(room, name, resource).replace("\n", newline)
+        AsmRoomPropertiesSource(after).resource(staged)
+        return after
+    }
+
+    /** First typing and ownership retirement are one reversible action; invalid drafts remain editable. */
+    fun editUnmanaged(roomId: Int, name: String, expected: String, replacement: String,
+                      afterUndo: () -> Unit, afterRedo: () -> Unit) {
+        val owner = project()
+        val key = owner.roomKey(roomId)
+        val existing = owner.rooms[key]
+        val live = existing ?: RoomEdits(roomId)
+        val original = snapshotRoomForResize(live)
+        val staged = snapshotRoomForResize(live).also { it.ensureStateManifest(catalog.parser) }
+        require(automaticSource(staged, name) == expected) { "Room-property source changed; reopen its current link before editing." }
+        require(expected != replacement) { "No room-property source change to apply." }
+        val resource = effectiveProperties(staged)
+        adoptScalars(staged, resource)
+        val before = workspace.projectSourceText(PLM_SOURCE_FILE)
+        fun encode(room: RoomEdits) = Json.encodeToString(RoomEdits.serializer(), room) // Ignore disposable projections.
+        fun checkCurrent(undo: Boolean) {
+            require(project() === owner && owner.rooms[key] === (if (undo || existing != null) live else null) &&
+                encode(live) == encode(if (undo) staged else original)) {
+                "Room data changed; undo newer edits before restoring room-property ownership."
+            }
+        }
+        fun setRoom(undo: Boolean) {
+            val target = if (undo) original else staged
+            if (original.states.isEmpty()) { live.states.clear(); live.states.addAll(snapshotRoomForResize(target).states) }
+            live.roomHeaderChange = target.roomHeaderChange; live.stateDataChange = target.stateDataChange
+            live.asmRoomPropertiesSourceVersion = target.asmRoomPropertiesSourceVersion
+            live.asmHeaderPropertiesProjection = target.asmHeaderPropertiesProjection
+            live.states.zip(target.states).forEach { (state, saved) ->
+                state.stateDataChange = saved.stateDataChange; state.asmStatePropertiesProjection = saved.asmStatePropertiesProjection
+            }
+            if (undo && existing == null) owner.rooms.remove(key) else owner.rooms[key] = live
+            owner.projectFormatVersion = SmEditProject.CURRENT_PROJECT_FORMAT_VERSION
+        }
+        fun notify() { refreshAll(); changed() }
+        checkCurrent(false)
+        workspace.replaceProjectSources(mapOf(PLM_SOURCE_FILE to (before to replacement)),
+            beforeApply = { setRoom(false) }, afterApply = { lastGood[roomId] = resource; notify() },
+            beforeUndo = { checkCurrent(true); setRoom(true) }, afterUndo = { notify(); afterUndo() },
+            beforeRedo = { checkCurrent(false); setRoom(false) }, afterRedo = { notify(); afterRedo() })
+    }
+
     fun migrate(roomId: Int, name: String) {
         if (isManaged(roomId)) return
         val owner = project()
@@ -72,10 +142,7 @@ internal class AsmRoomPropertiesBridge(
         val beforeModel = snapshotRoomForResize(room)
         val staged = snapshotRoomForResize(room)
         val resource = effectiveProperties(room)
-        staged.roomHeaderChange = room.roomHeaderChange?.let { RoomHeaderChange(width = it.width, height = it.height, doorOut = it.doorOut) }?.takeUnless { it == RoomHeaderChange() }
-        staged.stateDataChange = null; staged.states.forEach { it.stateDataChange = null }
-        staged.asmRoomPropertiesSourceVersion = 1
-        resource.projectInto(staged)
+        adoptScalars(staged, resource)
         val current = source()
         require(!Regex("(?m)^macro ${AsmRoomPropertiesSource.prefix(roomId)}").containsMatchIn(current.text)) { "Existing room-property declarations need review before adoption." }
         val after = current.text.trimEnd() + "\n\n" + AsmRoomPropertiesSource.render(room, name, resource)

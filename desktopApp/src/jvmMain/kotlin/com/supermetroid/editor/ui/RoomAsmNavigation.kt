@@ -130,6 +130,7 @@ internal class RoomAsmNavigation(
                 // Validate requested sub-records against the planned document BEFORE any ownership transition.
                 when (request.kind) {
                     RoomAsmSourceKind.DOORS -> AsmDoorSource(text).line(roomId, request.door ?: 0)
+                    RoomAsmSourceKind.PROPERTIES -> AsmRoomPropertiesSource(text).line(roomId, request.stateId)
                     RoomAsmSourceKind.FX -> {
                         val fx = AsmFxSource(text).resource(roomId, state)
                         require(request.door == null || fx.entries.any { it.doorSelect == request.door }) { "This incoming-door FX record changed; reopen its current link." }
@@ -144,28 +145,38 @@ internal class RoomAsmNavigation(
                         workspace.projectWorkspace?.root == root && workspace.roomSourceInspection === snapshot &&
                         workspace.sourceBufferRevision == revision && Json.encodeToString(SmEditProject.serializer(), owner) == model &&
                         runCatching { editor.inspectRoomSource(name, request, roomId) == text }.getOrDefault(false)
-                val automatic = if (request.kind != RoomAsmSourceKind.DOORS) null else {
-                    val planned = bridge.doors.automaticSource(room, name)
-                    AsmRoomSourceAutomaticEdit(planned, AsmDoorSource(planned).line(roomId, request.door ?: 0),
+                val automatic = if (request.kind !in setOf(RoomAsmSourceKind.DOORS, RoomAsmSourceKind.PROPERTIES)) null else {
+                    val planned = when (request.kind) {
+                        RoomAsmSourceKind.DOORS -> bridge.doors.automaticSource(room, name)
+                        else -> bridge.properties.automaticSource(room, name)
+                    }
+                    val lineIndex = when (request.kind) {
+                        RoomAsmSourceKind.DOORS -> AsmDoorSource(planned).line(roomId, request.door ?: 0)
+                        else -> AsmRoomPropertiesSource(planned).line(roomId, request.stateId)
+                    }
+                    AsmRoomSourceAutomaticEdit(planned, lineIndex,
                         apply = { replacement ->
                             if (!unchanged()) {
-                                editor.postStatus("The room or ASM project changed; reopen its door source before editing. No changes were applied.")
+                                editor.postStatus("The room or ASM project changed; reopen its ${request.kind.title} before editing. No changes were applied.")
                                 workspace.reportSourceEditError(editor.statusMessage)
                                 false
                             } else {
-                                val applied = editor.editInspectedDoorSource(roomId, name, planned, replacement,
-                                    afterUndo = {
-                                        if (workspace.workspaceKind == AsmWorkspaceKind.PROJECT && workspace.browserMode == AsmBrowserMode.SOURCE &&
-                                            workspace.selectedFileId == request.kind.fileId && workspace.roomSourceInspection == null) {
-                                            val line = workspace.selectedLineIndex; val column = workspace.selectedColumnIndex
-                                            openRoom(roomId, name, request, refreshView = true, redoHead = workspace.sourceRedoHead(request.kind.fileId))
-                                            workspace.selectSourcePosition(line, column)
-                                        }
-                                    },
-                                    afterRedo = {
-                                        if (workspace.roomSourceInspection?.roomId == roomId && workspace.roomSourceInspection?.automaticEdit != null)
-                                            workspace.finishRoomSourceInspection()
-                                    })
+                                val afterUndo = {
+                                    if (workspace.workspaceKind == AsmWorkspaceKind.PROJECT && workspace.browserMode == AsmBrowserMode.SOURCE &&
+                                        workspace.selectedFileId == request.kind.fileId && workspace.roomSourceInspection == null) {
+                                        val line = workspace.selectedLineIndex; val column = workspace.selectedColumnIndex
+                                        openRoom(roomId, name, request, refreshView = true, redoHead = workspace.sourceRedoHead(request.kind.fileId))
+                                        workspace.selectSourcePosition(line, column)
+                                    }
+                                }
+                                val afterRedo = {
+                                    if (workspace.roomSourceInspection?.roomId == roomId && workspace.roomSourceInspection?.automaticEdit != null)
+                                        workspace.finishRoomSourceInspection()
+                                }
+                                val applied = when (request.kind) {
+                                    RoomAsmSourceKind.DOORS -> editor.editInspectedDoorSource(roomId, name, planned, replacement, afterUndo, afterRedo)
+                                    else -> editor.editInspectedRoomPropertiesSource(roomId, name, planned, replacement, afterUndo, afterRedo)
+                                }
                                 if (applied) { workspace.finishRoomSourceInspection(); workspace.dismissError() }
                                 else workspace.reportSourceEditError(editor.statusMessage)
                                 applied
