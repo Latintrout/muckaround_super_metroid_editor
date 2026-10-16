@@ -7,6 +7,7 @@ internal data class AsmRoomSourceLink(
     val kind: RoomAsmSourceKind,
     val sourceStateIndex: Int? = null,
     val detail: String = "Room-wide resource",
+    val doorIndex: Int? = null,
 ) {
     val title: String get() = "$roomName · ${kind.title}"
 }

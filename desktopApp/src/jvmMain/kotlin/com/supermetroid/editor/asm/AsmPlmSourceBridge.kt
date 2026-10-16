@@ -42,6 +42,7 @@ internal class AsmPlmSourceBridge(
     val enemies = AsmEnemyBridge(catalog, workspace, project) { onMetadataChanged() }
     val layouts = AsmRoomLayoutBridge(catalog, workspace, project) { onMetadataChanged() }
     val properties = AsmRoomPropertiesBridge(catalog, workspace, project) { onMetadataChanged() }
+    val doors = AsmDoorSourceBridge(catalog, workspace, project) { onMetadataChanged() }
     var describePlm: (RomParser.PlmEntry) -> String = { AsmRoomObjectSource.defaultDescription(it) }
     private val lastValid = mutableMapOf<Int, AsmPlmDocument>()
     private var sourceRevision: Triple<String, String, AsmPlmSourceCatalog.SourceRevision>? = null
@@ -88,13 +89,13 @@ internal class AsmPlmSourceBridge(
     val selectors = AsmRoomSelectorsBridge(catalog, workspace, project) { onMetadataChanged() }
     val stateLifecycle = AsmRoomStateLifecycle(catalog, workspace, project) { onMetadataChanged() }
     override val sourceFileIds: Set<String> get() = buildSet {
-        if (project().rooms.values.any { it.asmStateSelectorsSourceVersion != 0 || it.asmRoomPropertiesSourceVersion != 0 || it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmLayoutSourceVersion != 0 }) add(PLM_SOURCE_FILE)
-        if (project().rooms.values.any { it.asmFxSourceVersion != 0 }) add(FX_SOURCE_FILE)
+        if (project().rooms.values.any { it.asmDoorSourceVersion != 0 || it.asmStateSelectorsSourceVersion != 0 || it.asmRoomPropertiesSourceVersion != 0 || it.asmPlmSourceVersion != 0 || it.asmInitialScrollSourceVersion != 0 || it.asmLayoutSourceVersion != 0 }) add(PLM_SOURCE_FILE)
+        if (project().rooms.values.any { it.asmDoorSourceVersion != 0 || it.asmFxSourceVersion != 0 }) add(FX_SOURCE_FILE)
         if (project().rooms.values.any { it.asmEnemySourceVersion != 0 }) add(ENEMY_SOURCE_FILE)
     }
 
     override fun prepare(fileId: String, text: String): () -> String {
-        if (fileId == FX_SOURCE_FILE && fileId in sourceFileIds) return fx.prepare(text)
+        if (fileId == FX_SOURCE_FILE && project().rooms.values.any { it.asmFxSourceVersion != 0 }) return fx.prepare(text)
         if (fileId == ENEMY_SOURCE_FILE && fileId in sourceFileIds) return enemies.prepare(text)
         if (fileId != PLM_SOURCE_FILE || fileId !in sourceFileIds) return { text }
         val rooms = project().rooms.values.filter { it.asmPlmSourceVersion != 0 }.map(::snapshotRoomObjectMetadata)
@@ -517,7 +518,7 @@ internal class AsmPlmSourceBridge(
         require(owner.newRooms.isEmpty()) { "Source-aware reset for projects with added rooms needs stable source identities first." }
         val room = owner.rooms.getValue(owner.roomKey(roomId))
         val sources = linkedMapOf(PLM_SOURCE_FILE to sourceText())
-        if (room.asmFxSourceVersion != 0) sources[FX_SOURCE_FILE] = workspace.projectSourceText(FX_SOURCE_FILE)
+        if (room.asmDoorSourceVersion != 0 || room.asmFxSourceVersion != 0) sources[FX_SOURCE_FILE] = workspace.projectSourceText(FX_SOURCE_FILE)
         if (room.asmEnemySourceVersion != 0) sources[ENEMY_SOURCE_FILE] = workspace.projectSourceText(ENEMY_SOURCE_FILE)
         val external = workspace.projectSourceReadersExcept(sources.keys).asSequence().map { it() }
         val after = resetRoomSource(room, sources, external)

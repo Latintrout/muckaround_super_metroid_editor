@@ -4,6 +4,7 @@ import com.supermetroid.editor.rom.RomParser
 
 internal enum class RoomAsmSourceKind(val title: String, val fileId: String = PLM_SOURCE_FILE) {
     LAYOUT("Layout ASM"), PROPERTIES("Room header / state fields"), SELECTORS("State selectors ASM"),
+    DOORS("Door connections ASM", DOOR_SOURCE_FILE),
     INITIAL_SCROLLS("Initial scrolls ASM"), FX("FX ASM", FX_SOURCE_FILE),
     ENEMIES("Enemy population ASM", ENEMY_SOURCE_FILE), ENEMY_GRAPHICS("Enemy graphics ASM", ENEMY_SOURCE_FILE),
     PLMS("Object placements ASM"), SAVE_SPAWN("Save spawn ASM"),

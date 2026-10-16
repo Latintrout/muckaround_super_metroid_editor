@@ -45,6 +45,7 @@ internal data class AsmRoomMaterialization(
     val initialScrollTables: List<AsmRoomInitialScrollTable> = emptyList(),
     val fxTables: List<AsmRoomFxTable> = emptyList(),
     val enemyTables: List<AsmRoomEnemyTable> = emptyList(),
+    val doorTables: List<AsmRoomDoorTable> = emptyList(),
 ) {
     val isEmpty: Boolean get() = claims.isEmpty()
 
@@ -76,6 +77,7 @@ internal class AsmSourceRoomMaterializer {
         sourceInitialScrolls: Map<Int, Map<String, com.supermetroid.editor.rom.SourceInitialScrollResource>> = emptyMap(),
         sourceFx: Map<Int, Map<String, com.supermetroid.editor.rom.SourceFxResource>> = emptyMap(),
         sourceEnemies: Map<Int, Map<String, com.supermetroid.editor.rom.SourceEnemyResources>> = emptyMap(),
+        sourceDoors: Map<Int, com.supermetroid.editor.rom.SourceRoomDoors> = emptyMap(),
     ): AsmRoomMaterialization {
         if (!ProjectRoomExporter.hasRoomEdits(project)) return AsmRoomMaterialization.EMPTY
 
@@ -116,7 +118,19 @@ internal class AsmSourceRoomMaterializer {
         val initialScrollTables = if (sourceInitialScrolls.isEmpty()) emptyList() else discoverAsmInitialScrollTables(project, report, requireNotNull(plannedRom), sourceInitialScrolls)
         val fxTables = if (sourceFx.isEmpty()) emptyList() else discoverAsmFxTables(project, report, requireNotNull(plannedRom), sourceFx)
         val enemyTables = if (sourceEnemies.isEmpty()) emptyList() else discoverAsmEnemyTables(project, report, requireNotNull(plannedRom), sourceEnemies)
-        val typedClaims = plmTables.flatMap(AsmRoomPlmTable::claims) + scrollTables.map(AsmRoomScrollTable::claim) + saveTables.map(AsmRoomSaveTable::claim) + initialScrollTables.flatMap(AsmRoomInitialScrollTable::claims) + fxTables.flatMap(AsmRoomFxTable::claims) + enemyTables.flatMap(AsmRoomEnemyTable::claims)
+        val doorTables = sourceDoors.toSortedMap().flatMap { (roomId, doors) -> doors.entries.map { door ->
+            AsmRoomDoorTable(AsmDoorSource.name(roomId, door.change.doorIndex), door)
+        } }
+        val typedClaims = plmTables.flatMap(AsmRoomPlmTable::claims) + scrollTables.map(AsmRoomScrollTable::claim) + saveTables.map(AsmRoomSaveTable::claim) + initialScrollTables.flatMap(AsmRoomInitialScrollTable::claims) + fxTables.flatMap(AsmRoomFxTable::claims) + enemyTables.flatMap(AsmRoomEnemyTable::claims) + doorTables.map(AsmRoomDoorTable::claim)
+        doorTables.forEach { table ->
+            val claim = table.claim()
+            val bytes = requireNotNull(plannedRom)
+            val header = if (bytes.size % 0x8000 == 0x200) 0x200 else 0
+            require(bytes.copyOfRange(header + claim.pcOffset, header + claim.endExclusive).contentEquals(claim.bytes)) { "${table.label}: planned DoorDef differs from authored fields." }
+            require(report.writes.none { it.owner != ASM_ROOM_GRAPH_OWNER && it.offset < claim.endExclusive && claim.pcOffset <= it.endInclusive }) {
+                "${table.label}: another patch/source owner overlaps the authored DoorDef."
+            }
+        }
         val typedOffsets = hashSetOf<Int>()
         typedClaims.forEach { claim ->
             (claim.pcOffset until claim.endExclusive).forEach { pc ->
@@ -155,7 +169,7 @@ internal class AsmSourceRoomMaterializer {
         return AsmRoomMaterialization(
             source = renderSource(rawClaims) + scrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } +
                 plmTables.joinToString("\n", prefix = "\n") { it.renderSource() } + saveTables.joinToString("\n", prefix = "\n") { it.renderSource() } +
-                initialScrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } + fxTables.joinToString("\n", prefix = "\n") { it.renderSource() } + enemyTables.joinToString("\n", prefix = "\n") { it.renderSource() },
+                initialScrollTables.joinToString("\n", prefix = "\n") { it.renderSource() } + fxTables.joinToString("\n", prefix = "\n") { it.renderSource() } + enemyTables.joinToString("\n", prefix = "\n") { it.renderSource() } + doorTables.joinToString("\n", prefix = "\n") { it.renderSource() },
             claims = rawClaims + typedClaims,
             roomIds = roomIds,
             eligibleWrites = writes.size,
@@ -166,6 +180,7 @@ internal class AsmSourceRoomMaterializer {
             initialScrollTables = initialScrollTables,
             fxTables = fxTables,
             enemyTables = enemyTables,
+            doorTables = doorTables,
         )
     }
 

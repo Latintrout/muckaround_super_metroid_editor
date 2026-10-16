@@ -634,6 +634,12 @@ class MinimapEditorState {
 
     private fun canRestoreHeaders(snapshot: MinimapProjectSnapshot, editorState: EditorState): Boolean {
         if (editorState.project.rooms.any { (key, room) ->
+                room.asmDoorSourceVersion != 0 && snapshot.doorChanges[key].orEmpty().isNotEmpty()
+            }) {
+            editorState.postStatus("Undo newer door-source adoption before restoring this map edit.")
+            return false
+        }
+        if (editorState.project.rooms.any { (key, room) ->
                 room.asmRoomPropertiesSourceVersion != 0 && snapshot.roomHeaders[key] != room.effectiveHeaderChange
             }) {
             editorState.postStatus("Undo newer room-header source changes before restoring this map edit.")
@@ -657,8 +663,10 @@ class MinimapEditorState {
             val roomId = key.toIntOrNull(16) ?: continue
             val edits = editorState.project.getOrCreateRoom(roomId)
             if (edits.asmRoomPropertiesSourceVersion == 0) edits.roomHeaderChange = snapshot.roomHeaders[key]?.copy()
-            edits.doorChanges.clear()
-            edits.doorChanges.addAll(snapshot.doorChanges[key].orEmpty().map { it.copy() })
+            if (edits.asmDoorSourceVersion == 0) {
+                edits.doorChanges.clear()
+                edits.doorChanges.addAll(snapshot.doorChanges[key].orEmpty().map { it.copy() })
+            }
             edits.plmChanges.clear()
             edits.plmChanges.addAll(snapshot.plmChanges[key].orEmpty().map { it.copy() })
             edits.saveStationSpawns.clear()

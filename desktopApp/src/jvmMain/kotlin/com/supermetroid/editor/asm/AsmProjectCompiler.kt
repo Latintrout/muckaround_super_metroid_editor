@@ -57,8 +57,8 @@ internal data class AsmCompiledBuildBase(
     /** Source-built input before GUI room materialization. State source identities
      * must be validated here, never against the already-rewritten selector graph. */
     val roomValidationRomBytes: ByteArray? = null,
-    /** Pinned across generated-input passes of one build; recomputed after authored source changes. */
-    val managedPredicateStart: Int? = null,
+    /** Shared predicate/arrival code pool, pinned across this build's generated-input passes. */
+    val managedBank8FStart: Int? = null,
 )
 
 internal fun AsmCompiledBuildBase.copyForReuse(): AsmCompiledBuildBase = copy(
@@ -186,7 +186,7 @@ internal class AsmProjectCompiler(
         patchMaterialization: AsmPatchMaterialization = AsmPatchMaterialization.EMPTY,
         roomMaterialization: AsmRoomMaterialization = AsmRoomMaterialization.EMPTY,
         referenceRomBody: ByteArray? = null,
-        managedPredicateStart: Int? = null,
+        managedBank8FStart: Int? = null,
         onProgress: (String) -> Unit = {},
     ): AsmCompiledBuildBase {
         val workspace = workspaceRepository.loadForBuild(projectFilePath)
@@ -215,7 +215,7 @@ internal class AsmProjectCompiler(
             patchMaterialization = patchMaterialization,
             roomMaterialization = roomMaterialization,
             referenceRomBody = referenceRomBody,
-            managedPredicateStart = managedPredicateStart,
+            managedBank8FStart = managedBank8FStart,
         )
         AsmCompiledBuildCache.get(cacheKey)?.let { cached ->
             val label = if (materialization.isEmpty && patchMaterialization.isEmpty && roomMaterialization.isEmpty) {
@@ -252,16 +252,16 @@ internal class AsmProjectCompiler(
                 CompiledTree(referenceRomBody.copyOf(), emptyList(), ByteArray(0))
             }
             val sourceText = File(workspace.workingDirectory, "src/$PLM_SOURCE_FILE").takeIf(File::isFile)?.readText().orEmpty()
-            val predicates = try { AsmRoomSelectorsSource(sourceText).managedPredicates() }
+            val predicates = try { (AsmRoomSelectorsSource(sourceText).managedPredicates() + AsmDoorArrivalsSource(sourceText).routines()).sortedBy { it.label } }
             catch (error: Exception) {
                 throw AsmCompilationException("$PLM_SOURCE_FILE: ${error.message}")
             }
             if (predicates.isNotEmpty()) {
-                predicateStart = managedPredicateStart ?: run {
-                    onProgress("Finding verified space for managed room predicates…")
+                predicateStart = managedBank8FStart ?: run {
+                    onProgress("Finding verified space for managed bank-8F code…")
                     val authored = compileTree(workspace.workingDirectory, asar,
-                        generatedPredicateSource = AsmManagedRoomPredicates.render(predicates, null))
-                    AsmManagedRoomPredicates.chooseStart(reference.rom, authored.rom, authored.symbols, predicates)
+                        generatedBank8FSource = AsmManagedBank8FCode.render(predicates, null))
+                    AsmManagedBank8FCode.chooseStart(reference.rom, authored.rom, authored.symbols, predicates)
                 }
             }
             onProgress("Compiling project ASM source…")
@@ -271,16 +271,16 @@ internal class AsmProjectCompiler(
                 assetOverrides = materialization.assetOverrides,
                 generatedRoomSource = roomMaterialization.source,
                 generatedPatchSource = patchMaterialization.source,
-                generatedPredicateSource = AsmManagedRoomPredicates.render(predicates, predicateStart),
+                generatedBank8FSource = AsmManagedBank8FCode.render(predicates, predicateStart),
             )
             if (predicateStart != null) {
-                predicateClaims = AsmManagedRoomPredicates.claims(predicates, predicateStart, reference.rom, project.rom, project.symbols)
+                predicateClaims = AsmManagedBank8FCode.claims(predicates, predicateStart, reference.rom, project.rom, project.symbols)
                 val generatedClaims = materialization.claims.map { it.pcOffset until it.endExclusive } +
                     roomMaterialization.claims.map { it.pcOffset until it.endExclusive } +
                     patchMaterialization.claims.map { it.pcOffset until it.endExclusive }
                 if (predicateClaims.any { claim -> generatedClaims.any { range ->
                     claim.pcOffset <= range.last && range.first < claim.pcOffset + claim.length
-                } }) throw AsmCompilationException("Generated room/assets/patches overlap managed predicate code; no ROM was produced.")
+                } }) throw AsmCompilationException("Generated room/assets/patches overlap managed bank-8F code; no ROM was produced.")
             }
         } catch (problem: AsmCompilationException) {
             runCatching {
@@ -347,7 +347,7 @@ internal class AsmProjectCompiler(
             assemblerVersion = version.lineSequence().firstOrNull().orEmpty(),
             compilerOutput = (reference.output + project.output).distinct(),
             compilerSymbols = project.symbols,
-            managedPredicateStart = predicateStart,
+            managedBank8FStart = predicateStart,
         ).also { compiled ->
             runCatching {
                 buildArtifacts.publishSuccess(
@@ -380,7 +380,7 @@ internal class AsmProjectCompiler(
             patchMaterialization = AsmPatchMaterialization.EMPTY,
             roomMaterialization = AsmRoomMaterialization.EMPTY,
             referenceRomBody = null,
-            managedPredicateStart = null,
+            managedBank8FStart = null,
         )
     }
 
@@ -409,11 +409,11 @@ internal class AsmProjectCompiler(
         patchMaterialization: AsmPatchMaterialization,
         roomMaterialization: AsmRoomMaterialization,
         referenceRomBody: ByteArray?,
-        managedPredicateStart: Int?,
+        managedBank8FStart: Int?,
     ): String {
         val fingerprint = BuildFingerprint()
         fingerprint.addText(CACHE_FORMAT_VERSION)
-        fingerprint.addText("managed-predicate-start:$managedPredicateStart")
+        fingerprint.addText("managed-bank8f-start:$managedBank8FStart")
         fingerprint.addText(assemblerVersion)
         fingerprint.addFile("asar", asar)
         fingerprint.addBytes("loaded-rom", loadedRom)
@@ -462,7 +462,7 @@ internal class AsmProjectCompiler(
         assetOverrides: Map<String, ByteArray> = emptyMap(),
         generatedRoomSource: String = "",
         generatedPatchSource: String = "",
-        generatedPredicateSource: String = "",
+        generatedBank8FSource: String = "",
     ): CompiledTree {
         require(File(sourceTree, "src/main.asm").isFile) { "ASM source tree has no src/main.asm: $sourceTree" }
         require(File(sourceTree, "data").isDirectory) { "ASM source tree has no extracted data: $sourceTree" }
@@ -472,7 +472,7 @@ internal class AsmProjectCompiler(
             copyTree(File(sourceTree, "data"), File(staging, "data"))
             applyAssetOverrides(File(staging, "data"), assetOverrides)
             AsmProjectModuleGateway.apply(File(staging, "src"))
-            applyGeneratedPredicateSource(File(staging, "src"), generatedPredicateSource)
+            applyGeneratedBank8FSource(File(staging, "src"), generatedBank8FSource)
             applyGeneratedRoomSource(File(staging, "src"), generatedRoomSource)
             applyGeneratedPatchSource(File(staging, "src"), generatedPatchSource)
             val rom = File(staging, "SM.sfc")
@@ -528,14 +528,14 @@ internal class AsmProjectCompiler(
         }
     }
 
-    private fun applyGeneratedPredicateSource(sourceRoot: File, source: String) {
+    private fun applyGeneratedBank8FSource(sourceRoot: File, source: String) {
         if (source.isBlank()) return
-        val generated = File(sourceRoot, GENERATED_PREDICATE_FILE)
-        require(!generated.exists()) { "Project source uses reserved SMEDIT file name $GENERATED_PREDICATE_FILE" }
+        val generated = File(sourceRoot, GENERATED_BANK8F_FILE)
+        require(!generated.exists()) { "Project source uses reserved SMEDIT file name $GENERATED_BANK8F_FILE" }
         generated.writeText(source)
         val main = File(sourceRoot, "main.asm")
         val original = main.readText()
-        val include = "; SMEDIT managed room predicates\nincsrc \"$GENERATED_PREDICATE_FILE\"\n\n"
+        val include = "; SMEDIT managed bank-8F code\nincsrc \"$GENERATED_BANK8F_FILE\"\n\n"
         val marker = "print \"Assembly complete. Total bytes written: \", bytes"
         main.writeText(if (marker in original) original.replaceFirst(marker, include + marker) else original + "\n" + include)
     }
@@ -621,8 +621,8 @@ internal class AsmProjectCompiler(
         const val ASM_ROM_SIZE = 3 * 1024 * 1024
         private const val GENERATED_ROOM_FILE = "__smedit_generated_rooms.asm"
         private const val GENERATED_PATCH_FILE = "__smedit_generated_patches.asm"
-        private const val GENERATED_PREDICATE_FILE = "__smedit_managed_predicates.asm"
-        private const val CACHE_FORMAT_VERSION = "smedit-asm-build-cache-v6"
+        private const val GENERATED_BANK8F_FILE = "__smedit_managed_bank8f.asm"
+        private const val CACHE_FORMAT_VERSION = "smedit-asm-build-cache-v7-arrivals"
 
         internal fun clearBuildCacheForTests() = AsmCompiledBuildCache.clear()
 

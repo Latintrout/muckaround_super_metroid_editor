@@ -108,8 +108,9 @@ class RoomAsmNavigationTest {
             assertTrue(f.navigation.open(request), "$kind: ${f.editor.statusMessage}")
             val inspection = assertNotNull(f.workspace.roomSourceInspection, kind.name)
             assertEquals(kind.fileId, f.workspace.selectedFileId)
-            assertFalse(f.workspace.isProjectSourceEditable)
-            f.workspace.updateSourceEditText(kind.fileId, "This must not replace the preview or source")
+            assertEquals(kind == RoomAsmSourceKind.DOORS, f.workspace.isProjectSourceEditable)
+            f.workspace.updateSourceEditText(kind.fileId, if (kind == RoomAsmSourceKind.DOORS) f.workspace.sourceEditorText(kind.fileId)
+                else "This must not replace the preview or source")
             assertEquals(model, f.model(), kind.name); assertEquals(sources, f.sources(), kind.name)
             assertEquals(revision, f.workspace.sourceBufferRevision, kind.name)
             assertEquals(guiHistory, f.editor.undoStack, kind.name); assertEquals(dirty, f.editor.dirty, kind.name)
@@ -336,6 +337,49 @@ class RoomAsmNavigationTest {
             assertNull(f.workspace.roomSourceInspection)
             assertEquals(savedRevision, f.workspace.sourceBufferRevision); assertFalse(f.editor.dirty)
         }
+    }
+
+    @Test fun `ASM first door typing needs no opt in and restores an absent room on undo without touching the canvas`() = runBlocking {
+        val f = fixture("automatic-asm-first", secondRoom = true)
+        f.editor.loadRoom(0xA000, f.parser, f.parser.readRoomHeader(0xA000)!!)
+        f.project.rooms.remove("91F8") // The fixture initially visits this room; test a genuinely absent target.
+        f.editor.applyBulkEdits("Keep my canvas", listOf(TileEdit(5, 5, 0, 0x8123)))
+        val model = f.model(); val sources = f.sources(); val history = f.editor.undoStack.toList()
+        val working = f.editor.workingLevelData!!.copyOf(); val state = f.editor.currentPlmStateId()
+        val link = AsmRoomSourceLink(0x91F8, "Test room", RoomAsmSourceKind.DOORS)
+        assertFalse(f.project.rooms.containsKey("91F8"))
+        assertTrue(f.navigation.openFromAsm(link), f.editor.statusMessage)
+        val staged = f.workspace.sourceEditorText(DOOR_SOURCE_FILE)
+        val edited = staged.replace("dw ${'$'}0000 ; Distance", "dw ${'$'}1234 ; Distance")
+        assertNotEquals(staged, edited)
+        assertTrue(f.workspace.updateSourceEditText(DOOR_SOURCE_FILE, edited), f.editor.statusMessage)
+        assertEquals(1, f.project.rooms.getValue("91F8").asmDoorSourceVersion)
+        assertEquals(0x1234, f.bridge.doors.view(0x91F8).resource!!.entries.first().change.distFromDoor)
+        assertEquals(history, f.editor.undoStack); assertEquals(0xA000, f.editor.currentRoomId)
+        assertEquals(state, f.editor.currentPlmStateId()); assertContentEquals(working, f.editor.workingLevelData)
+        assertTrue(f.workspace.undoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
+        assertEquals(model, f.model()); assertEquals(sources, f.sources())
+        assertEquals(history, f.editor.undoStack); assertContentEquals(working, f.editor.workingLevelData)
+        assertTrue(f.workspace.redoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
+        assertEquals(edited, f.workspace.projectSourceText(DOOR_SOURCE_FILE))
+        assertEquals(history, f.editor.undoStack); assertEquals(state, f.editor.currentPlmStateId())
+    }
+
+    @Test fun `automatic doors can be typed from ASM without loading any visual room`() = runBlocking {
+        val f = fixture("automatic-headless")
+        f.editor.initForProject(f.file, f.project)
+        f.editor.bindRoomSources(f.bridge.catalog, f.workspace)
+        f.project.rooms.remove("91F8")
+        val model = f.model()
+        assertTrue(f.navigation.openFromAsm(AsmRoomSourceLink(0x91F8, "Test room", RoomAsmSourceKind.DOORS)), f.editor.statusMessage)
+        val text = f.workspace.sourceEditorText(DOOR_SOURCE_FILE)
+        assertTrue(f.workspace.updateSourceEditText(DOOR_SOURCE_FILE, text + "; my first door edit\n"), f.editor.statusMessage)
+        assertEquals(0, f.editor.currentRoomId); assertNull(f.editor.roomSourceParser); assertTrue(f.editor.undoStack.isEmpty())
+        assertTrue(f.workspace.undoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
+        assertEquals(model, f.model()); assertFalse(f.project.rooms.containsKey("91F8"))
+        assertTrue(f.workspace.redoSourceEdit(DOOR_SOURCE_FILE), f.workspace.error)
+        assertEquals(1, f.project.rooms.getValue("91F8").asmDoorSourceVersion)
+        assertEquals(0, f.editor.currentRoomId); assertNull(f.editor.roomSourceParser); assertTrue(f.editor.undoStack.isEmpty())
     }
 
     @Test fun `ASM adoption of another room uses its geometry and leaves the active room state and GUI undo intact`() = runBlocking {

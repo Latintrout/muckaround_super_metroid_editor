@@ -535,8 +535,19 @@ fun main() = application {
                 }
             }
 
+            val roomAsmNavigation = RoomAsmNavigation(editorState, asmWorkspaceState,
+                roomName = { selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}" },
+                navigate = ::navigate, showAsm = { leftTab = TAB_ASM })
+
             fun openAsmAddress(snesAddress: Int) {
                 if (!editorState.asmNavigationEnabled) return
+                if (snesAddress ushr 16 == 0x83) {
+                    val doorIndex = editorState.doorEntries.indexOfFirst { it.doorDefPtr == (snesAddress and 0xFFFF) }
+                    if (doorIndex >= 0) {
+                        roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.DOORS, door = doorIndex))
+                        return
+                    }
+                }
                 navigate {
                     val managedLine = if (editorState.hasManagedPlms() && snesAddress ushr 16 == 0x8F &&
                         snesAddress and 0xFFFF == editorState.currentPlmSourcePointer()) {
@@ -553,10 +564,6 @@ fun main() = application {
                     leftTab = TAB_ASM
                 }
             }
-
-            val roomAsmNavigation = RoomAsmNavigation(editorState, asmWorkspaceState,
-                roomName = { selectedRoom?.name ?: "Room ${editorState.currentRoomId.toString(16).uppercase()}" },
-                navigate = ::navigate, showAsm = { leftTab = TAB_ASM })
 
             fun openPlmPlacement(entry: RomParser.PlmEntry) {
                 roomAsmNavigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.PLMS, plm = entry))
@@ -1470,6 +1477,7 @@ fun main() = application {
                                                     ?: selectedRoom
                                             },
                                             onNavigateToAsm = editorAsmAddressLink,
+                                            onNavigateToDoorArrival = editorState.projectAsmNavigation<(Int, Boolean) -> Unit> { index, create -> roomAsmNavigation.openArrival(index, create) },
                                             roomKeyboardNavigationEnabled = leftTab == TAB_ROOMS,
                                             onNavigateToPlmPlacement = editorPlmPlacementLink,
                                             onNavigateToScrollCommands = editorScrollCommandsLink,

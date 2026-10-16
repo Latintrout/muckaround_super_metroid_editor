@@ -45,6 +45,231 @@ import kotlin.test.assertContains
 class AsmBuildPipelineIntegrationTest {
     @TempDir lateinit var tempDirectory: File
 
+    @Test fun `source owned door connections assemble exact fields with reciprocal GUI history identities and patch guards`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState(sourceIndexLoader = {
+            com.supermetroid.editor.asm.AsmProjectWorkspaceRepository().loadRoomWorkspace(it)
+        })
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project) }
+        val bridge = editor.bindRoomSources(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace)
+        val native = assertNotNull(parser.readRoomHeader(0x9879))
+        editor.loadRoom(native.roomId, parser, native)
+        val nativeDoors = editor.doorEntries.toList()
+        val navigation = RoomAsmNavigation(editor, workspace, { native.name })
+        val json = kotlinx.serialization.json.Json
+        val model = json.encodeToString(SmEditProject.serializer(), project)
+        val revision = workspace.sourceBufferRevision
+        assertTrue(navigation.open(RoomAsmSourceRequest(RoomAsmSourceKind.DOORS, door = 1)), editor.statusMessage)
+        val preview = assertNotNull(workspace.roomSourceInspection)
+        assertContains(preview.text, "SmeditDoors_9879_Door_1")
+        assertEquals(revision, workspace.sourceBufferRevision)
+        assertEquals(model, json.encodeToString(SmEditProject.serializer(), project))
+        assertTrue(workspace.isProjectSourceEditable)
+        val staged = workspace.sourceEditorText(FX_SOURCE_FILE)
+        assertTrue(workspace.updateSourceEditText(FX_SOURCE_FILE, staged + "; Door source edited without an adoption click.\n"), editor.statusMessage)
+        assertNull(workspace.roomSourceInspection)
+        assertEquals(1, project.rooms.getValue("9879").asmDoorSourceVersion)
+        assertTrue(editor.ensureSelectorSource(native.name), editor.statusMessage)
+        assertTrue(editor.ensureCurrentPlmSource(native.name), editor.statusMessage)
+        assertTrue(editor.ensureFxSource(native.name), editor.statusMessage)
+        assertTrue(editor.ensureLayoutSource(native.name), editor.statusMessage)
+        val room = project.rooms.getValue("9879")
+        val fx = bridge.fx.view(native.roomId, room.states.first().id).resource
+        editor.updateDoor(0, editor.doorEntries.first().copy(distFromDoor = 0x1234))
+        assertEquals(0x1234, editor.doorEntries.first().distFromDoor)
+        assertTrue(room.doorChanges.isEmpty(), "Door values must not be duplicated in JSON")
+        assertFalse(json.encodeToString(SmEditProject.serializer(), project).contains("asmDoorProjection"))
+        val authored = bridge.doors.sourceText()
+        val logs = mutableListOf<String>()
+        suspend fun build(): RomBuildResult? {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            logs.clear()
+            val headless = json.decodeFromString<SmEditProject>(json.encodeToString(SmEditProject.serializer(), project))
+            return ProjectFileService.buildRom(headless, parser, logs::add, logs::add, fixture.projectFile.path)
+        }
+        val first = assertNotNull(build(), logs.joinToString("\n"))
+        val built = RomParser(first.resultRom)
+        val doors = built.parseDoorList(assertNotNull(built.readRoomHeader(native.roomId)).doorOut)
+        assertEquals(nativeDoors.first().copy(distFromDoor = 0x1234), doors.first())
+        assertEquals(nativeDoors.drop(1), doors.drop(1))
+        assertEquals(nativeDoors.map { it.doorDefPtr }, doors.map { it.doorDefPtr })
+        val source = com.supermetroid.editor.asm.AsmDoorSource(bridge.doors.sourceText()).resource(room, parser)
+        for (door in source.entries) {
+            val pc = built.snesToPc(0x830000 or door.doorDefPtr)
+            assertContentEquals(door.bytes(), first.resultRom.copyOfRange(pc, pc + 12))
+            for (offset in pc until pc + 12) assertTrue(first.writeReport.writes.any {
+                it.owner == "room-graph:project" && offset in it.offset..it.endInclusive
+            }, "Complete DoorDef bytes must be claimed even when unchanged")
+        }
+        val generated = assertNotNull(AsmBuildArtifactRepository().loadGeneratedRooms(fixture.projectFile.path))
+        assertTrue(generated.lines.any { "%SmeditDoors_9879_Door_0()" in it })
+        assertEquals(authored, bridge.doors.sourceText(), "Build must not rewrite the authored door fields")
+        val raw = authored.replace("dw ${'$'}1234 ; Distance", "dw ${'$'}2345 ; Distance")
+        workspace.replaceProjectSource(FX_SOURCE_FILE, authored, raw)
+        editor.refreshLinkedPlms()
+        assertEquals(0x2345, editor.doorEntries.first().distFromDoor)
+        assertEquals(fx, bridge.fx.view(native.roomId, room.states.first().id).resource)
+        val rawBuild = assertNotNull(build(), logs.joinToString("\n"))
+        assertEquals(0x2345, RomParser(rawBuild.resultRom).parseDoorList(native.doorOut).first().distFromDoor)
+        assertTrue(workspace.undoSourceEdit(FX_SOURCE_FILE), workspace.error)
+        editor.refreshLinkedPlms()
+        assertTrue(editor.undo(), editor.statusMessage) // GUI distance edit in the same source document.
+        assertEquals(nativeDoors, editor.doorEntries)
+        val undone = assertNotNull(build(), logs.joinToString("\n"))
+        assertEquals(nativeDoors, RomParser(undone.resultRom).parseDoorList(native.doorOut))
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertContentEquals(first.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+
+        val doorPc = parser.snesToPc(0x830000 or nativeDoors.first().doorDefPtr)
+        val lowFlags = fixture.rom[doorPc + 2].toInt() and 255
+        project.patches += SmPatch("door-byte-collision", "Cannot overwrite an unchanged owned DoorDef byte", enabled = true,
+            writes = mutableListOf(PatchWrite((doorPc + 2).toLong(), listOf(lowFlags xor 0x80), expectedBytes = listOf(lowFlags))))
+        assertNull(build()); assertTrue(logs.any { "conflict" in it.lowercase() }, logs.joinToString("\n"))
+        project.patches.removeLast()
+        val good = bridge.doors.sourceText()
+        val broken = good.replace("dw ${'$'}1234 ; Distance", "dw ${'$'}10000 ; Distance")
+        workspace.replaceProjectSource(FX_SOURCE_FILE, good, broken)
+        editor.refreshLinkedPlms()
+        assertNotNull(editor.doorPreviewProblem)
+        assertNull(build()); assertTrue(workspace.saveAllSources(), workspace.error)
+        assertEquals(broken, bridge.doors.sourceText())
+        assertTrue(editor.selectorEditingAvailable(), "A bad door declaration must not lock supported selectors")
+        assertTrue(workspace.undoSourceEdit(FX_SOURCE_FILE), workspace.error)
+        editor.refreshLinkedPlms()
+        assertNull(editor.doorPreviewProblem)
+        assertContentEquals(first.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+
+        // A second raw owner of the native definition is rejected before generated source overwrites it.
+        val originalMacro = Regex("(?m)^Door_Flyway_0:[\\s\\S]*?(?=^Door_Flyway_1:)").find(good)!!.value
+        val competing = good.replace(originalMacro, originalMacro.replace("%spawnDistance(${'$'}8000)", "%spawnDistance(${'$'}4321)"))
+        assertNotEquals(good, competing)
+        workspace.replaceProjectSource(FX_SOURCE_FILE, good, competing)
+        assertNull(build()); assertTrue(logs.any { "also changed in original bank_83.asm" in it }, logs.joinToString("\n"))
+        assertTrue(workspace.undoSourceEdit(FX_SOURCE_FILE), workspace.error)
+        assertContentEquals(first.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
+
+    @Test fun `managed door arrivals preserve native behavior grow and relink with predicates reciprocal fields and complete patch ownership`() = runBlocking {
+        ProjectFileService.clearAsmBuildCachesForTests()
+        val fixture = AsmProjectTestFixture.create(tempDirectory)
+        val parser = RomParser(fixture.rom)
+        val project = sourceProject(fixture)
+        val workspace = AsmWorkspaceState(sourceIndexLoader = { com.supermetroid.editor.asm.AsmProjectWorkspaceRepository().loadRoomWorkspace(it) })
+        workspace.bindProject(fixture.projectFile.path, true, progressive = true)
+        val editor = EditorState().apply { testMode = true; initForProject(fixture.projectFile, project) }
+        val bridge = editor.bindRoomSources(AsmPlmSourceCatalog.load(fixture.workspace.originalDirectory, parser), workspace)
+        val native = assertNotNull(parser.readRoomHeader(0x9879))
+        editor.loadRoom(native.roomId, parser, native)
+        val nativeDoors = editor.doorEntries.toList()
+        assertTrue(editor.ensureSelectorSource(native.name), editor.statusMessage)
+        assertTrue(editor.ensureCurrentPlmSource(native.name), editor.statusMessage)
+        assertTrue(editor.createManagedDoorArrival(0), editor.statusMessage)
+        assertTrue(editor.createManagedDoorArrival(1), editor.statusMessage)
+        val room = project.rooms.getValue("9879")
+        val condition = com.supermetroid.editor.asm.AsmRoomSelectorsSource(bridge.sourceText()).resource(room).conditions
+            .entries.first { it.value.kind != ProjectRoomStateConditionKind.DEFAULT }.key
+        val predicateMacro = com.supermetroid.editor.asm.AsmRoomSelectorsSource.conditionName(native.roomId, condition)
+        val predicateLabel = "${predicateMacro}_Predicate"
+        val aLabel = "SmeditArrival_9879_Door_0_Entry"; val bLabel = "SmeditArrival_9879_Door_1_Entry"
+        val originalLabel = bridge.catalog.symbols.entries.first { it.key.startsWith("DoorASM_") && it.value == nativeDoors.first().entryCode }.key
+        val root = bridge.sourceText()
+        val body = Regex("(?m)^macro $predicateMacro\\(\\)\\n([\\s\\S]*?)^endmacro").find(root)!!.groups[1]!!.range
+        val custom = root.replaceRange(body, "    ; smedit:managed-predicate-v1\n    clc\n    rts\n")
+            .replace("jmp.w $originalLabel ; Preserve the original behavior and caller stack.", "jmp.w $originalLabel ; Preserve the original behavior and caller stack.\n    fillbyte ${'$'}FF\n    fill 32")
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, root, custom)
+        editor.refreshLinkedPlms()
+        assertFalse(editor.selectorEditingAvailable()); assertNull(editor.doorPreviewProblem)
+        val logs = mutableListOf<String>()
+        val json = kotlinx.serialization.json.Json
+        suspend fun build(): RomBuildResult? {
+            assertTrue(workspace.saveAllSources(), workspace.error)
+            logs.clear()
+            val reopened = json.decodeFromString<SmEditProject>(json.encodeToString(SmEditProject.serializer(), project))
+            return ProjectFileService.buildRom(reopened, parser, logs::add, logs::add, fixture.projectFile.path)
+        }
+        fun labels() = assertNotNull(AsmBuildArtifactRepository().load(fixture.projectFile.path)).symbols.labels
+        fun connections(rom: ByteArray) = RomParser(rom).parseDoorList(native.doorOut)
+        val first = assertNotNull(build(), logs.joinToString("\n"))
+        val initial = labels()
+        val a = initial.getValue(aLabel); val b = initial.getValue(bLabel); val predicate = initial.getValue(predicateLabel)
+        assertEquals(40, b - a); assertEquals(1, predicate - b)
+        assertEquals(a and 65535, connections(first.resultRom)[0].entryCode)
+        assertEquals(b and 65535, connections(first.resultRom)[1].entryCode)
+        assertEquals(nativeDoors.map { it.doorDefPtr }, connections(first.resultRom).map { it.doorDefPtr })
+        val nativeLow = nativeDoors.first().entryCode.toByte(); val nativeHigh = (nativeDoors.first().entryCode ushr 8).toByte()
+        assertContentEquals(byteArrayOf(0xA9.toByte(), nativeLow, nativeHigh, 0x85.toByte(), 0x12, 0x4C, nativeLow, nativeHigh),
+            first.resultRom.copyOfRange(parser.snesToPc(a), parser.snesToPc(a) + 8))
+        assertEquals(0x60, first.resultRom[parser.snesToPc(b)].toInt() and 255)
+        for (offset in parser.snesToPc(a) until parser.snesToPc(predicate) + 2) assertTrue(first.writeReport.writes.any {
+            it.owner.startsWith("asm-source:") && offset in it.offset..it.endInclusive
+        }, "Every managed byte, including unchanged FF padding, must be claimed")
+        assertTrue(editor.doorArrivalBindings.values.all { it.snesAddress == null }, "A build must not persist allocation guesses into previews")
+        assertContains(bridge.doors.sourceText(), "dw $aLabel")
+        assertEquals(custom, bridge.sourceText(), "Build must not rewrite authoring with allocated addresses")
+        val grown = custom.replace("fill 32", "fill 96")
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, custom, grown)
+        val bigger = assertNotNull(build(), logs.joinToString("\n"))
+        assertEquals(a, labels().getValue(aLabel)); assertEquals(b + 64, labels().getValue(bLabel)); assertEquals(predicate + 64, labels().getValue(predicateLabel))
+        assertEquals((b + 64) and 65535, connections(bigger.resultRom)[1].entryCode)
+        // Reserve a complete manually declared FF envelope; no changed-byte diff can find this.
+        val occupied = grown + "\npushpc\norg ${'$'}${a.toString(16)}\nArrivalReserved:\nfillbyte ${'$'}FF\nfill 128\nArrivalReserved_End:\npullpc\n"
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, grown, occupied)
+        val moved = assertNotNull(build(), logs.joinToString("\n"))
+        val movedA = labels().getValue(aLabel); val movedB = labels().getValue(bLabel)
+        assertTrue(movedA >= a + 128); assertEquals(104, movedB - movedA)
+        assertEquals(movedB and 65535, connections(moved.resultRom)[1].entryCode)
+        editor.updateDoor(1, editor.doorEntries[1].copy(distFromDoor = 0x1234))
+        assertEquals(0x1234, editor.doorEntries[1].distFromDoor)
+        assertContains(bridge.doors.sourceText(), "dw $bLabel")
+        val edited = assertNotNull(build(), logs.joinToString("\n"))
+        assertEquals(movedB and 65535, connections(edited.resultRom)[1].entryCode)
+        assertEquals(0x1234, connections(edited.resultRom)[1].distFromDoor)
+        assertTrue(editor.undo(), editor.statusMessage)
+        assertContentEquals(moved.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        assertTrue(editor.redo(), editor.statusMessage)
+        assertContentEquals(edited.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        // A known native label may itself move. Both the original DoorHeader and our tail JMP
+        // relink; the typed DoorDef remains the sole owner of this room's twelve-byte record.
+        val relocatedNativeAddress = movedA + 256
+        assertTrue(fixture.rom.copyOfRange(parser.snesToPc(relocatedNativeAddress), parser.snesToPc(relocatedNativeAddress) + 3).all { it.toInt() and 255 == 255 })
+        val renamed = occupied.replaceFirst("$originalLabel:", "${originalLabel}_BeforeManagedRelink:")
+        val nativeRelink = renamed + "\npushpc\norg ${'$'}${relocatedNativeAddress.toString(16)}\n$originalLabel:\n" +
+            "    jmp.w ${originalLabel}_BeforeManagedRelink\n${originalLabel}_End:\npullpc\n"
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, occupied, nativeRelink)
+        val nativeMoved = assertNotNull(build(), logs.joinToString("\n"))
+        val aliasAddress = labels().getValue(originalLabel)
+        assertEquals(relocatedNativeAddress, aliasAddress)
+        val wrapperPc = parser.snesToPc(labels().getValue(aLabel))
+        assertContentEquals(byteArrayOf(0xA9.toByte(), aliasAddress.toByte(), (aliasAddress ushr 8).toByte(), 0x85.toByte(), 0x12, 0x4C, aliasAddress.toByte(), (aliasAddress ushr 8).toByte()),
+            nativeMoved.resultRom.copyOfRange(wrapperPc, wrapperPc + 8))
+        assertEquals(labels().getValue(aLabel) and 65535, connections(nativeMoved.resultRom)[0].entryCode)
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertContentEquals(edited.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        val paddingPc = parser.snesToPc(movedA) + 10
+        project.patches += SmPatch("arrival-padding-collision", "Cannot repurpose claimed FF code padding", enabled = true,
+            writes = mutableListOf(PatchWrite(paddingPc.toLong(), listOf(0), expectedBytes = listOf(255))))
+        assertNull(build()); assertTrue(logs.any { "conflict" in it.lowercase() }, logs.joinToString("\n"))
+        project.patches.removeLast()
+        val oversize = occupied.replace("fill 96", "fill 1024")
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, occupied, oversize)
+        editor.refreshLinkedPlms(); assertNull(editor.doorPreviewProblem)
+        assertNull(build()); assertEquals(oversize, bridge.sourceText(), "Unbuildable executable drafts remain saveable")
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        val dispatcher = Regex("(?m)^Execute_Door_ASM:[\\s\\S]*?(?=^;;;)").find(occupied)!!.value
+        val incompatible = occupied.replace(dispatcher, dispatcher.replace("REP #${'$'}30", "REP #${'$'}20"))
+        assertNotEquals(occupied, incompatible)
+        workspace.replaceProjectSource(PLM_SOURCE_FILE, occupied, incompatible)
+        assertNull(build()); assertTrue(logs.any { "door-dispatch ABI" in it }, logs.joinToString("\n"))
+        assertTrue(workspace.undoSourceEdit(PLM_SOURCE_FILE), workspace.error)
+        assertContentEquals(edited.resultRom, assertNotNull(build(), logs.joinToString("\n")).resultRom)
+        assertContentEquals(fixture.rom, fixture.romFile.readBytes())
+    }
+
     @Test fun `managed inline predicates grow relocate relink and preserve reciprocal PLMs without authored addresses`() = runBlocking {
         ProjectFileService.clearAsmBuildCachesForTests()
         val fixture = AsmProjectTestFixture.create(tempDirectory)
@@ -167,9 +392,9 @@ class AsmBuildPipelineIntegrationTest {
                 roomMaterialization = com.supermetroid.editor.asm.AsmRoomMaterialization(
                     "org ${'$'}${(a + 100).toString(16)}\ndb ${'$'}FF\n",
                     listOf(com.supermetroid.editor.asm.AsmGeneratedRoomClaim("test", "Identical erased byte", collisionPc, byteArrayOf(-1))),
-                    emptySet(), 1, 0), managedPredicateStart = a)
+                    emptySet(), 1, 0), managedBank8FStart = a)
         }
-        assertContains(collision.message.orEmpty(), "overlap managed predicate", message = "Even identical writes must respect allocation ownership")
+        assertContains(collision.message.orEmpty(), "overlap managed bank-8F", message = "Even identical writes must respect allocation ownership")
         val oversized = grown.replace("fill 96", "fill 1024")
         workspace.replaceProjectSource(PLM_SOURCE_FILE, grown, oversized)
         assertNull(build()); assertTrue(logs.any { "1024 bytes" in it }, logs.joinToString("\n"))

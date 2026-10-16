@@ -213,6 +213,18 @@ internal fun mergeDoorBitflagWithMatchedOrientation(
     return ((orientation and 0xFF) shl 8) or (lowFlags and 0xFF)
 }
 
+/** Edit orthogonal DoorDef fields without losing elevator, cross-area or escape-gate bits. */
+internal fun editedDoorBitflag(
+    current: Int,
+    travel: Int = (current ushr 8) and 3,
+    closure: Int = current ushr 10,
+    elevator: Boolean = current and 0x80 != 0,
+): Int {
+    require(current in 0..0xFFFF && travel in 0..3 && closure in 0..63)
+    val flags = (current and 0x7F) or if (elevator) 0x80 else 0
+    return ((closure * 4 + travel) shl 8) or flags
+}
+
 /** Shared tile-meta icon: black fill, colored 2px border, centered white letter (matches map). */
 @Composable
 private fun TileMetaIcon(
@@ -251,6 +263,7 @@ fun MapCanvas(
     onRoomSelected: ((RoomInfo) -> Unit)? = null,
     onWorkspaceChanged: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
+    onNavigateToDoorArrival: ((Int, Boolean) -> Unit)? = null,
     onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToScrollCommands: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToSaveSpawn: ((RomParser.PlmEntry) -> Unit)? = null,
@@ -920,6 +933,7 @@ fun MapCanvas(
                                                     }
                                                 } catch (ex: Exception) {
                                                     mapCanvasLogLine("Room export failed: ${ex.message}")
+                                                    editorState.postStatus("Room export failed: ${ex.message}")
                                                 }
                                             }
                                             mapFocusReq.requestFocus()
@@ -1913,6 +1927,7 @@ fun MapCanvas(
                                     onMoveSamusHere = onMoveSamusHere,
                                     onWorkspaceChanged = onWorkspaceChanged,
                                     onNavigateToAsm = onNavigateToAsm,
+                                    onNavigateToDoorArrival = onNavigateToDoorArrival,
                                     onNavigateToPlmPlacement = onNavigateToPlmPlacement,
                                     onNavigateToScrollCommands = onNavigateToScrollCommands,
                                     onNavigateToSaveSpawn = onNavigateToSaveSpawn,

@@ -5,6 +5,27 @@ import com.supermetroid.editor.rom.DoorAsmScrollAnalysis
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.SCROLL_EXTENSION_DIRECTIONS
 import com.supermetroid.editor.rom.scrollExtensionConnectsToTrigger
+import com.supermetroid.editor.rom.analyzeDoorScrollAsm
+
+internal data class DoorArrivalScrollPreview(val analyses: List<DoorAsmScrollAnalysis>, val hasSourceManagedEffects: Boolean)
+
+/** Source-authored code is not the base ROM's old routine, even when its preview word is zero. */
+internal fun doorArrivalScrollPreview(roomId: Int, parser: RomParser, editor: EditorState): DoorArrivalScrollPreview {
+    var opaque = false
+    val codes = linkedSetOf<Int>()
+    for (info in parser.roomCatalog.rooms) {
+        val id = info.getRoomIdAsInt()
+        if ((editor.project.rooms[editor.project.roomKey(id)]?.asmDoorSourceVersion ?: 0) != 0) {
+            val view = editor.asmPlmSourceBridge?.doors?.view(id)
+            if (view == null || view.problem != null) opaque = true
+            else if (view.resource?.entries.orEmpty().any { it.change.destRoomPtr == roomId && (it.arrival != null || it.change.entryCode != 0) }) opaque = true
+            continue
+        }
+        editor.effectiveDoorsForRoom(id, parser).filter { it.destRoomPtr == roomId && it.entryCode in 0x8000..0xFFFE }
+            .forEach { codes += it.entryCode }
+    }
+    return DoorArrivalScrollPreview(codes.map { analyzeDoorScrollAsm(parser, it) }.filter { it.writes.isNotEmpty() }, opaque)
+}
 
 /**
  * Compact, editor-facing summary of the room scroll state that scroll-trigger PLMs can

@@ -7,11 +7,13 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Constraints
 import com.supermetroid.editor.asm.*
 import com.supermetroid.editor.data.ProjectRomBuildMode
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.TestRomHelper
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -23,6 +25,81 @@ import kotlin.test.*
 @OptIn(ExperimentalComposeUiApi::class)
 class AsmRoomSourceActionsTest {
     @TempDir lateinit var directory: File
+
+    @Test fun `door Source action opens the normal editor and first typing undo redo keep the staged text and caret usable`() = runBlocking {
+        val src = File(directory, "reference/src").apply { mkdirs() }
+        val data = File(directory, "reference/data").apply { mkdirs() }
+        File(src, "main.asm").writeText("incsrc bank_8F.asm\nincsrc bank_83.asm\n")
+        File(src, PLM_SOURCE_FILE).writeText("; Native room source\n")
+        File(src, DOOR_SOURCE_FILE).writeText("Door_LandingSite_0: ;838000;\n; Native door source\n")
+        val reference = AsmReferenceWorkspace(src.parentFile,
+            AsmReferenceMetadata(AsmReferenceContract.REPOSITORY_URL, AsmReferenceContract.COMMIT, "test", "base.sfc", "ab".repeat(32), 0x300000, 0),
+            AsmSourceParser().parse(src, data, emptyList()))
+        val file = File(directory, "Test.smedit").apply { writeText("{}") }
+        val repository = AsmProjectWorkspaceRepository(emptyList(), emptyList())
+        repository.initialize(file.path, reference)
+        val workspace = AsmWorkspaceState(projectRepository = repository)
+        workspace.bindProject(file.path, true)
+        val project = SmEditProject("base.sfc").apply {
+            asmWorkspace.enabled = true; asmWorkspace.buildMode = ProjectRomBuildMode.ASM_SOURCE
+        }
+        val rom = saveSourceTestRom()
+        val level = ByteArray(2 + 32 * 32 * 3).also { it[1] = 8 }
+        LZ5Compressor.compress(level).copyInto(rom, 0x200000)
+        for (pc in listOf(0x791F8 + 18, 0x79300)) {
+            rom[pc + 1] = 0x80.toByte(); rom[pc + 2] = 0xC0.toByte()
+        }
+        val parser = RomParser(rom)
+        assertTrue(AsmSemanticBridge.buildIndex(parser).roomSourcesFor(0x838000).any { it.kind == RoomAsmSourceKind.DOORS })
+        val editor = EditorState().apply { testMode = true; initForProject(file, project) }
+        editor.bindRoomSources(AsmPlmSourceCatalog("", "", emptyMap(), parser, emptyMap()), workspace)
+        val navigation = RoomAsmNavigation(editor, workspace, { "No canvas room" })
+        workspace.openSource(DOOR_SOURCE_FILE)
+        val source = workspace.projectSourceText(DOOR_SOURCE_FILE)
+        val model = Json.encodeToString(SmEditProject.serializer(), project)
+        val revision = workspace.sourceBufferRevision
+        var openedRoom: AsmEditorTarget? = null
+        val scene = ComposeScene()
+        val surface = Surface.makeRasterN32Premul(1200, 900)
+        try {
+            scene.constraints = Constraints.fixed(1200, 900)
+            scene.setContent { MaterialTheme {
+                AsmWorkspaceCanvas(workspace, parser, onOpenInEditor = { openedRoom = it }, onOpenRoomSource = { navigation.openFromAsm(it) })
+            } }
+            var time = System.nanoTime()
+            fun render() { repeat(12) { time += 16_666_667; scene.render(surface.canvas, time) } }
+            fun field() = assertNotNull(nodes(scene).singleOrNull { it.config.contains(SemanticsProperties.EditableText) })
+            render()
+            click(scene, "Edit door data…"); render()
+            val planned = workspace.sourceEditorText(DOOR_SOURCE_FILE)
+            assertContains(planned, "macro SmeditDoors_91F8_Door_0()")
+            assertEquals(planned, field().config[SemanticsProperties.EditableText].text)
+            assertTrue(nodes(scene).none { text(it) == "Create editable source" })
+            val cursor = planned.indexOf("dw ${'$'}0000 ; Distance") + 4
+            assertTrue(field().config[SemanticsActions.SetSelection].action!!.invoke(cursor, cursor + 4, false))
+            render()
+            assertEquals(model, Json.encodeToString(SmEditProject.serializer(), project))
+            assertEquals(source, workspace.projectSourceText(DOOR_SOURCE_FILE)); assertEquals(revision, workspace.sourceBufferRevision)
+            val edited = planned.replace("dw ${'$'}0000 ; Distance", "dw ${'$'}1234 ; Distance")
+            assertNotEquals(planned, edited)
+            assertTrue(field().config[SemanticsActions.InsertTextAtCursor].action!!.invoke(AnnotatedString("1234")))
+            render()
+            assertNull(workspace.roomSourceInspection)
+            assertEquals(edited, workspace.projectSourceText(DOOR_SOURCE_FILE))
+            assertEquals(edited, field().config[SemanticsProperties.EditableText].text)
+            assertEquals(cursor + 4, field().config[SemanticsProperties.TextSelectionRange].start, "First-edit promotion must preserve the typing caret")
+            assertEquals(1, project.rooms.getValue("91F8").asmDoorSourceVersion)
+            click(scene, "Edit room"); assertEquals(AsmEditorTarget.Room(0x91F8), openedRoom)
+            assertTrue(workspace.undoSourceEdit(DOOR_SOURCE_FILE), workspace.error); render()
+            assertEquals(source, workspace.projectSourceText(DOOR_SOURCE_FILE))
+            assertEquals(model, Json.encodeToString(SmEditProject.serializer(), project))
+            assertEquals(planned, field().config[SemanticsProperties.EditableText].text)
+            assertTrue(workspace.canRedoSource(DOOR_SOURCE_FILE))
+            assertTrue(workspace.redoSourceEdit(DOOR_SOURCE_FILE), workspace.error); render()
+            assertEquals(edited, field().config[SemanticsProperties.EditableText].text)
+            assertEquals(0, editor.currentRoomId); assertTrue(editor.undoStack.isEmpty())
+        } finally { scene.close(); surface.close() }
+    }
 
     @Test fun `Source and Assets buttons open pure previews and adopt the selected room state without entering the visual editor`() = runBlocking {
         for (fromAsset in listOf(false, true)) {

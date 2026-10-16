@@ -511,14 +511,18 @@ data class RoomEdits(
     @kotlinx.serialization.Transient var asmHeaderPropertiesProjection: RoomHeaderChange? = null,
     var asmStateSelectorsSourceVersion: Int = 0,
     @kotlinx.serialization.Transient var asmSelectorOrderProjection: List<String>? = null,
+    /** Existing DoorDef fields are authored in bank_83.asm; list identities remain native. */
+    var asmDoorSourceVersion: Int = 0,
+    @kotlinx.serialization.Transient var asmDoorProjection: List<DoorChange>? = null,
 ) {
+    val effectiveDoorChanges: List<DoorChange> get() = asmDoorProjection ?: doorChanges
     val effectiveStates: List<RoomStateEdits> get() = asmSelectorOrderProjection?.mapNotNull { id -> states.firstOrNull { it.id == id } } ?: states
     val effectiveHeaderChange: RoomHeaderChange? get() = asmHeaderPropertiesProjection?.copy(
         width = roomHeaderChange?.width, height = roomHeaderChange?.height, doorOut = roomHeaderChange?.doorOut,
     ) ?: roomHeaderChange
     val effectiveStateDataChange: StateDataChange? get() = stateDataChange
     val hasEdits: Boolean get() =
-        asmStateSelectorsSourceVersion != 0 || asmRoomPropertiesSourceVersion != 0 || asmLayoutSourceVersion != 0 || asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || asmEnemySourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
+        asmDoorSourceVersion != 0 || asmStateSelectorsSourceVersion != 0 || asmRoomPropertiesSourceVersion != 0 || asmLayoutSourceVersion != 0 || asmPlmSourceVersion != 0 || asmInitialScrollSourceVersion != 0 || asmFxSourceVersion != 0 || asmEnemySourceVersion != 0 || stateGraphChanged || levelResourceOperations.values.any { it.isNotEmpty() } ||
             states.any { it.hasEdits } || operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||
@@ -959,7 +963,7 @@ data class SmEditProject(
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
-        const val CURRENT_PROJECT_FORMAT_VERSION = 16
+        const val CURRENT_PROJECT_FORMAT_VERSION = 18
     }
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

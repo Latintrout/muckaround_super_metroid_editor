@@ -217,12 +217,18 @@ internal class RomExporter(
     private val sourceLayouts: Map<Int, Map<String, com.supermetroid.editor.rom.SourceRoomLayoutResource>> = emptyMap(),
     private val sourceRoomProperties: Map<Int, com.supermetroid.editor.rom.SourceRoomProperties> = emptyMap(),
     private val sourceSelectors: Map<Int, com.supermetroid.editor.rom.SourceRoomSelectors> = emptyMap(),
+    private val sourceDoors: Map<Int, com.supermetroid.editor.rom.SourceRoomDoors> = emptyMap(),
     private val projectFilePath: String = "",
 ) {
 
     fun build(): RomBuildResult? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        if (project.rooms.values.any { it.asmDoorSourceVersion != 0 && it.roomId !in sourceDoors && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
+            onLog("ERROR: Authored doors require validated ASM build inputs.")
+            onStatus("Authored doors require validated ASM build inputs.")
+            return null
+        }
         if (project.rooms.values.any { it.asmStateSelectorsSourceVersion != 0 && it.roomId !in sourceSelectors && project.roomKey(it.roomId) !in compiledAsmBase?.generatedRoomIds.orEmpty() }) {
             onLog("ERROR: Authored selectors require validated ASM build inputs.")
             onStatus("Authored selectors require validated ASM build inputs.")
@@ -500,6 +506,7 @@ internal class RomExporter(
                                 sourceLayouts = sourceLayouts,
                                 sourceRoomProperties = sourceRoomProperties,
                                 sourceSelectors = sourceSelectors,
+                                sourceDoors = sourceDoors,
                             ).exportRooms()
                         }
                         roomsPatched.addAll(roomExportResult.roomsPatched)
@@ -513,6 +520,9 @@ internal class RomExporter(
                         }
                         for ((pcOffset, label) in roomExportResult.sourceSaveClaims) {
                             writePlan.claimCurrentRange(owner, "Source save $label", pcOffset - writePlan.headerSize, 14, RomWriteKind.ROOM)
+                        }
+                        for ((pcOffset, size) in roomExportResult.sourceDoorClaims) {
+                            writePlan.claimCurrentRange(owner, "Authored DoorDef / connection identity", pcOffset - writePlan.headerSize, size, RomWriteKind.ROOM)
                         }
                     }
                 }

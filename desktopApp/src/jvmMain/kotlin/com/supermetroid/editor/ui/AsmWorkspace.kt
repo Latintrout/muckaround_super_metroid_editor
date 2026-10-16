@@ -1831,7 +1831,7 @@ private fun AsmWorkspaceCanvasContent(
 ) {
     val workspace = state.workspace
     val semanticIndex = remember(romParser) { romParser?.let(AsmSemanticBridge::buildIndex) }
-    state.roomSourceInspection?.let { preview ->
+    state.roomSourceInspection?.takeIf { it.automaticEdit == null }?.let { preview ->
         Column(modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("${preview.title} — read-only preview", fontWeight = FontWeight.SemiBold)
             Text("Inspecting does not change the project. Create editable source to adopt this data into project ASM; that step requires a build.")
@@ -2711,8 +2711,8 @@ private fun AsmSourceCanvas(
     val find = remember(pane.id, source.id, state.workspaceKind) { AsmDocumentFindState() }
     val textFocus = remember(pane.id) { FocusRequester() }
     val closeFind = { find.close(); runCatching { textFocus.requestFocus() }; Unit }
-    val documentText = remember(source, state.sourceBufferRevision, find.open, state.workspaceKind) {
-        if (!find.open) "" else if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditText(source.id)
+    val documentText = remember(source, state.sourceBufferRevision, find.open, state.workspaceKind, state.roomSourceInspection) {
+        if (!find.open) "" else if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditorText(source.id)
         else source.lines.joinToString("\n")
     }
     val lineOffsets = remember(source) { asmDocumentLineOffsets(source.lines) }
@@ -2746,19 +2746,24 @@ private fun AsmSourceCanvas(
     val indexedExactAddress = addressAnchorsByLine[pane.lineIndex]
     val compiledExactAddress = compiledAddressesByLine[pane.lineIndex]
     val exactSnesAddress = compiledExactAddress ?: indexedExactAddress?.snesAddress
-    val editorLinks = remember(semanticIndex, exactSnesAddress, source, pane.lineIndex) {
+    val editorLines = remember(source, state.workspaceKind, state.sourceBufferRevision, state.roomSourceInspection) {
+        if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditorText(source.id).lines() else source.lines
+    }
+    val editorLinks = remember(semanticIndex, exactSnesAddress, source, pane.lineIndex, editorLines) {
         val address = exactSnesAddress
-        val layoutTarget = com.supermetroid.editor.asm.AsmRoomLayoutSource.targetAt(source.lines, pane.lineIndex)
-        val propertiesTarget = com.supermetroid.editor.asm.AsmRoomPropertiesSource.targetAt(source.lines, pane.lineIndex)
-        val selectorsTarget = com.supermetroid.editor.asm.AsmRoomSelectorsSource.targetAt(source.lines, pane.lineIndex)
-        if (layoutTarget != null || propertiesTarget != null || selectorsTarget != null) listOf(com.supermetroid.editor.asm.AsmEditorLink(
-            "Edit room", if (layoutTarget != null) "Decoded layout · tile/BTS source" else if (propertiesTarget != null) "Room header / state fields" else "State selectors / branch order", layoutTarget ?: propertiesTarget ?: selectorsTarget!!))
+        val layoutTarget = com.supermetroid.editor.asm.AsmRoomLayoutSource.targetAt(editorLines, pane.lineIndex)
+        val propertiesTarget = com.supermetroid.editor.asm.AsmRoomPropertiesSource.targetAt(editorLines, pane.lineIndex)
+        val selectorsTarget = com.supermetroid.editor.asm.AsmRoomSelectorsSource.targetAt(editorLines, pane.lineIndex)
+        val doorsTarget = com.supermetroid.editor.asm.AsmDoorSource.targetAt(editorLines, pane.lineIndex)
+        val arrivalTarget = com.supermetroid.editor.asm.AsmDoorArrivalsSource.targetAt(editorLines, pane.lineIndex)
+        if (layoutTarget != null || propertiesTarget != null || selectorsTarget != null || doorsTarget != null || arrivalTarget != null) listOf(com.supermetroid.editor.asm.AsmEditorLink(
+            "Edit room", if (layoutTarget != null) "Decoded layout · tile/BTS source" else if (propertiesTarget != null) "Room header / state fields" else if (doorsTarget != null) "Door connections" else if (arrivalTarget != null) "Arrival ASM" else "State selectors / branch order", layoutTarget ?: propertiesTarget ?: selectorsTarget ?: doorsTarget ?: arrivalTarget!!))
         else if (semanticIndex == null || address == null) emptyList()
         else semanticIndex.linksFor(address)
     }
-    val roomSourceLinks = remember(index, semanticIndex, source, pane.lineIndex, state.workspaceKind, state.sourceBufferRevision) {
+    val roomSourceLinks = remember(index, semanticIndex, source, pane.lineIndex, state.workspaceKind, state.sourceBufferRevision, state.roomSourceInspection) {
         asmRoomSourceLinksAt(index, source, pane.lineIndex, semanticIndex,
-            if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditText(source.id) else null)
+            if (state.workspaceKind == AsmWorkspaceKind.PROJECT) state.sourceEditorText(source.id) else null)
     }
     val referenceLabel = remember(index, source.id, pane.lineIndex, pane.referenceSymbol) {
         index.label(pane.referenceSymbol)
@@ -2912,10 +2917,15 @@ private fun AsmSourceCanvas(
         )
         AsmDocumentFindBar(find, documentText, { match ->
             state.activateSourcePane(pane.id)
-            state.openSource(source.id, match.line, addToHistory = false, columnIndex = match.column)
+            state.selectSourceEditorMatch(source.id, match.line, match.column)
             scope.launch { horizontal.scrollTo(((match.column - 8).coerceAtLeast(0) * characterWidthPx).toInt()) }
         }, closeFind)
         if (state.workspaceKind == AsmWorkspaceKind.PROJECT) {
+            state.roomSourceInspection?.takeIf { it.fileId == source.id && it.automaticEdit != null }?.let {
+                Text("Door data is ready to edit and syncs with the room editor. Opening this view changes nothing.",
+                    fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+            }
             AsmEditorLinkBar(editorLinks, onOpenInEditor)
             AsmRoomSourceActions(roomSourceLinks, onOpenRoomSource)
             when {
@@ -3255,8 +3265,8 @@ private fun AsmEditableSourcePane(
 ) {
     val fs = LocalEditorTheme.current.fontSize.value
     val density = LocalDensity.current
-    val sourceText = remember(source.id, state.sourceBufferRevision, state.editSessionSerial) {
-        state.sourceEditText(source.id)
+    val sourceText = remember(source.id, state.sourceBufferRevision, state.editSessionSerial, state.roomSourceInspection) {
+        state.sourceEditorText(source.id)
     }
     val totalLineCount = remember(sourceText) { sourceText.count { it == '\n' } + 1 }
     var pageStartLine by remember(pane.id, source.id, state.editSessionSerial) {
@@ -3275,7 +3285,7 @@ private fun AsmEditableSourcePane(
     }
     val pageKey = AsmEditPageKey(pane.id, source.id, state.editSessionSerial, pane.navigationSerial, pageStartLine)
     val page = remember(pageKey) {
-        asmSourceEditPage(state.sourceEditText(source.id), pageStartLine, ASM_EDIT_PAGE_LINES)
+        asmSourceEditPage(state.sourceEditorText(source.id), pageStartLine, ASM_EDIT_PAGE_LINES)
     }
     val initialCursorLine = pane.lineIndex
         .takeIf { it in page.startLine until (page.startLine + page.lineCount) }
@@ -3301,8 +3311,8 @@ private fun AsmEditableSourcePane(
     var completionFromTyping by remember(pageKey) { mutableStateOf(false) }
     var selectedCompletionIndex by remember(pageKey) { mutableStateOf(0) }
     var dismissedCompletionSignature by remember(pageKey) { mutableStateOf<String?>(null) }
-    LaunchedEffect(source.id, page.startLine, state.sourceBufferRevision) {
-        val latest = asmSourceEditPage(state.sourceEditText(source.id), page.startLine, ASM_EDIT_PAGE_LINES)
+    LaunchedEffect(source.id, page.startLine, state.sourceBufferRevision, state.roomSourceInspection) {
+        val latest = asmSourceEditPage(state.sourceEditorText(source.id), page.startLine, ASM_EDIT_PAGE_LINES)
         if (latest.text != fieldValue.text) {
             val selection = fieldValue.selection
             fieldValue = fieldValue.copy(
@@ -3318,9 +3328,9 @@ private fun AsmEditableSourcePane(
     val inactiveModuleFileIds = state.disabledProjectModuleFileIds - source.id
     val indexedMacros = state.workspace?.index?.macros.orEmpty()
         .filterNot { it.fileId in inactiveModuleFileIds }
-    LaunchedEffect(source.id, liveDiagnosticRevision, indexedMacros, inactiveModuleFileIds) {
+    LaunchedEffect(source.id, liveDiagnosticRevision, indexedMacros, inactiveModuleFileIds, state.roomSourceInspection) {
         delay(ASM_LIVE_DIAGNOSTIC_DELAY_MS)
-        val text = state.sourceEditText(source.id)
+        val text = state.sourceEditorText(source.id)
         val macros = indexedMacros.filterNot { it.fileId == source.id } + parseAsmMacros(source.id, text)
         val diagnostics = withContext(Dispatchers.Default) {
             AsmSourceLinter.lintText(source.id, text, macros)
@@ -3376,22 +3386,23 @@ private fun AsmEditableSourcePane(
     fun applyEditorValue(adjusted: TextFieldValue) {
         val previousPageText = fieldValue.text
         val textChanged = adjusted.text != fieldValue.text
-        fieldValue = adjusted
         // A caret move or selection is local editor state, not workspace
         // navigation. Publishing it used to clear Find Usages and could cause
         // the paged source view to reposition after an ordinary click.
-        if (!textChanged) return
+        if (!textChanged) { fieldValue = adjusted; return }
         state.activateSourcePane(pane.id)
-        val currentPage = asmSourceEditPage(state.sourceEditText(source.id), page.startLine, ASM_EDIT_PAGE_LINES)
+        val currentPage = asmSourceEditPage(state.sourceEditorText(source.id), page.startLine, ASM_EDIT_PAGE_LINES)
         val pageChange = if (currentPage.text == previousPageText) {
             AsmSourceTextChange.between(previousPageText, adjusted.text)
                 ?.let { it.copy(offset = currentPage.prefix.length + it.offset) }
         } else null
-        state.updateSourceEditText(
+        val applied = state.updateSourceEditText(
             source.id,
             currentPage.merge(adjusted.text),
             undoChange = pageChange,
         )
+        if (!applied) return
+        fieldValue = adjusted
         val activeOffset = adjusted.selection.end.coerceIn(0, adjusted.text.length)
         state.selectSourcePosition(
             page.startLine + asmLineIndexAtOffset(adjusted.text, activeOffset),
@@ -3818,6 +3829,7 @@ private fun AsmEditableSourcePane(
                                 pageText = fieldValue.text,
                                 requestedOffset = offset,
                                 pageStartLine = page.startLine,
+                                state = state,
                             )
                         }
                         .onPointerEvent(PointerEventType.Exit) {
@@ -4092,6 +4104,7 @@ internal fun asmEditableReferenceIsNavigable(
     pageText: String,
     requestedOffset: Int,
     pageStartLine: Int,
+    state: AsmWorkspaceState? = null,
 ): Boolean {
     val sourceIndex = index ?: return false
     asmSourceIncludeAt(pageText, requestedOffset)?.let { include ->
@@ -4099,6 +4112,7 @@ internal fun asmEditableReferenceIsNavigable(
     }
     val tokenReference = asmEditableTokenAt(pageText, requestedOffset, pageStartLine) ?: return false
     val token = tokenReference.token
+    if (state?.managedCodeLine(token) != null) return true
     if (token.startsWith('"') && sourceIndex.resolveAsset(token.removeSurrounding("\"")) != null) return true
     if (token.startsWith('$')) {
         val resolution = parseAsmAddressQuery(token)?.let(sourceIndex.addressAtlas::resolve)
@@ -4160,6 +4174,7 @@ internal fun asmOpenEditableReference(
         }
     }
     val reference = asmEditableSymbolAt(pageText, requestedOffset, pageStartLine) ?: return false
+    if (state.openManagedCodeReference(reference.token)) return true
     sourceIndex.macrosAt(fileId, reference.lineIndex)
         .firstOrNull { it.name.equals(reference.token, ignoreCase = true) }
         ?.let { macro ->
@@ -4930,7 +4945,8 @@ internal fun AsmRoomSourceActions(links: List<AsmRoomSourceLink>, onOpen: ((AsmR
                 Text(if (links.size == 1) links.single().title else "Room data · ${links.size} resource/state choices",
                     fontSize = fs.detail, modifier = Modifier.weight(1f))
                 TextButton(onClick = { if (links.size == 1) onOpen(links.single()) else expanded = !expanded }) {
-                    Text("Preview / make editable…", fontSize = fs.detail)
+                    Text(if (links.all { it.kind == com.supermetroid.editor.asm.RoomAsmSourceKind.DOORS }) "Edit door data…"
+                        else "Preview / make editable…", fontSize = fs.detail)
                 }
             }
             if (expanded) {

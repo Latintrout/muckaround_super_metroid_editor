@@ -242,9 +242,34 @@ and named command streams support growth/shrinkage; changed resource links,
 added-room projects and mixed source/GUI operations are guarded boundaries. Only
 objects, named scroll commands, adopted save spawns, initial scroll grids,
 ordinary FX tables, paired enemy/GFX tables, decoded layouts, ordinary header/state
-scalars and typed selectors have migrated. Doors and other resources keep their existing
-model/backend. This does **not** change the ordinary unlinked/ROM
+scalars, typed selectors and existing fixed-identity DoorDefs have migrated.
+Other resources keep their existing model/backend. This does **not** change the ordinary unlinked/ROM
 editing model described below. See the [source/GUI ownership contract](../asm/reference_workspace.md#reciprocal-sourcegui-ownership--first-authoring-slice).
+
+Door connections are room-wide source resources in bank `$83`, independent of
+state ownership and of their separate executable arrival ASM. Schema 17 introduced
+ownership via `asmDoorSourceVersion`, not persisted decoded door values. Native list order,
+count and DoorDef addresses remain fixed; GUI/source edits share exact literal
+fields and reciprocal history. Door ASM opens as an editor-only staged bank;
+the first actual edit adopts ownership and text atomically, without a separate
+opt-in or dirty/build marker on inspection. Save/build inputs exclude staged
+declarations. Explicit arrival creation also adopts DoorDefs in its single
+cross-bank action when necessary. Full record/list/header-pointer claims include
+unchanged bytes. Invalid drafts lock only door editing/building, not unrelated
+room resources. Native exceptional geometry is preserved, while new geometry is
+validated. Shared DoorDefs, structural list edits, added-room source identities
+and joint incoming-door resize/area changes remain guarded. See
+[door connection authoring](../asm/reference_workspace.md#reciprocal-door-connections).
+
+Schema 18 adds checked symbolic arrival references: marked bank-$8F routine bodies
+and native `DoorASM_*` labels resolve through actual assembler symbols, never a
+persisted preview/allocation address. Managed arrivals and predicates share one
+packed, fully claimed code pool. Creation preserves known native dispatch context
+and behavior with a tail jump, publishing the body and DoorDef word as one source
+history group. Only the arrival address is managed in ASM; ordinary connection
+fields remain reciprocal. Initial-scroll diagnostics explicitly omit authored
+arrival execution, and room-only JSON export refuses to discard its source/code
+dependencies. See [managed arrival ASM](../asm/reference_workspace.md#managed-arrival-asm-and-symbolic-connections).
 
 **Room Info → Layout → ASM** adopts effective L1/BTS/L2 into editable decoded
 `dw`/`db` macros, retiring JSON tile deltas with one undo boundary. Painting and

@@ -27,13 +27,13 @@ class AsmManagedRoomPredicatesTest {
             predicate.label to 0x8F8000, predicate.label + "_End" to 0x8F8001)
         val beforeReference = reference.copyOf()
         val beforeAuthored = authored.copyOf()
-        assertEquals(0x8FF081, AsmManagedRoomPredicates.chooseStart(reference, authored, labels, listOf(predicate)))
+        assertEquals(0x8FF081, AsmManagedBank8FCode.chooseStart(reference, authored, labels, listOf(predicate)))
         assertContentEquals(beforeReference, reference)
         assertContentEquals(beforeAuthored, authored)
         reference[0x7F100] = 0 // A raw source edit cannot erase existing reference data and offer it as free space.
-        assertEquals(0x8FF102, AsmManagedRoomPredicates.chooseStart(reference, authored, labels, listOf(predicate)))
+        assertEquals(0x8FF102, AsmManagedBank8FCode.chooseStart(reference, authored, labels, listOf(predicate)))
         authored[0x7FFFF] = 0
-        assertContains(assertFails { AsmManagedRoomPredicates.chooseStart(reference, authored, labels, listOf(predicate)) }.message.orEmpty(), "No verified")
+        assertContains(assertFails { AsmManagedBank8FCode.chooseStart(reference, authored, labels, listOf(predicate)) }.message.orEmpty(), "No verified")
         assertEquals(0x60, authored[0x7F010].toInt())
         assertEquals(0, reference[0x7F100].toInt())
     }
@@ -41,7 +41,7 @@ class AsmManagedRoomPredicatesTest {
     @Test fun `managed claims cover FF tails require contiguous resolved symbols and enforce bank and size bounds`() {
         val reference = rom()
         val compiled = rom().also { it[0x7F001] = 0x60 }
-        fun claims(start: Int = 0x8FF001, end: Int = 0x8FF041) = AsmManagedRoomPredicates.claims(listOf(predicate), 0x8FF001,
+        fun claims(start: Int = 0x8FF001, end: Int = 0x8FF041) = AsmManagedBank8FCode.claims(listOf(predicate), 0x8FF001,
             reference, compiled, symbols(predicate.label to start, predicate.label + "_End" to end))
         assertEquals(listOf(AsmSourceOwnedRange(0x7F001, 64, PLM_SOURCE_FILE)), claims())
         for ((start, end) in listOf(0x8FF002 to 0x8FF041, 0x8FF001 to 0x8FF001, 0x8FF001 to 0x8FF402, 0x8FF001 to 0x900001))
@@ -53,15 +53,15 @@ class AsmManagedRoomPredicatesTest {
     @Test fun `discovery produces stable identities and build only envelopes without modifying authored text`() {
         val text = "macro ${predicate.macroName}()\r\n    $marker\r\n    clc\r\n    rts\r\nendmacro\r\n"
         assertEquals(listOf(predicate), AsmRoomSelectorsSource(text).managedPredicates())
-        val probe = AsmManagedRoomPredicates.render(listOf(predicate), null)
+        val probe = AsmManagedBank8FCode.render(listOf(predicate), null)
         assertContains(probe, "${predicate.label} = ${'$'}8F8000")
         assertFalse(probe.contains("%${predicate.macroName}()"))
-        val source = AsmManagedRoomPredicates.render(listOf(predicate), 0x8FF001)
+        val source = AsmManagedBank8FCode.render(listOf(predicate), 0x8FF001)
         assertContains(source, "%${predicate.macroName}()")
         assertContains(source, "${predicate.label}_End:")
         assertContains(source, "warnpc ${'$'}900000")
-        assertEquals("", AsmManagedRoomPredicates.render(emptyList(), null))
-        assertFails { AsmManagedRoomPredicates.render(listOf(predicate), 0x908000) }
+        assertEquals("", AsmManagedBank8FCode.render(emptyList(), null))
+        assertFails { AsmManagedBank8FCode.render(listOf(predicate), 0x908000) }
         assertEquals(text, AsmRoomSelectorsSource(text).text)
     }
 }

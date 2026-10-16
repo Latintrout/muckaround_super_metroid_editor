@@ -17,7 +17,18 @@ import java.time.Instant
 internal enum class AsmBrowserMode { SOURCE, GENERATED_ROOMS, PLM_PLACEMENT, ASSETS, LIBRARY, ROM }
 
 internal data class AsmRoomSourceInspection(val roomId: Int, val title: String, val text: String, val stateId: String? = null,
-                                          val fileId: String = PLM_SOURCE_FILE, val startEditing: () -> Unit)
+                                          val fileId: String = PLM_SOURCE_FILE,
+                                          val automaticEdit: AsmRoomSourceAutomaticEdit? = null,
+                                          val startEditing: () -> Unit)
+
+/** An editor-only overlay. Save, Build, search/replace and semantic writers still see the real bank. */
+internal data class AsmRoomSourceAutomaticEdit(
+    val text: String,
+    val lineIndex: Int,
+    val apply: (String) -> Boolean,
+    val reopen: () -> Unit,
+    val redoHead: AsmSourceTextChange? = null,
+)
 
 /** Capture on the caller thread; perform bounded source normalization away from the UI. */
 internal interface AsmSourceSaveParticipant {
@@ -305,7 +316,7 @@ internal class AsmWorkspaceState(
         get() = projectModifiedFileIds.isNotEmpty() || activeUnsavedSourceFileIds.isNotEmpty()
     val isProjectSourceEditable: Boolean
         get() = workspaceKind == AsmWorkspaceKind.PROJECT &&
-            roomSourceInspection == null &&
+            (roomSourceInspection == null || roomSourceInspection?.automaticEdit != null) &&
             browserMode == AsmBrowserMode.SOURCE &&
             selectedFileId != null
     val sourceBuildRequired: Boolean
@@ -313,7 +324,10 @@ internal class AsmWorkspaceState(
             (activeUnsavedSourceFileIds.isNotEmpty() || buildReport?.succeeded != true)
     val sourceStatusSummary: String
         get() {
-            if (roomSourceInspection != null) return "Room source · read-only preview · not adopted"
+            roomSourceInspection?.takeIf { it.fileId == selectedFileId }?.let {
+                return if (it.automaticEdit != null) "Door source · editable · project changes on first edit"
+                else "Room source · read-only preview · not adopted"
+            }
             if (browserMode == AsmBrowserMode.GENERATED_ROOMS) {
                 return if (showRoomBuildWrites) "Room Data · build writes · last compilation" else "Room Data · last successful build"
             }
@@ -766,7 +780,22 @@ internal class AsmWorkspaceState(
         activateProjectWorkspace(project)
         openSource(snapshot.fileId, addToHistory = false)
         roomSourceInspection = snapshot
+        snapshot.automaticEdit?.let { selectSourcePosition(it.lineIndex, 0) }
         if (addToHistory) forwardStack.clear()
+    }
+
+    fun sourceEditorText(fileId: String): String = roomSourceInspection
+        ?.takeIf { it.fileId == fileId }?.automaticEdit?.text ?: sourceEditText(fileId)
+
+    fun finishRoomSourceInspection() { roomSourceInspection = null }
+
+    fun reportSourceEditError(message: String) { error = message }
+
+    fun selectSourceEditorMatch(fileId: String, lineIndex: Int, columnIndex: Int) {
+        if (roomSourceInspection?.fileId == fileId && roomSourceInspection?.automaticEdit != null) {
+            selectSourcePosition(lineIndex, columnIndex)
+            navigationSerial++
+        } else openSource(fileId, lineIndex, addToHistory = false, columnIndex = columnIndex)
     }
 
     fun sourceEditText(fileId: String): String = sourceBuffers[fileId]
@@ -827,17 +856,24 @@ internal class AsmWorkspaceState(
         notifySourceTransition(afterApply)
     }
 
-    fun updateSourceEditText(fileId: String, text: String, undoChange: AsmSourceTextChange? = null) {
-        if (roomSourceInspection != null) return
-        if (workspaceKind != AsmWorkspaceKind.PROJECT || workspace?.index?.file(fileId) == null) return
+    fun updateSourceEditText(fileId: String, text: String, undoChange: AsmSourceTextChange? = null): Boolean {
+        roomSourceInspection?.let { inspection ->
+            val automatic = inspection.automaticEdit ?: return false
+            if (fileId == inspection.fileId) {
+                if (text == automatic.text) return true
+                return automatic.apply(text)
+            }
+        }
+        if (workspaceKind != AsmWorkspaceKind.PROJECT || workspace?.index?.file(fileId) == null) return false
         val previous = sourceEditText(fileId)
-        if (previous == text) return
+        if (previous == text) return true
         if (sourceBuffers[fileId] == null) {
-            val diskText = workspace?.index?.file(fileId)?.file?.readText() ?: return
+            val diskText = workspace?.index?.file(fileId)?.file?.readText() ?: return false
             savedSourceTexts[fileId] = diskText
         }
         recordSourceUndo(fileId, previous, text, undoChange)
         applySourceEditText(fileId, text)
+        return true
     }
 
     private fun applySourceEditText(fileId: String, text: String) {
@@ -871,16 +907,22 @@ internal class AsmWorkspaceState(
         sourceRedoStacks.remove(fileId)
     }
 
-    fun canUndoSource(fileId: String): Boolean = sourceUndoStacks[fileId]?.isNotEmpty() == true
+    private fun inspectionBlocksSource(fileId: String?): Boolean = roomSourceInspection?.let {
+        it.automaticEdit == null || it.fileId == fileId
+    } == true
 
-    fun canRedoSource(fileId: String): Boolean = sourceRedoStacks[fileId]?.isNotEmpty() == true
+    fun canUndoSource(fileId: String): Boolean = !inspectionBlocksSource(fileId) && sourceUndoStacks[fileId]?.isNotEmpty() == true
+
+    fun canRedoSource(fileId: String): Boolean = if (inspectionBlocksSource(fileId)) {
+        roomSourceInspection?.automaticEdit?.redoHead?.let { it === sourceRedoHead(fileId) } == true
+    } else sourceRedoStacks[fileId]?.isNotEmpty() == true
 
     /** Text equality is insufficient: an edit can be changed away and back in a newer undo step. */
     internal fun sourceUndoHead(fileId: String): AsmSourceTextChange? = sourceUndoStacks[fileId]?.lastOrNull()
     internal fun sourceRedoHead(fileId: String): AsmSourceTextChange? = sourceRedoStacks[fileId]?.lastOrNull()
 
     fun undoSourceEdit(fileId: String? = selectedFileId, fromRoomEditor: Boolean = false): Boolean {
-        if (roomSourceInspection != null && !fromRoomEditor) return false
+        if (inspectionBlocksSource(fileId) && !fromRoomEditor) return false
         val selectedId = fileId ?: return false
         val undo = sourceUndoStacks[selectedId] ?: return false
         val change = undo.lastOrNull() ?: return false
@@ -899,7 +941,10 @@ internal class AsmWorkspaceState(
     }
 
     fun redoSourceEdit(fileId: String? = selectedFileId, fromRoomEditor: Boolean = false): Boolean {
-        if (roomSourceInspection != null && !fromRoomEditor) return false
+        if (inspectionBlocksSource(fileId) && !fromRoomEditor) {
+            val draft = roomSourceInspection?.automaticEdit ?: return false
+            if (fileId != roomSourceInspection?.fileId || draft.redoHead == null || sourceRedoHead(fileId ?: return false) !== draft.redoHead) return false
+        }
         val selectedId = fileId ?: return false
         val redo = sourceRedoStacks[selectedId] ?: return false
         val change = redo.lastOrNull() ?: return false
@@ -1449,6 +1494,21 @@ internal class AsmWorkspaceState(
         }
     }
 
+    /** Generated entry symbols navigate to their current authored body, even before Save/Build. */
+    internal fun managedCodeLine(token: String): Int? {
+        if (workspaceKind != AsmWorkspaceKind.PROJECT || projectWorkspace == null) return null
+        val macro = managedBank8FMacroName(token) ?: return null
+        val text = projectSourceText(PLM_SOURCE_FILE)
+        val match = Regex("(?m)^[ \\t]*macro[ \\t]+${Regex.escape(macro)}\\(\\)").findAll(text).singleOrNull() ?: return null
+        return text.take(match.range.first).count { it == '\n' }
+    }
+
+    internal fun openManagedCodeReference(token: String): Boolean {
+        val line = managedCodeLine(token) ?: return false
+        openSource(PLM_SOURCE_FILE, line)
+        return true
+    }
+
     fun openLabel(fileId: String, lineIndex: Int, token: String) {
         workspace?.index?.resolveLabel(fileId, lineIndex, token)
             ?.let { label ->
@@ -1707,7 +1767,8 @@ internal class AsmWorkspaceState(
         pendingSnesAddress?.let(::openAddress)
     }
 
-    internal fun locationSnapshot(): AsmWorkspaceLocation? = roomSourceInspection?.let(AsmWorkspaceLocation::RoomSourceInspection) ?: when (browserMode) {
+    internal fun locationSnapshot(): AsmWorkspaceLocation? = roomSourceInspection?.takeIf { it.fileId == selectedFileId }
+        ?.let(AsmWorkspaceLocation::RoomSourceInspection) ?: when (browserMode) {
         AsmBrowserMode.SOURCE -> selectedFileId?.let {
             AsmWorkspaceLocation.Source(
                 fileId = it,
@@ -1757,7 +1818,8 @@ internal class AsmWorkspaceState(
             is AsmWorkspaceLocation.Rom -> selectRomPreviewView(location.view, addToHistory = false)
             is AsmWorkspaceLocation.GeneratedRooms -> openGeneratedRooms(location.lineIndex, addToHistory = false, buildWrites = location.buildWrites)
             is AsmWorkspaceLocation.PlmPlacement -> openPlmPlacement(location.snapshot, addToHistory = false)
-            is AsmWorkspaceLocation.RoomSourceInspection -> openRoomSourceInspection(location.snapshot, addToHistory = false)
+            is AsmWorkspaceLocation.RoomSourceInspection -> location.snapshot.automaticEdit?.reopen?.invoke()
+                ?: openRoomSourceInspection(location.snapshot, addToHistory = false)
         }
     }
 

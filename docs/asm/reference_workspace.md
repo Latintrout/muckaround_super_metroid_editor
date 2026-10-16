@@ -416,7 +416,8 @@ retype addresses. Room headers, door lists, room-state records, layouts,
 backgrounds, FX, PLM/object sets, enemy sets and graphics, special X-Ray data,
 room ASM, and scroll data expose compact **ASM** links wherever the ROM stores a
 valid address. The tile inspector links a selected door to its `$83`
-DoorDef. For an item/object, **ASM** instead targets its selected room/state's
+DoorDef preview/authored declaration; the adjacent **Arrival ASM** link opens the
+separate executable routine in `$8F`. For an item/object, **ASM** instead targets its selected room/state's
 placement: the exact `%PLMPopEntry` line in editable Bank `$8F` source when
 verified. The adjacent dropdown offers **Behavior** for the shared `$84` PLM
 header (setup/instructions), independently of the placement. Expanded enemy stats link
@@ -1777,10 +1778,183 @@ fields and retaining state geometry, PLMs, enemies, FX and scripts.
 The literal-format test also round-trips the native fields of every writable
 vanilla catalog room.
 
+## Reciprocal door connections
+
+In ASM source mode, select an existing door tile and open its **DoorDef** ASM
+link. Supported door data opens directly in the normal ASM editor; there is no
+**Create editable source** step. Before the first edit this is a staged view of
+the real bank plus the room's effective DoorDefs: opening it, moving the caret,
+using Find, saving, or building does not adopt data or invalidate a successful
+build. The first text change adopts the room's connections and that exact edit
+in one undoable transaction. Undo restores the previous GUI overrides and source
+ownership together, while keeping the door data visible and ready to edit.
+A normal GUI connection edit also adopts automatically after preflight validation.
+Source/Assets offers **Edit door data…** from a native DoorDef, without loading a visual room.
+Connections are room-wide, not state-specific; intentional one-way links are valid.
+
+The staged view is editor-only: project search/replace, saves, semantic writers
+and build inputs continue to use actual source, not provisional declarations.
+Stale room/project/ROM/source snapshots reject a first edit without publishing
+partial changes; reopen the link to see the current data. Unsupported ownership,
+shared native records and retained conflicting declarations still require review.
+Incomplete first edits are saveable drafts, not rejected keystrokes; invalid
+door data blocks GUI writes and builds until repaired, just like later edits.
+
+Each `SmeditDoors_<room>_Door_<index>()` macro contains the exact twelve bytes:
+destination `dw`, flags/direction `db`, cap tile X/Y `db`, arrival screen X/Y `db`,
+distance `dw`, and bank-$8F arrival ASM pointer `dw` (`$0000` means none). Cap
+coordinates are **not** an ASM pointer. GUI edits replace literal tokens only,
+preserving comments and line endings; raw edits refresh the GUI and **Edit room**
+returns to the owning room immediately from the live buffer, before Save/Build.
+The normal source editor preserves its typing caret across first-edit adoption.
+Native escape-gate directions are supported alongside
+ordinary door directions. Native exceptional entrance geometry is retained on
+adoption/distance edits; changed geometry or destination dimensions must pass
+bounds validation rather than silently inheriting that exception.
+The inspector's **Advanced** controls distinguish None / Blue door / Escape gate
+closure; travel and elevator edits preserve unrelated flag bits.
+
+Schema 17 stores ownership only, retiring old GUI door overrides with reciprocal
+undo/redo. Source-only undo also restores ownership. Invalid drafts remain
+saveable, show the last valid read-only preview (or an unavailable-source notice
+on a cold load), and block door GUI writes/builds. Other supported room resources
+stay editable. A stale visual edit cannot overwrite a newer ASM row. Older
+minimap undo/redo snapshots cannot restore retired GUI door overrides over source
+ownership, even before the map pane has refreshed its external-edit version.
+
+Builds preserve the native list order/count and every bank-$83 DoorDef address:
+BTS indices, incoming-door state selectors, FX variants and saves retain their
+identities. Checked generated macro invocations own each complete twelve-byte
+record, plus the room's list pointer and pointer list, including unchanged bytes.
+Competing patches/native-table edits fail. Known native `DoorASM_*` anchors must
+still resolve to the declared arrival address; moved/removed anchors cannot leave
+a silently stale pointer. This checks identities and ownership, not arbitrary
+arrival-code behavior. Literal pointers to custom code remain the author's
+responsibility. Managed arrival routines and symbolic references now extend this
+codec as described below; numeric legacy pointers retain their fixed-address guard.
+
+Explicit boundaries: shared DoorDefs require a joint-owner workflow; adding,
+deleting, reordering or relocating connections is not yet supported. Added-room
+projects remain guarded. Resize of a destination with authored incoming doors
+and area reassignment involving authored doors require a future joint
+header/map/DoorDef/arrival-code transaction. Mother Brain exit retargeting that
+would require automatic arrival-code cleanup is refused rather than replacing
+custom code. Room reset already retires door ownership/source with compound undo.
+
+Manual round trip: in Flyway select a door and open its DoorDef link directly.
+Check that merely opening it does not add a build marker or project edit.
+Change the distance word to `$1234`, use **Edit room**, and check the **Advanced →
+Distance** control. Change that control to `$2345`, reopen the source, then Undo/Redo and
+Build. This is a data-sync check, not a recommendation to play with arbitrary
+spawn distances. **Arrival ASM**, when present, opens the separate routine.
+
+`AsmDoorSourceTest` covers staged no-op/save/build isolation, atomic first-edit
+adoption and history, invalid first drafts, stale snapshots, ASM/GUI/source history, stale
+UI writes, invalid/cold drafts, literal preservation, native catalog formats,
+shared-owner rejection, relocation guards, complete claims and reset. A Compose
+source-action test selects/replaces a field in the real ASM text box and checks
+caret preservation, live **Edit room**, and staged Undo/Redo. The shared
+navigation suite exercises ASM-first adoption without a loaded canvas. Real Asar
+integration builds Flyway with other owned room resources, checks exact bytes and
+stable identities, save/reopen and undo/cache parity, and rejects both an
+overlapping patch and competing original-bank edits.
+
+## Managed arrival ASM and symbolic connections
+
+The door inspector offers **Create managed arrival ASM…** without a preliminary
+door-data opt-in. This explicitly creates a marked routine in `bank_8F.asm`
+and binds that connection's arrival word in `bank_83.asm`, in **one cross-bank
+Undo/Redo transaction**, including automatic DoorDef adoption when needed. Unknown
+native code or other preflight failures leave both banks and ownership untouched.
+Opening an existing arrival link never creates code or
+requires a build. The source pane's **Edit room** returns to the owning room.
+
+When there is a known native arrival, the scaffold restores the native
+dispatcher's A / `$12` scratch-pointer context and tail-jumps to its `DoorASM_*`
+label, preserving its behavior and caller stack rather than discarding it or
+copying shared code. A native symbol may move within bank `$8F`; both that jump
+and symbolic DoorDef references follow the actual compiled label. An unknown
+numeric target cannot be replaced automatically: review/preserve it in ASM first.
+A connection with no previous arrival gets a minimal `RTS` body.
+
+For example, an originally empty second Flyway arrival becomes:
+
+```asm
+; bank_8F.asm
+macro SmeditArrival_9879_Door_1()
+    ; SMEDIT managed arrival v1
+    rts
+endmacro
+
+; Last word of SmeditDoors_9879_Door_1() in bank_83.asm:
+    dw SmeditArrival_9879_Door_1_Entry ; Arrival ASM
+```
+
+Do not add `org`, placement/end labels or includes inside that body. The checked
+gateway accepts instructions, local labels, data, bounded fill and assertions;
+placement and entry/end symbols are generated out-of-tree. Each routine is
+limited to 1,024 assembled bytes. Arrivals and managed state predicates share
+one deterministic packed bank-$8F pool. Reference/current-source bytes and
+explicit manual envelopes constrain placement; complete code ranges, including
+unchanged `$FF` padding, are owned and excluded from room allocations. Growth
+relinks subsequent routines and DoorDefs automatically. The generated-input pass
+must retain the first pass's symbols, exact bytes and complete ROM parity.
+
+Arrival entry uses the verified native dispatcher: native mode, 16-bit A/X/Y,
+DB=`$8F`, an `RTS` return, and a balanced routine-owned stack. The compiler checks
+that dispatcher ABI and actual symbol banks/bounds. These are **trusted code
+contracts, not a proof of arbitrary behavior**, stack balance, termination or
+side effects. Ordinary external helpers and advanced numeric fixed-address
+dependencies remain the author's responsibility. Changing engine dispatch to an
+incompatible ABI blocks symbolic arrivals rather than running them with guessed
+assumptions.
+
+The GUI shows **Managed in ASM · address resolved on build** and the target label,
+not a fabricated allocation address. Only the numeric arrival-address control is
+replaced by that source link; destination, screens, flags/cap and distance remain
+reciprocal. GUI edits and destination-picker suggestions preserve the binding.
+Use a known native `DoorASM_*` name or a managed `_Entry` symbol for the final
+`dw`; expressions and unverified arbitrary labels are not silently interpreted.
+Restoring a literal (including `$0000`) automatically restores the numeric control.
+It does not delete the authored routine: declared managed bodies still assemble
+and own space until explicitly removed/reset, even if currently unreferenced.
+Go to Definition on generated entry/end symbols opens their current authored
+macro body, including unsaved text before the first build.
+
+An unfinished executable body remains saveable and does not lock connection-data
+editing. Missing/ambiguous binding declarations are different: they make that
+data projection stale/unavailable and block its writes/builds until repaired.
+Incoming scroll diagnostics follow effective connection targets but do not show
+base-ROM scroll writes as the execution of authored arrivals; they identify
+source-managed effects as unsimulated while leaving the initial grid editable.
+Room-only JSON cannot carry these code dependencies and is explicitly refused;
+save the portable ASM project or build/export a ROM instead. Schema 18 marks this
+project compatibility boundary; no labels, code or guessed addresses are copied
+into persisted room deltas.
+
+Room reset retires unreferenced arrival macros with the door declarations and
+restores both through Undo. External symbolic references retain the code and its
+transitive dependencies. Shared DoorDefs, structural door-list edits, added-room
+identities and joint resize/area remapping remain guarded; managed code placement
+does not make arbitrary routines safe to rewrite for new geometry.
+
+Manual smoke test: adopt Flyway's DoorDefs, then **Create managed arrival ASM…**
+on its Bomb Torizo connection (the native empty arrival). Insert `nop` before
+`rts`, Build, and use **Edit room**. Change **Advanced → Distance** and check its
+DoorDef source still contains the same `_Entry` word. Test Undo from either bank
+and the canvas. On the Parlor connection, the scaffold should preserve the
+original native routine through a context-preserving tail jump instead.
+
+Coverage includes codec/bank/ABI/envelope checks, headered builds, direct native
+relink ownership handoff, instruction-level dispatcher/scaffold context parity,
+unbuilt symbol navigation, reciprocal field/history/reset/draft flows, and a real
+Asar scenario with two arrivals plus a predicate, growth/relocation, moved native
+labels, headless reopen, unchanged-padding patch conflicts and ABI/oversize failures.
+
 ## Room/source workflow safety contracts
 
 Room source links share the production `RoomAsmNavigation` router. Layout,
-header/state fields, selectors, initial scrolls, FX, enemies/GFX and object-source
+header/state fields, selectors, doors, initial scrolls, FX, enemies/GFX and object-source
 adoption all follow the same rule: inspection is read-only; **Create editable
 source** is an explicit ownership/edit boundary. A verified native PLM placement
 opens its existing code directly without creating wrapper declarations. Save-spawn
@@ -2193,7 +2367,9 @@ Follow-up work can now be incremental:
    Bounded handwritten predicate import now has explicit review/conversion.
    Explicit executable predicates now have an ASM-only binding/adapter boundary.
    Broader recognition and placement/scaffolding assistance can follow incrementally.
-   Next are doors/connections and associated door ASM, including joint map/area
+   Existing DoorDef fields now have reciprocal declarations with stable identities.
+   Managed arrival ASM now shares checked placement with predicates and symbolic DoorDefs.
+   Next are structural connection edits and joint map/area
    transactions. Asset-owned tileset/palette/separate-background authoring and
    stable project-created room source identities follow those room workflows.
    Graphics, map, text, and sound encoders should follow the same

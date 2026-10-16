@@ -9955,3 +9955,56 @@ macro SmeditFx_91F8_State_73746174652d34()
     %SmeditFx_91F8_Table_3()
 endmacro
 
+; SMEDIT doors v1 · Single Chamber
+; Existing connection order and DoorDef identities stay fixed; one-way connections are allowed.
+; Arrival ASM is authored separately in bank_8F.asm; editing it does not disable these data fields.
+; Connection 1 · DoorDef $83:95CA
+macro SmeditDoors_AD5E_Door_0()
+    dw $ACB3 ; Destination room · bank $8F
+    db $00, $05 ; Flags, direction / closing door
+    db $1E, $16 ; Door cap tile X, Y (not an ASM pointer)
+    db $01, $01 ; Arrival screen X, Y
+    dw $8000 ; Distance ($8000 = default)
+    dw $0000 ; Arrival ASM · bank $8F ($0000 = none)
+endmacro
+
+; Connection 2 · DoorDef $83:95D6
+macro SmeditDoors_AD5E_Door_1()
+    dw $ADAD ; Destination room · bank $8F
+    db $00, $04 ; Flags, direction / closing door
+    db $01, $06 ; Door cap tile X, Y (not an ASM pointer)
+    db $00, $00 ; Arrival screen X, Y
+    dw $8000 ; Distance ($8000 = default)
+    dw $0000 ; Arrival ASM · bank $8F ($0000 = none)
+endmacro
+
+; Connection 3 · DoorDef $83:95E2
+macro SmeditDoors_AD5E_Door_2()
+    dw $ADAD ; Destination room · bank $8F
+    db $00, $04 ; Flags, direction / closing door
+    db $01, $16 ; Door cap tile X, Y (not an ASM pointer)
+    db $00, $01 ; Arrival screen X, Y
+    dw $8000 ; Distance ($8000 = default)
+    dw $0000 ; Arrival ASM · bank $8F ($0000 = none)
+endmacro
+
+; Connection 4 · DoorDef $83:95EE
+macro SmeditDoors_AD5E_Door_3()
+    dw $AE07 ; Destination room · bank $8F
+    db $00, $04 ; Flags, direction / closing door
+    db $01, $06 ; Door cap tile X, Y (not an ASM pointer)
+    db $00, $00 ; Arrival screen X, Y
+    dw $8000 ; Distance ($8000 = default)
+    dw $0000 ; Arrival ASM · bank $8F ($0000 = none)
+endmacro
+
+; Connection 5 · DoorDef $83:95FA
+macro SmeditDoors_AD5E_Door_4()
+    dw $B656 ; Destination room · bank $8F
+    db $00, $04 ; Flags, direction / closing door
+    db $11, $06 ; Door cap tile X, Y (not an ASM pointer)
+    db $01, $00 ; Arrival screen X, Y
+    dw $8000 ; Distance ($8000 = default)
+    dw $0000 ; Arrival ASM · bank $8F ($0000 = none)
+endmacro
+

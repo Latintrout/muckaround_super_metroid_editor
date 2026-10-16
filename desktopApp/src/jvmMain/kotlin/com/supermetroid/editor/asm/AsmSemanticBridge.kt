@@ -85,9 +85,11 @@ internal object AsmSemanticBridge {
             val room = runCatching { romParser.readRoomHeader(roomId) }.getOrNull()
             room?.doorOut?.let { doorOut ->
                 addRoomPointer(RomConstants.BANK_ROOM_DATA, doorOut, "Door list")
-                runCatching { romParser.parseDoorList(doorOut) }.getOrDefault(emptyList()).forEach { door ->
+                runCatching { romParser.parseDoorList(doorOut) }.getOrDefault(emptyList()).forEachIndexed { index, door ->
                     addRoomPointer(RomConstants.BANK_FX, door.doorDefPtr, "Door definition")
-                    addRoomPointer(RomConstants.BANK_ROOM_DATA, door.doorCapCode, "Door scroll ASM")
+                    roomSources.getOrPut(RomConstants.BANK_FX or door.doorDefPtr) { mutableListOf() }
+                        .add(AsmRoomSourceLink(roomId, roomInfo.name, RoomAsmSourceKind.DOORS,
+                            detail = "Connection ${index + 1}", doorIndex = index))
                     addRoomPointer(RomConstants.BANK_ROOM_DATA, door.entryCode, "Door entry ASM")
                 }
             }

@@ -11,6 +11,7 @@ internal fun snapshotRoomForResize(room: RoomEdits): RoomEdits =
     Json.decodeFromString(RoomEdits.serializer(), Json.encodeToString(RoomEdits.serializer(), room)).also { copy ->
         copy.asmHeaderPropertiesProjection = room.asmHeaderPropertiesProjection
         copy.asmSelectorOrderProjection = room.asmSelectorOrderProjection
+        copy.asmDoorProjection = room.asmDoorProjection
         copy.states.zip(room.states).forEach { (target, source) ->
             target.asmStatePropertiesProjection = source.asmStatePropertiesProjection
             target.asmConditionProjection = source.asmConditionProjection

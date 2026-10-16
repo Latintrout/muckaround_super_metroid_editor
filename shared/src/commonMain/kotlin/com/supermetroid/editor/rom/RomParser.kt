@@ -924,7 +924,7 @@ class RomParser(
      * 12-byte door entry in bank $83. Format (LE):
      *   +0  destRoomPtr  (2) destination room ID within bank $8F
      *   +2  bitflag      (2) direction (high byte) + flags (low byte: bit7=elevator)
-     *   +4  doorCapCode  (2) ASM pointer ($8F) for scroll changes on entry
+     *   +4  doorCapCode  (2) closing-door cap tile X (low byte), Y (high byte); not an ASM pointer
      *   +6  screenX      (1) spawn screen X
      *   +7  screenY      (1) spawn screen Y
      *   +8  distFromDoor (2) Samus distance from door edge (0x8000 = default)

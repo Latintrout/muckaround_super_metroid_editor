@@ -29,6 +29,7 @@ data class ProjectRoomExportResult(
     val newRoomDoorDefPtrs: Map<String, List<Int>> = emptyMap(),
     /** Complete fixed records, including unchanged words, must have one source owner. */
     val sourceSaveClaims: List<Pair<Int, String>> = emptyList(),
+    val sourceDoorClaims: List<Pair<Int, Int>> = emptyList(),
 )
 
 /**
@@ -55,6 +56,7 @@ class ProjectRoomExporter(
     private val sourceLayouts: Map<Int, Map<String, SourceRoomLayoutResource>> = emptyMap(),
     private val sourceRoomProperties: Map<Int, SourceRoomProperties> = emptyMap(),
     private val sourceSelectors: Map<Int, SourceRoomSelectors> = emptyMap(),
+    private val sourceDoors: Map<Int, SourceRoomDoors> = emptyMap(),
 ) {
     companion object {
         fun hasRoomEdits(project: SmEditProject): Boolean =
@@ -63,6 +65,7 @@ class ProjectRoomExporter(
 
     private val allocations = mutableListOf<RomAllocation>()
     private val sourceSaveClaims = mutableListOf<Pair<Int, String>>()
+    private val sourceDoorClaims = mutableListOf<Pair<Int, Int>>()
     private var stateGraphRedirectRoutinePtr: Int? = null
     private var statePredicateRoutinePtr: Int? = null
     private var stateExpressionInterpreterPtr: Int? = null
@@ -242,6 +245,40 @@ class ProjectRoomExporter(
             val room = romParser.readRoomHeader(roomId)
                 ?: failExport("Room 0x$roomKey has edits but its room header could not be read")
 
+            if (roomEdits.asmDoorSourceVersion != 0) {
+                require(project.asmWorkspace.enabled && project.asmWorkspace.buildMode == com.supermetroid.editor.data.ProjectRomBuildMode.ASM_SOURCE && project.newRooms.isEmpty()) {
+                    "Authored doors require existing-room ASM source mode."
+                }
+                val doors = requireNotNull(sourceDoors[roomId]) { "Room $roomKey requires its validated door source." }
+                require(doors.entries.all { it.arrival == null || it.arrival.snesAddress != null }) {
+                    "Resolve symbolic arrival ASM through the checked ASM build before exporting DoorDefs."
+                }
+                validateSourceRoomDoors(roomEdits, doors, romParser) { destination ->
+                    romParser.readRoomHeader(destination)?.let { header ->
+                        val overrides = project.rooms[project.roomKey(destination)]?.effectiveHeaderChange
+                        (overrides?.width ?: header.width) to (overrides?.height ?: header.height)
+                    }
+                }
+                validateSourceDoorOwnership(roomId, doors, romParser)
+                sourceDoorClaims += (romParser.snesToPc(0x8F0000 or roomId) + 9) to 2
+                sourceDoorClaims += romParser.snesToPc(0x8F0000 or doors.doorOutPtr) to (doors.entries.size * 2)
+                for (door in doors.entries) {
+                    val d = door.change
+                    val original = romParser.parseDoorEntry(doors.doorOutPtr, d.doorIndex)!!
+                    if (d.destRoomPtr != original.destRoomPtr || d.entryCode != original.entryCode) {
+                        require(!shouldClearEnemyBg2TransferOnDoor(roomId, d.destRoomPtr)) {
+                            "This Mother Brain exit requires a coordinated arrival-ASM cleanup; authored DoorDefs cannot silently replace custom code."
+                        }
+                        roomsPatched.addAll(cloneDoorDependentBgTransferIfNeeded(roomKey, roomId, d.doorIndex, d,
+                            romParser.readRoomHeader(d.destRoomPtr), d.bitflag, d.doorCapCode, d.entryCode))
+                    }
+                    val pc = romParser.snesToPc(0x830000 or door.doorDefPtr)
+                    door.bytes().copyInto(romData, pc)
+                    sourceDoorClaims += pc to 12
+                }
+                roomsPatched.add(roomKey)
+            }
+
             val headerChange = roomEdits.effectiveHeaderChange
             val effectiveWidth = headerChange?.width ?: room.width
             val effectiveHeight = headerChange?.height ?: room.height
@@ -408,6 +445,7 @@ class ProjectRoomExporter(
             newRoomIds = materialized.roomIdsByProjectId,
             newRoomDoorDefPtrs = materialized.doorDefPtrsByProjectId,
             sourceSaveClaims = sourceSaveClaims,
+            sourceDoorClaims = sourceDoorClaims,
         )
     }
 

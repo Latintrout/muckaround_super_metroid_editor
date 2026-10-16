@@ -91,6 +91,7 @@ internal fun TilePropertiesPanel(
     onMoveSamusHere: ((Int, Int) -> Unit)?,
     onWorkspaceChanged: (() -> Unit)? = null,
     onNavigateToAsm: ((Int) -> Unit)? = null,
+    onNavigateToDoorArrival: ((Int, Boolean) -> Unit)? = null,
     onNavigateToPlmPlacement: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToScrollCommands: ((RomParser.PlmEntry) -> Unit)? = null,
     onNavigateToSaveSpawn: ((RomParser.PlmEntry) -> Unit)? = null,
@@ -462,6 +463,11 @@ internal fun TilePropertiesPanel(
 
                 val allDoors = remember(editorState.editVersion) { editorState.doorEntries.toList() }
                 val currentDoor = allDoors.getOrNull(propsBts)
+                val arrivalBinding = editorState.doorArrivalBindings[propsBts]
+                if (currentDoor == null) editorState.doorPreviewProblem?.let {
+                    Text("Door source unavailable: $it. Open bank_83.asm to repair its declaration.",
+                        fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.error)
+                }
                 val projectRoom = editorState.project.newRoomForPreviewId(roomId)
                 val connectionSharedOutsideDoorway = remember(
                     blockX, blockY, propsBts, currentDoor, editorState.editVersion,
@@ -528,13 +534,13 @@ internal fun TilePropertiesPanel(
                             bitflag = bitflag,
                             screenX = opening.screenX,
                             screenY = opening.screenY,
-                            entryCode = match?.entryCode ?: 0,
+                            entryCode = if (arrivalBinding != null) currentDoor.entryCode else match?.entryCode ?: 0,
                             doorCapCode = opening.doorCapCode,
                         ),
                     )
                 }
 
-                if (currentDoor == null) {
+                if (currentDoor == null && editorState.doorPreviewProblem == null) {
                     Text(
                         if (allDoors.isEmpty()) {
                             "This doorway has no connection yet."
@@ -569,7 +575,7 @@ internal fun TilePropertiesPanel(
                     doorConnectionError?.let {
                         Text(it, fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.error)
                     }
-                } else {
+                } else if (currentDoor != null) {
                     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                     val doorDefinitionAddress = semanticAsmAddress(
                         RomConstants.BANK_FX,
@@ -604,308 +610,334 @@ internal fun TilePropertiesPanel(
                             modifier = Modifier.padding(bottom = 2.dp),
                         )
                     }
+                    val arrivalAddress = semanticAsmAddress(RomConstants.BANK_ROOM_DATA, currentDoor.entryCode)
+                    if (arrivalBinding != null && onNavigateToDoorArrival != null) {
+                        TextButton(onClick = { onNavigateToDoorArrival(propsBts, false) }) {
+                            Text("Arrival ASM · ${arrivalBinding.label}", fontSize = LocalEditorTheme.current.fontSize.value.detail)
+                        }
+                        Text("Managed in ASM · address resolved on build. Connection fields remain editable.",
+                            fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (arrivalAddress != null && asmLink != null) {
+                        AsmNavigationLink(arrivalAddress, asmLink, label = "Arrival ASM ${'$'}8F:${currentDoor.entryCode.toString(16).uppercase().padStart(4, '0')}")
+                    }
+                    if (editorState.asmNavigationEnabled && editorState.doorPreviewProblem == null &&
+                        arrivalBinding?.label?.startsWith("SmeditArrival_") != true && onNavigateToDoorArrival != null) {
+                        TextButton(onClick = { onNavigateToDoorArrival(propsBts, true) }) {
+                            Text("Create managed arrival ASM…", fontSize = LocalEditorTheme.current.fontSize.value.detail)
+                        }
+                    }
+                    if (editorState.doorPreviewProblem != null) {
+                        Text("Read-only door preview: ${editorState.doorPreviewProblem} Repair the ASM declaration to resume visual editing.",
+                            fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.error)
+                        Text("Last valid: ${currentDoor.directionName} → ${'$'}${currentDoor.destRoomPtr.toString(16).uppercase()}, " +
+                            "screen (${currentDoor.screenX + 1}, ${currentDoor.screenY + 1})",
+                            fontSize = LocalEditorTheme.current.fontSize.value.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        // Human-facing, one-based screen selector. ROM values stay zero-based internally.
+                        @Composable
+                        fun ScreenDropdown(label: String, value: Int, options: IntRange, onValueChange: (Int) -> Unit) {
+                            var expanded by remember { mutableStateOf(false) }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text(label, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth().height(28.dp)
+                                            .clickable { expanded = true },
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Text("${value + 1}", fontSize = LocalEditorTheme.current.fontSize.value.body, modifier = Modifier.weight(1f))
+                                            Text("▾", fontSize = LocalEditorTheme.current.fontSize.value.detail)
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false },
+                                        modifier = Modifier.requiredSizeIn(maxHeight = 300.dp)
+                                    ) {
+                                        for (v in options) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        "${v + 1}",
+                                                        fontSize = LocalEditorTheme.current.fontSize.value.body,
+                                                        fontWeight = if (v == value) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                },
+                                                onClick = {
+                                                    expanded = false
+                                                    if (v != value) onValueChange(v)
+                                                },
+                                                modifier = Modifier.height(24.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
-                    // Human-facing, one-based screen selector. ROM values stay zero-based internally.
-                    @Composable
-                    fun ScreenDropdown(label: String, value: Int, options: IntRange, onValueChange: (Int) -> Unit) {
-                        var expanded by remember { mutableStateOf(false) }
+                        DoorDestinationPicker(
+                            currentDoor = currentDoor,
+                            sourceRoomId = roomId,
+                            requiredDirection = pickerDirection,
+                            rooms = rooms.filter { it.getRoomIdAsInt() != roomId },
+                            romParser = romParser,
+                            editorState = editorState,
+                            enabled = !connectionSharedOutsideDoorway || projectRoom == null || allDoors.size < 16,
+                            onDoorwaySelected = { opening ->
+                                doorConnectionError = runCatching {
+                                    selectDoorway(opening)
+                                }.exceptionOrNull()?.message
+                            },
+                        )
+                        doorConnectionError?.let {
+                            Text(it, fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.error)
+                        }
+                        val effectiveDestinationRoom = remember(currentDoor.destRoomPtr, editorState.editVersion) {
+                            romParser.readRoomHeader(currentDoor.destRoomPtr)?.let(editorState::applyHeaderChanges)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        if (connectionDiagnostic?.needsAttention == true) {
+                            DoorConnectionHealthCard(connectionDiagnostic)
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        val dirNames = listOf("Right", "Left", "Down", "Up")
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Text(label, fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
+                            Text("Entrance:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
+                            Text(
+                                "${incomingDoorEdgeName(currentDoor.direction).replaceFirstChar { it.uppercase() }} edge" +
+                                    " · screen ${oneBasedRoomCoordinate(currentDoor.screenX, currentDoor.screenY)}",
+                                fontSize = LocalEditorTheme.current.fontSize.value.detail,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Direction dropdown
+                        var dirDropExpanded by remember { mutableStateOf(false) }
+                        val currentDir = currentDoor.direction and 0x03
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Text("Travel:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
                             Box(modifier = Modifier.weight(1f)) {
                                 Surface(
                                     modifier = Modifier.fillMaxWidth().height(28.dp)
-                                        .clickable { expanded = true },
+                                        .clickable { dirDropExpanded = true },
                                     shape = MaterialTheme.shapes.small,
                                     color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
                                     Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
                                         verticalAlignment = Alignment.CenterVertically) {
-                                        Text("${value + 1}", fontSize = LocalEditorTheme.current.fontSize.value.body, modifier = Modifier.weight(1f))
+                                        val bubbleTag = when (currentDoor.direction ushr 2) { 1 -> " (closing)"; 2 -> " (escape gate)"; else -> "" }
+                                        Text("${dirNames.getOrElse(currentDir) { "?" }}$bubbleTag", fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.weight(1f))
                                         Text("▾", fontSize = LocalEditorTheme.current.fontSize.value.detail)
                                     }
                                 }
                                 DropdownMenu(
-                                    expanded = expanded,
-                                    onDismissRequest = { expanded = false },
-                                    modifier = Modifier.requiredSizeIn(maxHeight = 300.dp)
+                                    expanded = dirDropExpanded,
+                                    onDismissRequest = { dirDropExpanded = false }
                                 ) {
-                                    for (v in options) {
+                                    for ((di, dn) in dirNames.withIndex()) {
                                         DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    "${v + 1}",
-                                                    fontSize = LocalEditorTheme.current.fontSize.value.body,
-                                                    fontWeight = if (v == value) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
+                                            text = { Text(dn, fontSize = LocalEditorTheme.current.fontSize.value.body) },
                                             onClick = {
-                                                expanded = false
-                                                if (v != value) onValueChange(v)
+                                                dirDropExpanded = false
+                                                val newBitflag = editedDoorBitflag(currentDoor.bitflag, travel = di)
+                                                val newDir = newBitflag ushr 8
+                                                val derivedCap = editorState.deriveEffectiveDoorCapPosition(
+                                                    romParser, currentDoor.destRoomPtr, newDir,
+                                                    currentDoor.screenX, currentDoor.screenY,
+                                                )
+                                                editorState.updateDoor(propsBts, currentDoor.copy(
+                                                    bitflag = newBitflag,
+                                                    doorCapCode = derivedCap ?: currentDoor.doorCapCode
+                                                ))
                                             },
-                                            modifier = Modifier.height(24.dp)
+                                            modifier = Modifier.height(26.dp)
                                         )
                                     }
                                 }
                             }
                         }
-                    }
-
-                    DoorDestinationPicker(
-                        currentDoor = currentDoor,
-                        sourceRoomId = roomId,
-                        requiredDirection = pickerDirection,
-                        rooms = rooms.filter { it.getRoomIdAsInt() != roomId },
-                        romParser = romParser,
-                        editorState = editorState,
-                        enabled = !connectionSharedOutsideDoorway || projectRoom == null || allDoors.size < 16,
-                        onDoorwaySelected = { opening ->
-                            doorConnectionError = runCatching {
-                                selectDoorway(opening)
-                            }.exceptionOrNull()?.message
-                        },
-                    )
-                    doorConnectionError?.let {
-                        Text(it, fontSize = LocalEditorTheme.current.fontSize.value.statusBar, color = MaterialTheme.colorScheme.error)
-                    }
-                    val effectiveDestinationRoom = remember(currentDoor.destRoomPtr, editorState.editVersion) {
-                        romParser.readRoomHeader(currentDoor.destRoomPtr)?.let(editorState::applyHeaderChanges)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    if (connectionDiagnostic?.needsAttention == true) {
-                        DoorConnectionHealthCard(connectionDiagnostic)
                         Spacer(modifier = Modifier.height(4.dp))
-                    }
 
-                    val dirNames = listOf("Right", "Left", "Down", "Up")
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Text("Entrance:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
-                        Text(
-                            "${incomingDoorEdgeName(currentDoor.direction).replaceFirstChar { it.uppercase() }} edge" +
-                                " · screen ${oneBasedRoomCoordinate(currentDoor.screenX, currentDoor.screenY)}",
-                            fontSize = LocalEditorTheme.current.fontSize.value.detail,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
+                        val destinationColumns = 0 until (effectiveDestinationRoom?.width ?: 1).coerceAtLeast(1)
+                        val destinationRows = 0 until (effectiveDestinationRoom?.height ?: 1).coerceAtLeast(1)
 
-                    // Direction dropdown
-                    var dirDropExpanded by remember { mutableStateOf(false) }
-                    val currentDir = currentDoor.direction and 0x03
-                    val isBubble = (currentDoor.direction and 0x04) != 0
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Text("Travel:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
-                        Box(modifier = Modifier.weight(1f)) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().height(28.dp)
-                                    .clickable { dirDropExpanded = true },
-                                shape = MaterialTheme.shapes.small,
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    val bubbleTag = if (isBubble) " (closing)" else ""
-                                    Text("${dirNames.getOrElse(currentDir) { "?" }}$bubbleTag", fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.weight(1f))
-                                    Text("▾", fontSize = LocalEditorTheme.current.fontSize.value.detail)
-                                }
-                            }
-                            DropdownMenu(
-                                expanded = dirDropExpanded,
-                                onDismissRequest = { dirDropExpanded = false }
-                            ) {
-                                for ((di, dn) in dirNames.withIndex()) {
-                                    DropdownMenuItem(
-                                        text = { Text(dn, fontSize = LocalEditorTheme.current.fontSize.value.body) },
-                                        onClick = {
-                                            dirDropExpanded = false
-                                            val newDir = di + (if (isBubble) 4 else 0)
-                                            val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
-                                            val derivedCap = editorState.deriveEffectiveDoorCapPosition(
-                                                romParser, currentDoor.destRoomPtr, newDir,
-                                                currentDoor.screenX, currentDoor.screenY,
-                                            )
-                                            editorState.updateDoor(propsBts, currentDoor.copy(
-                                                bitflag = newBitflag,
-                                                doorCapCode = derivedCap ?: currentDoor.doorCapCode
-                                            ))
-                                        },
-                                        modifier = Modifier.height(26.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    val destinationColumns = 0 until (effectiveDestinationRoom?.width ?: 1).coerceAtLeast(1)
-                    val destinationRows = 0 until (effectiveDestinationRoom?.height ?: 1).coerceAtLeast(1)
-
-                    ScreenDropdown("Screen col:", currentDoor.screenX, destinationColumns) { v ->
-                        val derivedCap = editorState.deriveEffectiveDoorCapPosition(
-                            romParser, currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
-                        val match = romParser.findVanillaDoorMatch(
-                            currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
-                        val newBitflag = mergeDoorBitflagWithMatchedOrientation(
-                            currentDoor.bitflag,
-                            match?.orientation
-                        )
-                        editorState.updateDoor(propsBts, currentDoor.copy(
-                            screenX = v,
-                            bitflag = newBitflag,
-                            entryCode = match?.entryCode ?: currentDoor.entryCode,
-                            doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
-                        ))
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    ScreenDropdown("Screen row:", currentDoor.screenY, destinationRows) { v ->
-                        val derivedCap = editorState.deriveEffectiveDoorCapPosition(
-                            romParser, currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
-                        val match = romParser.findVanillaDoorMatch(
-                            currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
-                        val newBitflag = mergeDoorBitflagWithMatchedOrientation(
-                            currentDoor.bitflag,
-                            match?.orientation
-                        )
-                        editorState.updateDoor(propsBts, currentDoor.copy(
-                            screenY = v,
-                            bitflag = newBitflag,
-                            entryCode = match?.entryCode ?: currentDoor.entryCode,
-                            doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
-                        ))
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    var advancedDoorFields by remember(roomId, propsBts) { mutableStateOf(false) }
-                    TextButton(
-                        onClick = { advancedDoorFields = !advancedDoorFields },
-                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
-                        modifier = Modifier.height(24.dp),
-                    ) {
-                        Text(if (advancedDoorFields) "▾ Hide advanced" else "▸ Advanced", fontSize = LocalEditorTheme.current.fontSize.value.detail)
-                    }
-                    if (advancedDoorFields) {
-                        // Distance from door (16-bit, keep as text)
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Text("Distance:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
-                            var distText by remember(currentDoor) {
-                                mutableStateOf("0x${currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0')}")
-                            }
-                            AppTextInput(
-                                value = distText,
-                                onValueChange = { v ->
-                                    distText = v
-                                    v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
-                                        editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it))
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                fontSize = LocalEditorTheme.current.fontSize.value.body, monospace = true
+                        ScreenDropdown("Screen col:", currentDoor.screenX, destinationColumns) { v ->
+                            val derivedCap = editorState.deriveEffectiveDoorCapPosition(
+                                romParser, currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
+                            val match = romParser.findVanillaDoorMatch(
+                                currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
+                            val newBitflag = mergeDoorBitflagWithMatchedOrientation(
+                                currentDoor.bitflag,
+                                match?.orientation
                             )
+                            editorState.updateDoor(propsBts, currentDoor.copy(
+                                screenX = v,
+                                bitflag = newBitflag,
+                                entryCode = if (arrivalBinding != null) currentDoor.entryCode else match?.entryCode ?: currentDoor.entryCode,
+                                doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
+                            ))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        // Elevator + Closing door toggles
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = currentDoor.isElevator,
-                                onCheckedChange = { checked ->
-                                    val newFlags = if (checked) currentDoor.bitflag or 0x80 else currentDoor.bitflag and 0x7F
-                                    editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newFlags))
-                                },
-                                modifier = Modifier.size(20.dp)
+                        ScreenDropdown("Screen row:", currentDoor.screenY, destinationRows) { v ->
+                            val derivedCap = editorState.deriveEffectiveDoorCapPosition(
+                                romParser, currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
+                            val match = romParser.findVanillaDoorMatch(
+                                currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
+                            val newBitflag = mergeDoorBitflagWithMatchedOrientation(
+                                currentDoor.bitflag,
+                                match?.orientation
                             )
-                            Text("Elevator", fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(start = 4.dp))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Checkbox(
-                                checked = isBubble,
-                                onCheckedChange = { checked ->
-                                    val dir = currentDoor.direction and 0x03
-                                    val newDir = dir + (if (checked) 4 else 0)
-                                    val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
-                                    editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
-                                },
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text("Closing door", fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(start = 4.dp))
+                            editorState.updateDoor(propsBts, currentDoor.copy(
+                                screenY = v,
+                                bitflag = newBitflag,
+                                entryCode = if (arrivalBinding != null) currentDoor.entryCode else match?.entryCode ?: currentDoor.entryCode,
+                                doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
+                            ))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        // Door cap position with auto-derive
-                        val autoCap = remember(
-                            currentDoor.destRoomPtr,
-                            currentDoor.direction,
-                            currentDoor.screenX,
-                            currentDoor.screenY,
-                            editorState.editVersion,
+                        var advancedDoorFields by remember(roomId, propsBts) { mutableStateOf(false) }
+                        TextButton(
+                            onClick = { advancedDoorFields = !advancedDoorFields },
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                            modifier = Modifier.height(24.dp),
                         ) {
-                            editorState.deriveEffectiveDoorCapPosition(
-                                romParser, currentDoor.destRoomPtr, currentDoor.direction,
-                                currentDoor.screenX, currentDoor.screenY,
-                            )
+                            Text(if (advancedDoorFields) "▾ Hide advanced" else "▸ Advanced", fontSize = LocalEditorTheme.current.fontSize.value.detail)
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Text("Door Cap:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
-                            var capText by remember(currentDoor) {
-                                mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
+                        if (advancedDoorFields) {
+                            // Distance from door (16-bit, keep as text)
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text("Distance:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
+                                var distText by remember(currentDoor) {
+                                    mutableStateOf("0x${currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0')}")
+                                }
+                                AppTextInput(
+                                    value = distText,
+                                    onValueChange = { v ->
+                                        distText = v
+                                        v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
+                                            editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it))
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = LocalEditorTheme.current.fontSize.value.body, monospace = true
+                                )
                             }
-                            AppTextInput(
-                                value = capText,
-                                onValueChange = { v ->
-                                    capText = v
-                                    v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
-                                        editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it))
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Elevator and the engine's distinct closure families are independent fields.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = currentDoor.isElevator,
+                                    onCheckedChange = { checked ->
+                                        val newFlags = editedDoorBitflag(currentDoor.bitflag, elevator = checked)
+                                        editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newFlags))
+                                    },
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text("Elevator", fontSize = LocalEditorTheme.current.fontSize.value.detail, modifier = Modifier.padding(start = 4.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                val closures = listOf("None", "Blue door", "Escape gate")
+                                var closureExpanded by remember { mutableStateOf(false) }
+                                Box {
+                                    TextButton(onClick = { closureExpanded = true }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                                        Text("Close: ${closures.getOrElse(currentDoor.direction ushr 2) { "Custom" }} ▾", fontSize = LocalEditorTheme.current.fontSize.value.detail)
                                     }
-                                },
-                                modifier = Modifier.weight(1f),
-                                fontSize = LocalEditorTheme.current.fontSize.value.body, monospace = true
-                            )
-                            if (autoCap != null) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Surface(
-                                    modifier = Modifier.height(20.dp)
-                                        .clickable {
-                                            editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = autoCap))
-                                        },
-                                    shape = MaterialTheme.shapes.small,
-                                    color = if (currentDoor.doorCapCode == autoCap) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.tertiaryContainer
-                                ) {
-                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text("Auto", fontSize = LocalEditorTheme.current.fontSize.value.statusBar)
+                                    DropdownMenu(expanded = closureExpanded, onDismissRequest = { closureExpanded = false }) {
+                                        closures.forEachIndexed { kind, name ->
+                                            DropdownMenuItem(text = { Text(name, fontSize = LocalEditorTheme.current.fontSize.value.body) }, onClick = {
+                                                closureExpanded = false
+                                                editorState.updateDoor(propsBts, currentDoor.copy(bitflag = editedDoorBitflag(currentDoor.bitflag, closure = kind)))
+                                            })
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if (autoCap != null && currentDoor.doorCapCode != autoCap) {
-                            val capX = autoCap and 0xFF
-                            val capY = (autoCap shr 8) and 0xFF
-                            Text(
-                                "Suggested: 0x${autoCap.toString(16).uppercase().padStart(4, '0')} ($capX, $capY)",
-                                fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
-                                color = MaterialTheme.colorScheme.tertiary,
-                                modifier = Modifier.padding(start = 72.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Text("Entry ASM:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
-                            var asmText by remember(currentDoor) {
-                                mutableStateOf("0x${currentDoor.entryCode.toString(16).uppercase().padStart(4, '0')}")
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Door cap position with auto-derive
+                            val autoCap = remember(
+                                currentDoor.destRoomPtr,
+                                currentDoor.direction,
+                                currentDoor.screenX,
+                                currentDoor.screenY,
+                                editorState.editVersion,
+                            ) {
+                                editorState.deriveEffectiveDoorCapPosition(
+                                    romParser, currentDoor.destRoomPtr, currentDoor.direction,
+                                    currentDoor.screenX, currentDoor.screenY,
+                                )
                             }
-                            AppTextInput(
-                                value = asmText,
-                                onValueChange = { v ->
-                                    asmText = v
-                                    v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
-                                        editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it))
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text("Door Cap:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
+                                var capText by remember(currentDoor) {
+                                    mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
+                                }
+                                AppTextInput(
+                                    value = capText,
+                                    onValueChange = { v ->
+                                        capText = v
+                                        v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
+                                            editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it))
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = LocalEditorTheme.current.fontSize.value.body, monospace = true
+                                )
+                                if (autoCap != null) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Surface(
+                                        modifier = Modifier.height(20.dp)
+                                            .clickable {
+                                                editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = autoCap))
+                                            },
+                                        shape = MaterialTheme.shapes.small,
+                                        color = if (currentDoor.doorCapCode == autoCap) MaterialTheme.colorScheme.primaryContainer
+                                                else MaterialTheme.colorScheme.tertiaryContainer
+                                    ) {
+                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            Text("Auto", fontSize = LocalEditorTheme.current.fontSize.value.statusBar)
+                                        }
                                     }
-                                },
-                                modifier = Modifier.weight(1f),
-                                fontSize = LocalEditorTheme.current.fontSize.value.body, monospace = true
-                            )
+                                }
+                            }
+                            if (autoCap != null && currentDoor.doorCapCode != autoCap) {
+                                val capX = autoCap and 0xFF
+                                val capY = (autoCap shr 8) and 0xFF
+                                Text(
+                                    "Suggested: 0x${autoCap.toString(16).uppercase().padStart(4, '0')} ($capX, $capY)",
+                                    fontSize = LocalEditorTheme.current.fontSize.value.statusBar,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.padding(start = 72.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            if (arrivalBinding == null) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text("Entry ASM:", fontSize = LocalEditorTheme.current.fontSize.value.detail, color = labelColor, modifier = Modifier.width(tilePropertiesLabelWidth()))
+                                var asmText by remember(currentDoor) {
+                                    mutableStateOf("0x${currentDoor.entryCode.toString(16).uppercase().padStart(4, '0')}")
+                                }
+                                AppTextInput(
+                                    value = asmText,
+                                    onValueChange = { v ->
+                                        asmText = v
+                                        v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
+                                            editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it))
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = LocalEditorTheme.current.fontSize.value.body, monospace = true
+                                )
+                            }
                         }
-                    }
+                    } // Editable connection controls; invalid drafts retain only their last-valid preview.
                 }
             }
 

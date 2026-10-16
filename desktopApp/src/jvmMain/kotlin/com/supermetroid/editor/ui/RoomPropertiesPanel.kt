@@ -53,7 +53,6 @@ import com.supermetroid.editor.data.ScrollCommand
 import com.supermetroid.editor.data.StateDataChange
 import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
-import com.supermetroid.editor.rom.analyzeDoorScrollAsm
 import com.supermetroid.editor.rom.baseSourceStateIndex
 import com.supermetroid.editor.rom.projectRoomStateCondition
 import com.supermetroid.editor.rom.isSmEditGeneratedPredicate
@@ -1191,6 +1190,14 @@ fun RoomPropertiesPanel(
             } else {
                 remember(plmSetPtr) { romParser.parsePlmSet(plmSetPtr) }
             }
+            val arrivalPreview = remember(room.roomId, romParser, editorState.editVersion,
+                editorState.asmPlmSourceBridge?.doors?.sourceText(), editorState.asmPlmSourceBridge?.sourceText()) {
+                doorArrivalScrollPreview(room.roomId, romParser, editorState)
+            }
+            if (arrivalPreview.hasSourceManagedEffects) Text(
+                "Incoming arrival effects are managed in ASM and aren't simulated here. The initial scroll grid remains editable.",
+                fontSize = ROOM_INFO_BODY_FONT_SIZE, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             val runtimeDiagnostics = remember(
                 room.roomId,
                 selectedStateId,
@@ -1198,14 +1205,9 @@ fun RoomPropertiesPanel(
                 plmSetPtr,
                 scrollW,
                 scrollH,
+                arrivalPreview,
             ) {
-                val doorAnalyses = romParser.findDoorsLeadingTo(room.roomId)
-                    .map { it.entryCode }
-                    .filter { it != 0 && it != 0xFFFF }
-                    .distinct()
-                    .map { analyzeDoorScrollAsm(romParser, it) }
-                    .filter { it.writes.isNotEmpty() }
-                buildScrollRuntimeDiagnostics(visiblePlms, scrollW, scrollH, doorAnalyses) { trigger ->
+                buildScrollRuntimeDiagnostics(visiblePlms, scrollW, scrollH, arrivalPreview.analyses) { trigger ->
                     if (editorState.hasManagedPlms()) {
                         editorState.scrollCommandsFor(trigger, selectedStateId)
                     } else
