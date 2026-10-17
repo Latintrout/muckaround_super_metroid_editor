@@ -955,7 +955,7 @@ fun MapCanvas(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(controls?.backdrop ?: EditorColors.romBackground),
+                        .let { m -> controls?.backdrop?.let { m.background(it) } ?: m.background(EditorColors.romBackground) },
                     contentAlignment = Alignment.Center
                 ) {
                     when {
@@ -976,7 +976,7 @@ fun MapCanvas(
                             val effectiveBlocksWide = editorState?.workingBlocksWide ?: data.blocksWide
                             val effectiveBlocksTall = editorState?.workingBlocksTall ?: data.blocksTall
                             val activeOverlays = (
-                                overlayToggles.filter { it.value }.keys +
+                                (controls?.overlays ?: overlayToggles.filter { it.value }.keys) +
                                     if (editorState?.activeRoomLayer == RoomEditLayer.LAYER2) setOf(TileOverlay.LAYER2) else emptySet()
                                 ).toSet()
 
@@ -2228,7 +2228,9 @@ class MapCanvasControls {
     /** Last fit-to-viewport zoom the canvas computed, for a "Fit room" button. */
     var fitZoom by mutableStateOf<Float?>(null)
     /** Fill behind the room image; null keeps the editor default. Game pixels are never recoloured. */
-    var backdrop by mutableStateOf<androidx.compose.ui.graphics.Color?>(null)
+    var backdrop by mutableStateOf<androidx.compose.ui.graphics.Brush?>(null)
+    /** Editor overlays drawn over the room (e.g. the Maker's collision view); null uses the toolbar's choice. */
+    var overlays by mutableStateOf<Set<TileOverlay>?>(null)
 
     fun zoomBy(factor: Float) { zoom.value = (zoom.value * factor).coerceIn(ROOM_MIN_ZOOM, ROOM_MAX_ZOOM) }
     fun fit() { fitZoom?.let { zoom.value = it.coerceIn(ROOM_MIN_ZOOM, ROOM_MAX_ZOOM) } }

@@ -66,6 +66,11 @@ import com.supermetroid.editor.maker.MakerPlayLoadout
 import com.supermetroid.editor.maker.MakerPlayPlan
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.maker.AREA_NAMES
+import com.supermetroid.editor.ui.maker.MAKER_BASE_LAYERS
+import com.supermetroid.editor.ui.maker.MakerMarker
+import com.supermetroid.editor.ui.maker.ReadyCheck
+import com.supermetroid.editor.ui.maker.SOLID_VIEW_OVERLAYS
+import com.supermetroid.editor.ui.maker.readyChecks
 import com.supermetroid.editor.ui.maker.KeyCap
 import com.supermetroid.editor.ui.maker.MakerButton
 import com.supermetroid.editor.ui.maker.MakerCategory
@@ -82,6 +87,7 @@ import com.supermetroid.editor.ui.theme.MakerBrightness
 import com.supermetroid.editor.ui.theme.MakerFixedColors
 import com.supermetroid.editor.ui.theme.MakerThemeProvider
 import com.supermetroid.editor.ui.theme.MakerThemeState
+import com.supermetroid.editor.ui.theme.RoomBackdrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.awt.image.BufferedImage
@@ -126,10 +132,11 @@ internal fun MakerModeScreen(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
     themeState: MakerThemeState = remember { MakerThemeState() },
+    initialSolidView: Boolean = false,
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
-            onWorkspaceChanged, onPlay, onExit, themeState, modifier)
+            onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView)
     }
 }
 
@@ -146,6 +153,7 @@ private fun MakerScreenContent(
     onExit: () -> Unit,
     themeState: MakerThemeState,
     modifier: Modifier,
+    initialSolidView: Boolean,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
@@ -157,6 +165,14 @@ private fun MakerScreenContent(
     var loadout by remember { mutableStateOf(MAKER_LOADOUTS[1]) }
     var message by remember { mutableStateOf<String?>(null) }
     val controls = remember { MapCanvasControls() }
+    var solidView by remember { mutableStateOf(initialSolidView) }
+    var markers by remember { mutableStateOf(setOf<MakerMarker>()) }
+    androidx.compose.runtime.SideEffect {
+        controls.overlays = MAKER_BASE_LAYERS + (if (solidView) SOLID_VIEW_OVERLAYS else emptySet()) + markers.map { it.overlay }
+    }
+    val backdropChoice = themeState.appearance.roomBackdrop
+    val backdrop = remember(backdropChoice, editorState.tileGraphics) { roomBackdropBrush(backdropChoice, editorState) }
+    androidx.compose.runtime.SideEffect { controls.backdrop = backdrop }
     val areaOf = remember(rooms, romParser) {
         val areas = rooms.associate { it.id to (romParser?.readRoomHeader(it.getRoomIdAsInt())?.area ?: -1) }
         ({ room: RoomInfo? -> areas[room?.id] ?: -1 })
@@ -272,7 +288,7 @@ private fun MakerScreenContent(
         CommandBar(
             rooms = rooms, selectedRoom = selectedRoom, onRoomSelected = onRoomSelected, areaOf = areaOf,
             onUndo = { editorState.undo() }, onRedo = { editorState.redo() },
-            controls = controls, themeState = themeState,
+            controls = controls, themeState = themeState, solidView = solidView, onSolidView = { solidView = it },
             loadout = loadout, onLoadout = { loadout = it },
             onPlay = ::playHere, onAdvanced = onExit,
         )
@@ -329,10 +345,11 @@ private fun MakerScreenContent(
                         )
                     }
                     ZoomControls(controls, Modifier.align(Alignment.BottomEnd).padding(12.dp))
+                    if (solidView) SolidLegend(Modifier.align(Alignment.BottomStart).padding(12.dp))
                 }
                 if (themeState.appearance.showHintBar) HintBar(tool, activePart)
             }
-            Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, onAdvanced = onExit)
+            Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, rooms, markers, { markers = it }, onAdvanced = onExit)
         }
         StatusBar(editorState, message)
     }
@@ -348,6 +365,8 @@ private fun CommandBar(
     onRedo: () -> Unit,
     controls: MapCanvasControls,
     themeState: MakerThemeState,
+    solidView: Boolean,
+    onSolidView: (Boolean) -> Unit,
     loadout: MakerLoadout,
     onLoadout: (MakerLoadout) -> Unit,
     onPlay: () -> Unit,
@@ -389,6 +408,9 @@ private fun CommandBar(
         MakerButton(onClick = { controls.showGrid = !controls.showGrid }, selected = controls.showGrid) { fg ->
             MakerIcon(MakerIcons.GRID, fg, 18.dp); Text("Grid", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
+        MakerButton(onClick = { onSolidView(!solidView) }, selected = solidView) { fg ->
+            MakerIcon(MakerIcons.SOLID, fg, 18.dp); Text("What's solid?", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
         Spacer(Modifier.weight(1f))
         Box {
             MakerButton(onClick = { themeMenu = true }) { fg ->
@@ -406,6 +428,12 @@ private fun CommandBar(
                     DropdownMenuItem(
                         text = { Text((if (b == themeState.appearance.brightness) "● " else "   ") + when (b) { MakerBrightness.LIGHT -> "Light"; MakerBrightness.DARK -> "Dark"; MakerBrightness.SYSTEM -> "Follow system" }, fontSize = 13.sp) },
                         onClick = { themeState.update { it.copy(brightness = b) } },
+                    )
+                }
+                RoomBackdrop.entries.forEach { b ->
+                    DropdownMenuItem(
+                        text = { Text((if (b == themeState.appearance.roomBackdrop) "● " else "   ") + "Room backdrop: " + b.label, fontSize = 13.sp) },
+                        onClick = { themeState.update { it.copy(roomBackdrop = b) } },
                     )
                 }
             }
@@ -593,7 +621,10 @@ private fun HintBar(tool: MakerTool, part: MakerPart?) {
 }
 
 @Composable
-private fun Inspector(editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?, onAdvanced: () -> Unit) {
+private fun Inspector(
+    editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?, rooms: List<RoomInfo>,
+    markers: Set<MakerMarker>, onMarkers: (Set<MakerMarker>) -> Unit, onAdvanced: () -> Unit,
+) {
     val p = LocalMakerPalette.current
     Column(
         Modifier.width(300.dp).fillMaxHeight().background(p.panel).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp),
@@ -632,6 +663,36 @@ private fun Inspector(editorState: EditorState, romParser: RomParser?, room: Roo
                 "Area" to AREA_NAMES.getOrElse(area) { "?" },
                 "Doors" to "${editorState.doorEntries.size} out · $doorsIn lead in",
             ), mono = setOf("Size"))
+        }
+        if (room != null && romParser != null) {
+            val roomId = room.getRoomIdAsInt()
+            val checks = remember(roomId, romParser) {
+                val names = rooms.associate { it.getRoomIdAsInt() to it.name }
+                readyChecks(romParser, roomId) { names[it] ?: "another room" }
+            }
+            val todo = checks.count { !it.ok }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionLabel("Ready to play?", Modifier.weight(1f))
+                Text(if (todo == 0) "All good" else "$todo to fix", color = if (todo == 0) MakerFixedColors.ok else MakerFixedColors.warning,
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            checks.forEach { c -> ReadyRow(c) }
+        }
+        SectionLabel("Show on canvas")
+        MakerMarker.entries.forEach { m ->
+            val on = m in markers
+            Row(
+                Modifier.fillMaxWidth().height(38.dp).background(p.raised, RoundedCornerShape(6.dp)).border(1.dp, p.border, RoundedCornerShape(6.dp))
+                    .clickable(role = androidx.compose.ui.semantics.Role.Checkbox) { onMarkers(if (on) markers - m else markers + m) }.padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(Modifier.size(12.dp).background(Color(m.overlay.color), RoundedCornerShape(3.dp)))
+                Text(m.label, color = p.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Box(
+                    Modifier.size(20.dp).background(if (on) MakerFixedColors.ok else p.inset, RoundedCornerShape(4.dp)).border(1.dp, if (on) MakerFixedColors.ok else p.border, RoundedCornerShape(4.dp)),
+                    contentAlignment = Alignment.Center,
+                ) { if (on) MakerIcon(MakerIcons.CHECK, Color.White, 14.dp, strokeWidth = 2.8f) }
+            }
         }
         Text("Advanced room settings ›", color = p.accentDeep.takeIf { !p.isDark } ?: p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onAdvanced).padding(vertical = 4.dp))
@@ -672,3 +733,53 @@ private fun StatusBar(editorState: EditorState, message: String?) {
 }
 
 private fun Color.darker(f: Float = 0.72f) = Color(red * f, green * f, blue * f, alpha)
+
+
+@Composable
+private fun ReadyRow(c: ReadyCheck) {
+    val p = LocalMakerPalette.current
+    val warnBg = if (p.isDark) Color(0xFF3A3220) else Color(0xFFF6E6C4)
+    Row(
+        Modifier.fillMaxWidth()
+            .background(if (c.ok) p.raised else warnBg, RoundedCornerShape(6.dp))
+            .border(1.dp, if (c.ok) p.border else MakerFixedColors.hazards, RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        MakerIcon(if (c.ok) MakerIcons.CHECK else MakerIcons.WARN, if (c.ok) MakerFixedColors.ok else MakerFixedColors.warning, 18.dp, strokeWidth = 2.6f)
+        Column {
+            Text(c.title, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(c.detail, color = p.muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun SolidLegend(modifier: Modifier) {
+    Row(
+        modifier.background(Color(0xE6252B30), RoundedCornerShape(7.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        listOf(TileOverlay.SOLID to "Solid", TileOverlay.SLOPE to "Slope", TileOverlay.SPIKE to "Hurts", TileOverlay.DOOR to "Door",
+            TileOverlay.CRUMBLE to "Breakable").forEach { (o, label) ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(12.dp).background(Color(o.color), RoundedCornerShape(3.dp)))
+                Text(label, color = Color(0xFFF2EBDD), fontSize = 12.sp)
+            }
+        }
+        Text("Everything else: Samus passes through", color = Color(0xFFA9B4BF), fontSize = 12.sp)
+    }
+}
+
+/** Fill behind the room image. Never applied to the game pixels themselves. */
+private fun roomBackdropBrush(choice: RoomBackdrop, editorState: EditorState): androidx.compose.ui.graphics.Brush = when (choice) {
+    RoomBackdrop.DARK -> SolidColor(EditorColors.romBackground)
+    RoomBackdrop.GAME -> SolidColor(editorState.tileGraphics?.getPalettes()?.getOrNull(0)?.getOrNull(0)?.let { Color(it or (0xFF shl 24)) } ?: Color.Black)
+    RoomBackdrop.CHECKER -> {
+        val img = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 16) for (x in 0 until 16) img.setRGB(x, y, if ((x / 8 + y / 8) % 2 == 0) 0xFF3A3F45.toInt() else 0xFF2A2E32.toInt())
+        androidx.compose.ui.graphics.ShaderBrush(
+            androidx.compose.ui.graphics.ImageShader(img.toComposeImageBitmap(), androidx.compose.ui.graphics.TileMode.Repeated, androidx.compose.ui.graphics.TileMode.Repeated),
+        )
+    }
+}

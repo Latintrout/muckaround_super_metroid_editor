@@ -40,3 +40,21 @@ class MakerModelTest {
         assertEquals("Bomb block", blockTypeName(0xF000))
     }
 }
+
+class MakerReadyTest {
+    @kotlin.test.Test
+    fun `ready checklist matches what Play can do`() {
+        val rom = java.io.File(System.getenv("V1_ROM") ?: "")
+        org.junit.jupiter.api.Assumptions.assumeTrue(rom.isFile, "V1_ROM not set")
+        val parser = com.supermetroid.editor.rom.RomParser.loadRom(rom.absolutePath)
+        val names = parser.roomCatalog.rooms.associate { it.getRoomIdAsInt() to it.name }
+        val landing = readyChecks(parser, 0x91F8) { names[it] ?: "?" }
+        println("[READY] 91F8 $landing")
+        kotlin.test.assertTrue(landing.all { it.ok })
+        kotlin.test.assertEquals("From the save station in this room", landing[0].detail)
+        val parlor = readyChecks(parser, 0x92FD) { names[it] ?: "?" }
+        println("[READY] 92FD $parlor")
+        kotlin.test.assertTrue(parlor.all { it.ok })
+        kotlin.test.assertTrue(parlor[0].detail.startsWith("Enters through the door from"))
+    }
+}
