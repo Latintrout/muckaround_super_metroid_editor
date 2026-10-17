@@ -38,6 +38,8 @@ import com.supermetroid.editor.ui.theme.LocalMakerPalette
 /** 24x24 line icons (MODRET: clear silhouettes, consistent 2px stroke). */
 object MakerIcons {
     const val SELECT = "M5 3l14 8-6 2-3 6z"
+    const val MOVE = "M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"
+    const val BOX = "M4 6h16v12H4zM4 6l16 12"
     const val PAINT = "M18 3l3 3-10 10-4 1 1-4zM5 18c-1.5 0-2 1.5-2 3 2 0 3.5-.5 3.5-2"
     const val FILL = "M5 11l7-7 7 7-7 7zM5 11h14M20 16c0 1.7-.7 3-1.5 3S17 17.7 17 16l1.5-2.5z"
     const val ERASE = "M3 16l9-9 6 6-6 6H6zM14 19h7"

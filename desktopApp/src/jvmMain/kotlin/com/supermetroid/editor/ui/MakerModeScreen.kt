@@ -53,6 +53,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -136,10 +137,13 @@ internal fun MakerModeScreen(
     playing: Boolean = false,
     onStopPlay: () -> Unit = {},
     initialAppearanceOpen: Boolean = false,
+    initialTool: MakerTool = MakerTool.PAINT,
+    canvasControls: MapCanvasControls = remember { MapCanvasControls() },
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
-            onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen)
+            onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen,
+            initialTool, canvasControls)
     }
 }
 
@@ -160,17 +164,18 @@ private fun MakerScreenContent(
     playing: Boolean,
     onStopPlay: () -> Unit,
     initialAppearanceOpen: Boolean,
+    initialTool: MakerTool,
+    controls: MapCanvasControls,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
-    var tool by remember { mutableStateOf(MakerTool.PAINT) }
+    var tool by remember { mutableStateOf(initialTool) }
     var category by remember { mutableStateOf(MakerCategory.TERRAIN) }
     var activePart by remember { mutableStateOf<MakerPart?>(null) }
     var search by remember { mutableStateOf("") }
     var searchFocused by remember { mutableStateOf(false) }
     var loadout by remember { mutableStateOf(MAKER_LOADOUTS[1]) }
     var message by remember { mutableStateOf<String?>(null) }
-    val controls = remember { MapCanvasControls() }
     var solidView by remember { mutableStateOf(initialSolidView) }
     var appearanceOpen by remember { mutableStateOf(initialAppearanceOpen) }
     var markers by remember { mutableStateOf(setOf<MakerMarker>()) }
@@ -201,14 +206,16 @@ private fun MakerScreenContent(
         }
     }
 
-    fun choose(part: MakerPart) {
+    /** Picking a part switches to Paint unless the current tool already uses it; [switchTool] false keeps the tool. */
+    fun choose(part: MakerPart, switchTool: Boolean = true) {
         activePart = part
         when (part) {
             is MakerPart.Tile -> editorState.selectMetatile(part.metatile)
             is MakerPart.Pattern -> editorState.selectAndApplyPattern(part.patternId)
             else -> Unit
         }
-        applyTool(if (tool == MakerTool.FILL && part is MakerPart.Tile) MakerTool.FILL else MakerTool.PAINT, part)
+        val keep = !switchTool || ((tool == MakerTool.FILL || tool == MakerTool.BOX) && part is MakerPart.Tile)
+        applyTool(if (keep) tool else MakerTool.PAINT, part)
     }
 
     fun stampAt(bx: Int, by: Int) {
@@ -218,6 +225,16 @@ private fun MakerScreenContent(
             else -> return
         }
         message = "Placed ${activePart?.name} at block $bx, $by"
+    }
+
+    /** Box tool: fill (or clear) every block between two corners as one undo step. */
+    fun applyBox(a: Pair<Int, Int>, b: Pair<Int, Int>, clear: Boolean) {
+        val xs = minOf(a.first, b.first)..maxOf(a.first, b.first)
+        val ys = minOf(a.second, b.second)..maxOf(a.second, b.second)
+        editorState.beginStroke()
+        for (y in ys) for (x in xs) if (clear) editorState.eraseAt(x, y) else editorState.paintAt(x, y)
+        editorState.endStroke(if (clear) "Maker box clear" else "Maker box")
+        message = "${if (clear) "Cleared" else "Filled"} ${xs.count()} × ${ys.count()} blocks"
     }
 
     /** Right-click in Paint: remove the item/enemy under the cursor, else erase the block. */
@@ -271,9 +288,16 @@ private fun MakerScreenContent(
         }
     }
 
+    // A Maker room is one layout: edits apply to every state that shares it (no per-state prompt).
+    androidx.compose.runtime.LaunchedEffect(selectedRoom?.id, editorState.editVersion) {
+        if (editorState.currentLayoutEditingContext()?.requiresScopeChoice == true) {
+            editorState.setCurrentLayoutEditScope(LayoutEditScope.ALL_SHARING_STATES)
+        }
+    }
+
     // Start ready to paint with this area's ground.
     androidx.compose.runtime.LaunchedEffect(selectedRoom?.id, parts.isNotEmpty()) {
-        if (activePart == null && category == MakerCategory.TERRAIN) parts.firstOrNull()?.let { choose(it) }
+        if (activePart == null && category == MakerCategory.TERRAIN) parts.firstOrNull()?.let { choose(it, switchTool = false) }
     }
 
     Box(modifier.fillMaxSize()) {
@@ -319,14 +343,58 @@ private fun MakerScreenContent(
                 Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0C0C18))) {
                     val stamping = tool == MakerTool.PAINT && activePart?.stamps == true
                     val paintTiles = tool == MakerTool.PAINT && activePart is MakerPart.Tile
+                    val currentTool = tool
+                    val boxTile = activePart is MakerPart.Tile
                     Box(
-                        Modifier.fillMaxSize().pointerInput(stamping, paintTiles, playing) {
+                        Modifier.fillMaxSize().pointerInput(stamping, paintTiles, playing, currentTool, boxTile) {
                             awaitPointerEventScope {
                                 var erasing = false
+                                var panning = false
+                                var boxStart: Pair<Int, Int>? = null
+                                var boxClear = false
+                                var last = androidx.compose.ui.geometry.Offset.Zero
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     if (playing) {
                                         if (event.type == PointerEventType.Press) event.changes.forEach { it.consume() }
+                                        continue
+                                    }
+                                    val pos = event.changes.firstOrNull()?.position ?: androidx.compose.ui.geometry.Offset.Zero
+                                    // Move tool drag, or middle-drag with any tool: pan the room.
+                                    if (event.type == PointerEventType.Press &&
+                                        (event.buttons.isTertiaryPressed || (currentTool == MakerTool.MOVE && event.buttons.isPrimaryPressed))) {
+                                        panning = true; last = pos; event.changes.forEach { it.consume() }; continue
+                                    }
+                                    if (panning) {
+                                        if (event.type == PointerEventType.Move) { controls.panBy(last.x - pos.x, last.y - pos.y); last = pos }
+                                        if (event.type == PointerEventType.Release) panning = false
+                                        event.changes.forEach { it.consume() }
+                                        continue
+                                    }
+                                    if (currentTool == MakerTool.BOX && boxTile) {
+                                        val bx = editorState.hoverBlockX
+                                        val by = editorState.hoverBlockY
+                                        when {
+                                            event.type == PointerEventType.Press && bx >= 0 && by >= 0 -> {
+                                                boxClear = event.buttons.isSecondaryPressed
+                                                boxStart = bx to by
+                                                editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                            event.type == PointerEventType.Move && boxStart != null && bx >= 0 && by >= 0 -> {
+                                                editorState.mapSelEnd = bx to by // live preview; hover keeps tracking
+                                            }
+                                            event.type == PointerEventType.Release && boxStart != null -> {
+                                                val start = boxStart!!
+                                                // This handler runs before the canvas updates the hover block for the
+                                                // same event, so by release the hover is the last move's block.
+                                                val end = if (bx >= 0 && by >= 0) bx to by else editorState.mapSelEnd ?: start
+                                                editorState.mapSelStart = null; editorState.mapSelEnd = null
+                                                boxStart = null
+                                                applyBox(start, end, boxClear)
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                        }
                                         continue
                                     }
                                     val bx = editorState.hoverBlockX

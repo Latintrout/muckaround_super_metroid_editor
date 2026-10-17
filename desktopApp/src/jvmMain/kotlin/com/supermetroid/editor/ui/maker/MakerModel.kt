@@ -9,7 +9,9 @@ import com.supermetroid.editor.ui.theme.MakerFixedColors
 /** The Maker's tools. Each has its own silhouette, label and one-key shortcut. */
 enum class MakerTool(val label: String, val key: Char, val icon: String, val editorTool: EditorTool, val group: Int) {
     SELECT("Select", 'V', MakerIcons.SELECT, EditorTool.SELECT, 0),
+    MOVE("Move", 'H', MakerIcons.MOVE, EditorTool.SELECT, 0),
     PAINT("Paint", 'B', MakerIcons.PAINT, EditorTool.PAINT, 1),
+    BOX("Box", 'R', MakerIcons.BOX, EditorTool.SELECT, 1),
     FILL("Fill", 'G', MakerIcons.FILL, EditorTool.FILL, 1),
     ERASE("Erase", 'E', MakerIcons.ERASE, EditorTool.ERASE, 2),
     PICK("Pick", 'I', MakerIcons.PICK, EditorTool.SAMPLE, 2);
@@ -101,6 +103,11 @@ fun makerHint(tool: MakerTool, part: MakerPart?): String {
     val name = part?.name ?: "the chosen part"
     return when (tool) {
         MakerTool.SELECT -> "Click a block or part to inspect it."
+        MakerTool.MOVE -> "Drag to move around the room. Middle-drag moves the view with any tool."
+        MakerTool.BOX -> when (part) {
+            is MakerPart.Tile -> "Drag a box to fill it with $name. Right-drag a box to clear it."
+            else -> "Box fills with terrain or hazard tiles. Choose one on the left."
+        }
         MakerTool.PAINT -> when {
             part == null -> "Choose a part on the left, then click or drag to place it."
             part is MakerPart.AnyTile -> "Click any block in the room to copy it, then paint with it."

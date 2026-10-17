@@ -29,6 +29,9 @@ class MakerModelTest {
         assertTrue("flood" in makerHint(MakerTool.FILL, tile))
         assertTrue("empty air" in makerHint(MakerTool.ERASE, null))
         for (t in MakerTool.entries) assertTrue(makerHint(t, tile).isNotBlank())
+        assertTrue(makerHint(MakerTool.BOX, tile).startsWith("Drag a box to fill it with Ground."))
+        assertTrue("Choose one" in makerHint(MakerTool.BOX, item))
+        assertTrue("Middle-drag" in makerHint(MakerTool.MOVE, tile))
     }
 
     @Test

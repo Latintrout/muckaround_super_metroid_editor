@@ -1072,6 +1072,7 @@ fun MapCanvas(
 
                             val hScrollState = rememberScrollState()
                             val vScrollState = rememberScrollState()
+                            SideEffect { controls?.hScroll = hScrollState; controls?.vScroll = vScrollState }
                             val coroutineScope = rememberCoroutineScope()
                             var canvasViewW by remember { mutableStateOf(0) }
                             var canvasViewH by remember { mutableStateOf(0) }
@@ -2231,6 +2232,15 @@ class MapCanvasControls {
     var backdrop by mutableStateOf<androidx.compose.ui.graphics.Brush?>(null)
     /** Editor overlays drawn over the room (e.g. the Maker's collision view); null uses the toolbar's choice. */
     var overlays by mutableStateOf<Set<TileOverlay>?>(null)
+
+    /** The canvas's scroll positions, so the Maker's Move tool can pan the room. */
+    var hScroll: androidx.compose.foundation.ScrollState? = null
+    var vScroll: androidx.compose.foundation.ScrollState? = null
+
+    fun panBy(dx: Float, dy: Float) {
+        hScroll?.dispatchRawDelta(dx)
+        vScroll?.dispatchRawDelta(dy)
+    }
 
     fun zoomBy(factor: Float) { zoom.value = (zoom.value * factor).coerceIn(ROOM_MIN_ZOOM, ROOM_MAX_ZOOM) }
     fun fit() { fitZoom?.let { zoom.value = it.coerceIn(ROOM_MIN_ZOOM, ROOM_MAX_ZOOM) } }
