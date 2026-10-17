@@ -102,6 +102,34 @@ object PixelEditorCursors {
     }
 
     /**
+     * Cursor drawn from a 24-unit line-icon path (the Maker's toolbar icons): a dark outline under a
+     * light stroke, so it reads on any background. [hotspot] is in the icon's 24-unit space.
+     * Falls back to a crosshair if the path can't be drawn.
+     */
+    fun fromLineIcon(svgPath: String, hotspot: Point, name: String): PointerIcon = cache.getOrPut("line:$name") {
+        runCatching { createPointerIcon(renderLineIcon(svgPath), hotspot, name) }
+            .getOrElse { PointerIcon(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR)) }
+    }
+
+    /** The cursor image for [fromLineIcon] (exposed for tests). */
+    internal fun renderLineIcon(svgPath: String): BufferedImage {
+        val img = BufferedImage(CURSOR_SIZE, CURSOR_SIZE, BufferedImage.TYPE_INT_ARGB)
+        val g = img.createGraphics()
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
+        val scale = CURSOR_SIZE / 24f
+        val path = pathNodesToPath2D(androidx.compose.ui.graphics.vector.PathParser().parsePathString(svgPath).toNodes(), scale, scale)
+        g.color = Color(0x18, 0x22, 0x26, 235)
+        g.stroke = BasicStroke(4.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g.draw(path)
+        g.color = Color(0xF2, 0xEB, 0xDD, 255)
+        g.stroke = BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g.draw(path)
+        g.dispose()
+        return img
+    }
+
+    /**
      * Renders a Material ImageVector icon to a BufferedImage cursor.
      * Extracts vector path data and draws with AWT Graphics2D.
      */

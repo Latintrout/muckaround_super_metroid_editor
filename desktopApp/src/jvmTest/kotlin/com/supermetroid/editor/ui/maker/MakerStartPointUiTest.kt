@@ -73,6 +73,7 @@ class MakerStartPointUiTest {
         scene.frames(40)
         // Under a busy test run the canvas can take a while to lay out and fit the room.
         repeat(300) { if (controls.openTilePropertiesAt == null || controls.fitZoom == null) scene.frames(2) }
+        controls.fit() // don't depend on when the canvas applies its own first fit under a busy test run
         scene.frames(10)
         fun shot(name: String) { shots?.let { File(it, "$name.png").writeBytes(scene.render(System.nanoTime()).encodeToData(EncodedImageFormat.PNG)!!.bytes) } }
         fun pointOf(bx: Int, by: Int): Offset {
@@ -83,7 +84,7 @@ class MakerStartPointUiTest {
                 }
                 scene.frames(20)
             }
-            error("block $bx,$by not on screen")
+            error("block $bx,$by not on screen (zoom ${controls.zoom.value}, fit ${controls.fitZoom}, scroll ${controls.hScroll?.value},${controls.vScroll?.value})")
         }
         fun key(c: Char) {
             scene.sendKeyEvent(androidx.compose.ui.input.key.KeyEvent(java.awt.event.KeyEvent(awtSource, java.awt.event.KeyEvent.KEY_PRESSED, 0, 0,

@@ -50,6 +50,8 @@ object MakerIcons {
     const val SOLID = "M4 4h16v16H4zM4 12l8-8M4 20L20 4M12 20l8-8"
     const val CHEVRON = "M6 9l6 6 6-6"
     const val SEARCH = "M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4"
+    /** New room: the room outline with a plus. */
+    const val NEW_ROOM = "M3 5h18v14H3zM12 9v6M9 12h6"
     const val ROOM = "M3 5h18v14H3zM3 10h6v9M15 5v6h6"
     const val PLAY_FILLED = "M7 4l13 8-13 8z"
     const val CHECK = "M5 12l5 5 9-10"

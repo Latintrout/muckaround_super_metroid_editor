@@ -780,6 +780,15 @@ fun main() = application {
                 }
             }
 
+            /** Creates a project-owned room and selects it; returns an error message, or null on success. */
+            fun createProjectRoom(request: NewRoomCreationRequest): String? = runCatching {
+                val parser = checkNotNull(romParser) { "Open a ROM first" }
+                val (created, workspace) = editorState.createNewRoomWorkspace(request, parser)
+                romParser = workspace
+                rooms = workspace.roomCatalog.rooms
+                selectedRoom = editorState.projectRoomInfos().first { it.handle == created.handle }
+            }.exceptionOrNull()?.message
+
             fun runProjectInEmulator() {
                 scope.launch {
                     if (!saveAsmForExecution()) return@launch
@@ -1259,6 +1268,7 @@ fun main() = application {
                                 selectedRoom = rooms.firstOrNull { it.handle == selectedHandle } ?: selectedRoom
                             },
                             onPlay = ::runProjectInEmulator,
+                            onCreateRoom = ::createProjectRoom,
                             onExit = { makerMode = false },
                             playing = emulatorEnabled,
                             onStopPlay = {
@@ -1320,15 +1330,7 @@ fun main() = application {
                                             romParser = romParser,
                                             editorState = editorState,
                                             sidebarState = roomsSidebarState,
-                                            onCreateRoom = { request ->
-                                                runCatching {
-                                                    val parser = checkNotNull(romParser) { "Open a ROM first" }
-                                                    val (created, workspace) = editorState.createNewRoomWorkspace(request, parser)
-                                                    romParser = workspace
-                                                    rooms = workspace.roomCatalog.rooms
-                                                    selectedRoom = editorState.projectRoomInfos().first { it.handle == created.handle }
-                                                }.exceptionOrNull()?.message
-                                            },
+                                            onCreateRoom = ::createProjectRoom,
                                             onDeleteRoom = { roomId ->
                                                 runCatching {
                                                     val parser = checkNotNull(romParser) { "Open a ROM first" }

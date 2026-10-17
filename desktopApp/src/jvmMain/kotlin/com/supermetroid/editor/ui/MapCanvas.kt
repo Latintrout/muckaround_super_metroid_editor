@@ -1223,7 +1223,7 @@ fun MapCanvas(
                                     .onGloballyPositioned { viewportCoords[0] = it }
                                     .then(
                                         if (editorState != null)
-                                            Modifier.pointerHoverIcon(PixelEditorCursors.forEditorTool(editorState.activeTool))
+                                            Modifier.pointerHoverIcon(controls?.cursor ?: PixelEditorCursors.forEditorTool(editorState.activeTool))
                                         else Modifier
                                     )
                                     .onPointerEvent(PointerEventType.Scroll) { event ->
@@ -1259,6 +1259,7 @@ fun MapCanvas(
                                     }
                                     .onPointerEvent(PointerEventType.Press) { event ->
                                         mapFocusReq.requestFocus()
+                                        if (controls?.skipConsumedPresses == true && event.changes.any { it.isConsumed }) return@onPointerEvent
                                         val ne = event.nativeEvent as? MouseEvent
                                         if (ne != null && ne.button == MouseEvent.BUTTON2) {
                                             isDragging = true; val p = event.changes.first().position; lastDragX = p.x; lastDragY = p.y
@@ -2275,6 +2276,10 @@ class MapCanvasControls {
     var blockAtWindow: ((androidx.compose.ui.geometry.Offset) -> Pair<Int, Int>?)? = null
     /** Extra drawing over the room (e.g. the Maker's Start point); [scale] is canvas pixels per room pixel. */
     var drawOverRoom by mutableStateOf<(androidx.compose.ui.graphics.drawscope.DrawScope.(scale: Float) -> Unit)?>(null)
+    /** Maker: presses the screen above already consumed (moving a part, panning) skip the canvas's own tools. */
+    var skipConsumedPresses: Boolean = false
+    /** Mouse cursor over the room, overriding the editor tool's cursor (the Maker's per-tool cursors). */
+    var cursor by mutableStateOf<androidx.compose.ui.input.pointer.PointerIcon?>(null)
     /** Opens the block-properties panel for a block (set by the canvas). */
     var openTilePropertiesAt: ((Int, Int) -> Unit)? = null
 

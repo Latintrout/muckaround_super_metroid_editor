@@ -149,11 +149,13 @@ internal fun MakerModeScreen(
     initialAppearanceOpen: Boolean = false,
     initialTool: MakerTool = MakerTool.PAINT,
     canvasControls: MapCanvasControls = remember { MapCanvasControls() },
+    /** Creates a project room (the same action as Advanced mode's room list); returns an error, or null on success. */
+    onCreateRoom: ((NewRoomCreationRequest) -> String?)? = null,
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
             onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen,
-            initialTool, canvasControls)
+            initialTool, canvasControls, onCreateRoom)
     }
 }
 
@@ -176,6 +178,7 @@ private fun MakerScreenContent(
     initialAppearanceOpen: Boolean,
     initialTool: MakerTool,
     controls: MapCanvasControls,
+    onCreateRoom: ((NewRoomCreationRequest) -> String?)?,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
@@ -196,13 +199,15 @@ private fun MakerScreenContent(
     var dragPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val rootCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
     // Block properties live in the side panel, never floating over the room.
-    androidx.compose.runtime.SideEffect { controls.dockTileProperties = true }
+    androidx.compose.runtime.SideEffect { controls.dockTileProperties = true; controls.skipConsumedPresses = true }
     androidx.compose.runtime.SideEffect {
         controls.overlays = MAKER_BASE_LAYERS + (if (solidView) SOLID_VIEW_OVERLAYS else emptySet()) + markers.map { it.overlay }
     }
     val backdropChoice = themeState.appearance.roomBackdrop
     val backdrop = remember(backdropChoice, editorState.tileGraphics) { roomBackdropBrush(backdropChoice, editorState) }
     androidx.compose.runtime.SideEffect { controls.backdrop = backdrop }
+    // Each tool shows its own icon as the mouse cursor over the room.
+    androidx.compose.runtime.SideEffect { controls.cursor = com.supermetroid.editor.ui.maker.makerCursor(tool, activePart) }
     // The room's Start point, drawn as a flag badge on its block.
     val startPoint = editorState.editVersion.let { editorState.makerStartPoint() }
     val startFlag = remember { androidx.compose.ui.graphics.vector.PathParser().parsePathString(MakerIcons.START).toPath() }
@@ -312,6 +317,30 @@ private fun MakerScreenContent(
         }
     }
 
+    /**
+     * Select tool: move the blocks in [from] (minX, minY, maxX, maxY) by [dx], [dy] as one undo step.
+     * The area left behind becomes air; the move is clamped to the room. Returns the new bounds.
+     */
+    fun moveBlocks(from: IntArray, dx: Int, dy: Int): IntArray {
+        val (x0, y0, x1, y1) = from.toList()
+        val mx = dx.coerceIn(-x0, editorState.workingBlocksWide - 1 - x1)
+        val my = dy.coerceIn(-y0, editorState.workingBlocksTall - 1 - y1)
+        if (mx == 0 && my == 0) return from
+        val cells = (y0..y1).flatMap { y -> (x0..x1).map { x -> Triple(x, y, editorState.readBlockWord(x, y) to editorState.readBts(x, y)) } }
+        val target = LinkedHashMap<Pair<Int, Int>, Pair<Int, Int>>()
+        for ((x, y) in cells) target[x to y] = com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD to 0
+        for ((x, y, v) in cells) target[x + mx to y + my] = v
+        val edits = target.mapNotNull { (at, v) ->
+            val oldWord = editorState.readBlockWord(at.first, at.second)
+            val oldBts = editorState.readBts(at.first, at.second)
+            if (oldWord == v.first && oldBts == v.second) null
+            else com.supermetroid.editor.data.TileEdit(at.first, at.second, oldWord, v.first, oldBts, v.second)
+        }
+        editorState.applyBulkEdits("Maker move blocks", edits)
+        message = "Moved ${x1 - x0 + 1} × ${y1 - y0 + 1} blocks"
+        return intArrayOf(x0 + mx, y0 + my, x1 + mx, y1 + my)
+    }
+
     /** Box tool: fill (or clear) every block between two corners as one undo step. */
     fun applyBox(a: Pair<Int, Int>, b: Pair<Int, Int>, clear: Boolean) {
         val xs = minOf(a.first, b.first)..maxOf(a.first, b.first)
@@ -334,6 +363,55 @@ private fun MakerScreenContent(
             editorState.removeEnemy(it); message = "Removed ${RomParser.enemyName(it.id)}"; return
         }
         editorState.eraseAt(bx, by)
+    }
+
+    // A new room gets a solid border in this area's ground, the area's own air inside and a plain
+    // background (a blank room's layer 2 is metatile 0) once it has loaded. One undo step.
+    data class NewRoomLook(val roomId: Int, val ground: Int, val air: Int, val background: Int)
+    var borderPending by remember { mutableStateOf<NewRoomLook?>(null) }
+    androidx.compose.runtime.LaunchedEffect(borderPending, selectedRoom?.id, editorState.editVersion) {
+        val (roomId, ground, air, background) = borderPending ?: return@LaunchedEffect
+        if (editorState.currentRoomId != roomId || editorState.workingLevelData == null) return@LaunchedEffect
+        borderPending = null
+        val w = editorState.workingBlocksWide; val h = editorState.workingBlocksTall
+        val edits = (0 until h).flatMap { y -> (0 until w).map { x -> x to y } }.mapNotNull { (x, y) ->
+            val word = if (x == 0 || y == 0 || x == w - 1 || y == h - 1) ground else air
+            val old = editorState.readBlockWord(x, y); val oldBts = editorState.readBts(x, y)
+            if (old == word && oldBts == 0) null else com.supermetroid.editor.data.TileEdit(x, y, old, word, oldBts, 0)
+        }
+        val layer2 = if (!editorState.canEditEmbeddedLayer2()) emptyList() else (0 until h).flatMap { y -> (0 until w).map { x -> x to y } }.mapNotNull { (x, y) ->
+            val old = editorState.readLayer2BlockWord(x, y)
+            if (old == background) null else com.supermetroid.editor.data.TileEdit(x, y, old, background, layer = com.supermetroid.editor.data.TILE_EDIT_LAYER_2)
+        }
+        editorState.applyBulkEdits("Maker new room", edits + layer2)
+    }
+
+    /** New room: an empty one-screen room in this area (free map cell, this room's tileset) with a solid border. */
+    fun newRoom() {
+        val create = onCreateRoom ?: return
+        val parser = romParser ?: return
+        val header = selectedRoom?.let { parser.readRoomHeader(it.getRoomIdAsInt())?.let(editorState::applyHeaderChanges) }
+        val area = header?.area ?: 0
+        val areaRooms = parser.roomCatalog.rooms.mapNotNull { info ->
+            parser.readRoomHeader(info.getRoomIdAsInt())?.let(editorState::applyHeaderChanges)
+        }.filter { it.area == area }
+        val spot = findAvailableRoomMapPosition(
+            effectiveMinimapData(parser, editorState.project, area), effectiveMapStationData(parser, editorState.project, area),
+            areaRooms, 1, 1, header?.mapX ?: 0, header?.mapY ?: 0,
+        )
+        if (spot == null) { message = "No free map space left in ${AREA_NAMES.getOrElse(area) { "this area" }}."; return }
+        val ground = 0x8000 or (com.supermetroid.editor.ui.maker.dominantGroundMetatile(editorState) ?: 0x111)
+        val air = com.supermetroid.editor.ui.maker.dominantAirWord(editorState) ?: com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD
+        val background = if (editorState.canEditEmbeddedLayer2()) {
+            (0 until editorState.workingBlocksTall).flatMap { y -> (0 until editorState.workingBlocksWide).map { x -> editorState.readLayer2BlockWord(x, y) } }
+                .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD
+        } else com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD
+        val name = "New room ${editorState.project.newRooms.size + 1}"
+        val error = create(NewRoomCreationRequest(name, cloneCurrentRoom = false, area = area, mapX = spot.first, mapY = spot.second,
+            width = 1, height = 1, tileset = header?.tileset ?: editorState.currentTilesetId))
+        if (error != null) { message = "Couldn't make a room: $error"; return }
+        editorState.project.newRooms.lastOrNull()?.let { borderPending = NewRoomLook(it.previewRoomId, ground, air, background) }
+        message = "Made $name. Paint it, place a Start point (Stations), then Play."
     }
 
     fun playHere() {
@@ -426,6 +504,7 @@ private fun MakerScreenContent(
             themeState = themeState,
             loadout = loadout, onLoadout = { loadout = it },
             onPlay = ::playHere, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
+            onNewRoom = if (onCreateRoom != null && romParser != null) ::newRoom else null,
         )
         Row(Modifier.weight(1f).fillMaxWidth()) {
             ToolRail(tool) { applyTool(it) }
@@ -473,6 +552,7 @@ private fun MakerScreenContent(
                                 var moving: Any? = null
                                 var moveFrom: Pair<Int, Int>? = null
                                 var selectPress: Pair<Int, Int>? = null
+                                var blockMove: IntArray? = null // selected box being dragged (minX, minY, maxX, maxY)
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     if (playing) {
@@ -526,11 +606,38 @@ private fun MakerScreenContent(
                                                 val obj: Any? = editorState.makerStartPoint()?.takeIf { it.x == bx && it.y == by }
                                                     ?: editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
                                                     ?: editorState.workingEnemies.firstOrNull { it.x / 16 == bx && it.y / 16 == by }
+                                                val ss = editorState.mapSelStart; val se = editorState.mapSelEnd
+                                                val sel = if (ss != null && se != null) intArrayOf(minOf(ss.first, se.first), minOf(ss.second, se.second),
+                                                    maxOf(ss.first, se.first), maxOf(ss.second, se.second)) else null
                                                 if (obj != null) {
                                                     moving = obj; moveFrom = bx to by
                                                     editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
                                                     event.changes.forEach { it.consume() }
-                                                } else selectPress = bx to by // the canvas handles the click; properties open on release
+                                                } else if (sel != null && bx in sel[0]..sel[2] && by in sel[1]..sel[3]) {
+                                                    // Press inside the selected box: drag moves its blocks in one gesture.
+                                                    blockMove = sel; moveFrom = bx to by
+                                                    event.changes.forEach { it.consume() }
+                                                } else selectPress = bx to by // the canvas draws the selection box; properties open on release
+                                            }
+                                            blockMove != null && event.type == PointerEventType.Move && inRoom -> {
+                                                val b = blockMove!!; val from = moveFrom!!
+                                                val dx = (bx - from.first).coerceIn(-b[0], editorState.workingBlocksWide - 1 - b[2])
+                                                val dy = (by - from.second).coerceIn(-b[1], editorState.workingBlocksTall - 1 - b[3])
+                                                editorState.mapSelStart = b[0] + dx to b[1] + dy; editorState.mapSelEnd = b[2] + dx to b[3] + dy
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                            blockMove != null && event.type == PointerEventType.Release -> {
+                                                val b = blockMove!!; val from = moveFrom!!
+                                                val to = if (inRoom) bx to by else from
+                                                if (to == from) {
+                                                    editorState.mapSelStart = b[0] to b[1]; editorState.mapSelEnd = b[2] to b[3]
+                                                    controls.openTilePropertiesAt?.invoke(from.first, from.second)
+                                                } else {
+                                                    val moved = moveBlocks(b, to.first - from.first, to.second - from.second)
+                                                    editorState.mapSelStart = moved[0] to moved[1]; editorState.mapSelEnd = moved[2] to moved[3]
+                                                }
+                                                blockMove = null; moveFrom = null
+                                                event.changes.forEach { it.consume() }
                                             }
                                             moving != null && event.type == PointerEventType.Move && inRoom -> {
                                                 editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
@@ -703,6 +810,7 @@ private fun CommandBar(
     onPlay: () -> Unit,
     onAdvanced: () -> Unit,
     onAppearance: () -> Unit,
+    onNewRoom: (() -> Unit)? = null,
 ) {
     val p = LocalMakerPalette.current
     var roomMenu by remember { mutableStateOf(false) }
@@ -725,6 +833,10 @@ private fun CommandBar(
                 MakerIcon(MakerIcons.CHEVRON, fg, 16.dp)
             }
             DropdownMenu(expanded = roomMenu, onDismissRequest = { roomMenu = false }, modifier = Modifier.heightIn(max = 520.dp)) {
+                if (onNewRoom != null) DropdownMenuItem(
+                    text = { Text("+ New room", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                    onClick = { roomMenu = false; onNewRoom() },
+                )
                 rooms.forEach { room ->
                     DropdownMenuItem(
                         text = { Text("${AREA_NAMES.getOrElse(areaOf(room)) { "?" }} · ${room.name}", fontSize = 13.sp) },
@@ -732,6 +844,9 @@ private fun CommandBar(
                     )
                 }
             }
+        }
+        if (onNewRoom != null) MakerButton(onClick = onNewRoom) { fg ->
+            MakerIcon(MakerIcons.NEW_ROOM, fg, 20.dp); Text("New room", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
         Divider()
         MakerButton(onClick = onUndo) { fg -> MakerIcon(MakerIcons.UNDO, fg, 20.dp); Text("Undo", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium) }

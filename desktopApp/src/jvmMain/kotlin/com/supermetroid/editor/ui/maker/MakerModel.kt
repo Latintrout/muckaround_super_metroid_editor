@@ -21,6 +21,26 @@ enum class MakerTool(val label: String, val key: Char, val icon: String, val edi
     }
 }
 
+/** Where each tool's icon "points" (24-unit icon space), used as its cursor hotspot. */
+private val TOOL_HOTSPOTS = mapOf(
+    MakerTool.MOVE to (12 to 12),  // centre of the arrows
+    MakerTool.PAINT to (3 to 21),  // brush tip
+    MakerTool.BOX to (4 to 6),     // top-left corner
+    MakerTool.FILL to (18 to 19),  // the drip
+    MakerTool.ERASE to (5 to 18),  // eraser edge
+    MakerTool.PICK to (4 to 18),   // dropper tip
+)
+
+/**
+ * Mouse cursor over the room: the tool's own toolbar icon. Select keeps the system arrow;
+ * Paint with "Any room tile" copies a tile, so it shows Pick.
+ */
+fun makerCursor(tool: MakerTool, part: MakerPart?): androidx.compose.ui.input.pointer.PointerIcon {
+    val shown = if (tool == MakerTool.PAINT && part is MakerPart.AnyTile) MakerTool.PICK else tool
+    val (hx, hy) = TOOL_HOTSPOTS[shown] ?: return androidx.compose.ui.input.pointer.PointerIcon.Default
+    return com.supermetroid.editor.ui.PixelEditorCursors.fromLineIcon(shown.icon, java.awt.Point(hx, hy), "maker-${shown.name.lowercase()}")
+}
+
 /** Part categories: fixed colour + marker shape + label, identical in every theme. */
 enum class MakerCategory(val label: String, val icon: String, val color: Color, val emptyHint: String) {
     TERRAIN("Terrain", MakerIcons.TERRAIN, MakerFixedColors.terrain, "No ground tile found in this room."),
@@ -142,11 +162,21 @@ fun dominantGroundMetatile(editorState: EditorState): Int? {
     return counts.maxByOrNull { it.value }?.key
 }
 
+/** Most common air (type 0x0) block word in the loaded room: the area's own empty sky or wall backing. */
+fun dominantAirWord(editorState: EditorState): Int? {
+    val counts = HashMap<Int, Int>()
+    for (by in 0 until editorState.workingBlocksTall) for (bx in 0 until editorState.workingBlocksWide) {
+        val word = editorState.readBlockWord(bx, by)
+        if ((word shr 12) and 0xF == 0x0) counts.merge(word, 1, Int::plus)
+    }
+    return counts.maxByOrNull { it.value }?.key
+}
+
 /** What a click will do, for the hint bar under the room. */
 fun makerHint(tool: MakerTool, part: MakerPart?): String {
     val name = part?.name ?: "the chosen part"
     return when (tool) {
-        MakerTool.SELECT -> "Click a block or part to inspect it."
+        MakerTool.SELECT -> "Click to inspect. Drag a part or a selected box to move it; drag empty space to select."
         MakerTool.MOVE -> "Drag to move around the room. Middle-drag moves the view with any tool."
         MakerTool.BOX -> when (part) {
             is MakerPart.Tile -> "Drag a box to fill it with $name. Right-drag a box to clear it."
