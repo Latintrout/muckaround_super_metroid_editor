@@ -225,6 +225,9 @@ class EmulatorWorkspaceState(
     private var handledRunRequestSerial = 0L
     var saveSlotIndex by mutableStateOf(0)
 
+    /** One-shot: turns the next Run build's ROM path into the path to boot (e.g. Maker Play's play-test copy). */
+    var playRomTransform: ((String) -> String)? = null
+
     /** Requests that the floating emulator become visible and actively run.
      * The window owns the build/connect lifecycle and observes this serial. */
     fun requestRun() {

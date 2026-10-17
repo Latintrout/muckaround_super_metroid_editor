@@ -50,10 +50,12 @@ sealed class MakerPart(val id: String, val name: String, val hint: String, val c
         /** Why it can't be placed in this room (graphics limits), or null when it can. */
         val blocked: String? = null,
     ) : MakerPart(id, name, hint, MakerCategory.ENEMIES)
+    /** Where Samus starts in Play. One per room: placing it again moves it. */
+    object StartPoint : MakerPart("start-point", "Start point", "Samus starts here in Play", MakerCategory.STATIONS)
     /** Copy any tile from the room (switches to Pick). */
     object AnyTile : MakerPart("decor-any", "Any room tile", "Pick it from the room", MakerCategory.DECOR)
 
-    val stamps: Boolean get() = this is Item || this is Enemy
+    val stamps: Boolean get() = this is Item || this is Enemy || this is StartPoint
 }
 
 /** Common breakable/special metatiles shared by every tileset (TilesetDefaults). */
@@ -93,7 +95,8 @@ private fun basicPartsFor(category: MakerCategory, editorState: EditorState): Li
         SHARED_TERRAIN.forEach { (t, hint) -> add(MakerPart.Tile(t.first, t.second, hint, category, t.third)) }
     }
     MakerCategory.HAZARDS -> listOf(MakerPart.Tile("spikes", "Spikes", "hurts on touch", category, 86))
-    MakerCategory.DOORS, MakerCategory.STATIONS -> editorState.project.patterns
+    MakerCategory.DOORS, MakerCategory.STATIONS -> (if (category == MakerCategory.STATIONS) listOf(MakerPart.StartPoint) else emptyList()) +
+        editorState.project.patterns
         .filter { it.builtIn && it.id.startsWith("builtin_") && isDoorPattern(it.id) == (category == MakerCategory.DOORS) }
         .sortedBy { it.name }
         .map { MakerPart.Pattern(it.id, it.name, if (category == MakerCategory.DOORS) doorHint(it.name) else stationHint(it.id), category, it.id) }
@@ -152,6 +155,7 @@ fun makerHint(tool: MakerTool, part: MakerPart?): String {
         MakerTool.PAINT -> when {
             part == null -> "Choose a part on the left, then click or drag to place it."
             part is MakerPart.AnyTile -> "Click any block in the room to copy it, then paint with it."
+            part is MakerPart.StartPoint -> "Click the block Samus should stand in when Play starts. Placing it again moves it; right-click removes it."
             part.stamps -> "Click or drag to place $name. Right-click removes the item or enemy under the cursor."
             else -> "Click or drag to place $name. Right-click or right-drag removes blocks."
         }

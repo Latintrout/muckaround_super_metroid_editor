@@ -11,23 +11,26 @@ data class ReadyCheck(val ok: Boolean, val title: String, val detail: String, va
  * The same facts Maker PLAY relies on (see [MakerPlayPlan]): a save station in the area to boot from,
  * and either that station in this room or a door leading in.
  */
-fun readyChecks(parser: RomParser, roomId: Int, roomName: (Int) -> String): List<ReadyCheck> {
+fun readyChecks(parser: RomParser, roomId: Int, startPoint: Pair<Int, Int>? = null, roomName: (Int) -> String): List<ReadyCheck> {
     val area = parser.readRoomHeader(roomId)?.area ?: return listOf(ReadyCheck(false, "Room not found", "Pick another room", "Room"))
     val areaName = AREA_NAMES.getOrElse(area) { "this area" }
     val stations = (0 until parser.saveEntryCount(area).coerceAtMost(RomParser.SAVE_STATION_SLOT_COUNT))
         .mapNotNull { parser.readSaveEntry(area, it) }.filter { it.roomId >= 0x8000 }
     val stationHere = stations.any { it.roomId == roomId }
     val doorsIn = parser.findDoorsLeadingTo(roomId).filter { it.doorDefPtr != 0 && !it.isElevator }
-    val plan = MakerPlayPlan.forRoom(parser, roomId)
+    val plan = MakerPlayPlan.forRoom(parser, roomId, startPoint)
     return listOf(
         when {
+            plan == null && stations.isNotEmpty() -> ReadyCheck(false, "Play can't reach this room yet", "Place a Start point (Stations) or connect a door", "Start")
             plan == null -> ReadyCheck(false, "Play can't reach this room yet", "Connect a door from another room", "Start")
+            plan.startPoint != null -> ReadyCheck(true, "Samus can start here", "At the Start point, block ${plan.startPoint.first}, ${plan.startPoint.second}", "Start")
             plan.entryDoor == null -> ReadyCheck(true, "Samus can start here", "From the save station in this room", "Start")
             else -> ReadyCheck(true, "Samus can start here", "Enters through the door from ${doorSource(parser, plan.entryDoor.doorDefPtr, roomName)}", "Start")
         },
         when {
             doorsIn.isNotEmpty() -> ReadyCheck(true, "Doors lead in", "${doorsIn.size} door${if (doorsIn.size == 1) "" else "s"} enter this room", "Doors in ${doorsIn.size}")
             stationHere -> ReadyCheck(true, "No door needed", "The save station here is the way in", "Doors in")
+            startPoint != null -> ReadyCheck(true, "No door needed", "Play starts at the Start point", "Doors in")
             else -> ReadyCheck(false, "No door leads in yet", "Connect a door from another room", "Doors in")
         },
         if (stations.isNotEmpty()) ReadyCheck(true, "Save station in $areaName", "Play boots from station ${plan?.stationIndex ?: 0}", "Save station")

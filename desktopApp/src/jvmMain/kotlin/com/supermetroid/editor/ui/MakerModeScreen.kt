@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -68,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.supermetroid.editor.data.MakerStartPoint
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.maker.MakerPlayLauncher
 import com.supermetroid.editor.maker.MakerPlayLoadout
@@ -200,6 +203,12 @@ private fun MakerScreenContent(
     val backdropChoice = themeState.appearance.roomBackdrop
     val backdrop = remember(backdropChoice, editorState.tileGraphics) { roomBackdropBrush(backdropChoice, editorState) }
     androidx.compose.runtime.SideEffect { controls.backdrop = backdrop }
+    // The room's Start point, drawn as a flag badge on its block.
+    val startPoint = editorState.editVersion.let { editorState.makerStartPoint() }
+    val startFlag = remember { androidx.compose.ui.graphics.vector.PathParser().parsePathString(MakerIcons.START).toPath() }
+    androidx.compose.runtime.SideEffect {
+        controls.drawOverRoom = startPoint?.let { sp -> { scale -> drawStartPoint(sp, scale, startFlag) } }
+    }
     val areaOf = remember(rooms, romParser) {
         val areas = rooms.associate { it.id to (romParser?.readRoomHeader(it.getRoomIdAsInt())?.area ?: -1) }
         ({ room: RoomInfo? -> areas[room?.id] ?: -1 })
@@ -249,8 +258,15 @@ private fun MakerScreenContent(
         applyTool(if (keep) tool else MakerTool.PAINT, part)
     }
 
-    fun stampAt(bx: Int, by: Int) {
+    /** [dragging]: the pointer moved on with the button held (items and enemies keep stamping; the Start point does not). */
+    fun stampAt(bx: Int, by: Int, dragging: Boolean = false) {
         when (val part = activePart) {
+            MakerPart.StartPoint -> {
+                if (dragging) return
+                editorState.setMakerStartPoint(MakerStartPoint(bx, by), "Maker place start point")
+                message = "Samus starts at block $bx, $by"
+                return
+            }
             is MakerPart.Item -> editorState.addPlm(part.plmId, bx, by, 0, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
             is MakerPart.Enemy -> {
                 if (part.blocked != null) { message = "${part.name} can't go in this room: ${part.blocked}."; return }
@@ -265,7 +281,7 @@ private fun MakerScreenContent(
     fun placePartAt(part: MakerPart, bx: Int, by: Int) {
         choose(part)
         when (part) {
-            is MakerPart.Item, is MakerPart.Enemy -> stampAt(bx, by)
+            is MakerPart.Item, is MakerPart.Enemy, MakerPart.StartPoint -> stampAt(bx, by)
             is MakerPart.Tile, is MakerPart.Pattern -> {
                 editorState.beginStroke(); editorState.paintAt(bx, by); editorState.endStroke("Maker place ${part.name}")
                 message = "Placed ${part.name} at block $bx, $by"
@@ -277,6 +293,10 @@ private fun MakerScreenContent(
     /** Select tool: move a placed item or enemy to another block (keeps its identity and parameters). */
     fun movePlaced(obj: Any, to: Pair<Int, Int>) {
         when (obj) {
+            is MakerStartPoint -> {
+                editorState.setMakerStartPoint(MakerStartPoint(to.first, to.second), "Maker move start point")
+                message = "Moved the Start point to block ${to.first}, ${to.second}"
+            }
             is RomParser.PlmEntry -> {
                 val before = editorState.undoStack.size
                 editorState.removePlm(obj.x, obj.y, obj.id, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
@@ -304,6 +324,9 @@ private fun MakerScreenContent(
 
     /** Right-click in Paint: remove the item/enemy under the cursor, else erase the block. */
     fun removeAt(bx: Int, by: Int) {
+        if (editorState.makerStartPoint() == MakerStartPoint(bx, by)) {
+            editorState.setMakerStartPoint(null, "Maker remove start point"); message = "Removed the Start point"; return
+        }
         editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }?.let {
             editorState.removePlm(it.x, it.y, it.id); message = "Removed ${RomParser.plmDisplayName(it.id)}"; return
         }
@@ -316,10 +339,18 @@ private fun MakerScreenContent(
     fun playHere() {
         val parser = romParser ?: return
         val roomId = selectedRoom?.getRoomIdAsInt() ?: return
-        val plan = MakerPlayPlan.forRoom(parser, roomId)
+        val start = editorState.makerStartPoint(roomId)?.let { it.x to it.y }
+        var plan = MakerPlayPlan.forRoom(parser, roomId, start)
         if (plan == null) {
-            message = "No save station or door leads into this room yet, so Play can't reach it."
+            message = if (start == null) "No save station or door leads into this room yet. Place a Start point (Stations) so Play can reach it."
+            else "There is no save station in this area for Play to boot from."
             return
+        }
+        // A start point enters through a temporary door added to a play-test copy of the build only.
+        if (plan!!.needsTemporaryDoor) emulatorWorkspaceState.playRomTransform = { built ->
+            val (copy, door) = com.supermetroid.editor.maker.MakerPlayDoor.writePlayCopy(java.io.File(built), roomId, start!!)
+            plan = plan!!.withEntryDoor(door)
+            copy.absolutePath
         }
         val l = loadout
         val wasActive = emulatorWorkspaceState.session.active
@@ -347,7 +378,7 @@ private fun MakerScreenContent(
                 writeBlock = { a, bytes -> emulatorWorkspaceState.writeMemory(a, bytes) },
             )
             val result = runCatching {
-                launcher.launch(plan, MakerPlayLoadout(l.items, l.beams, l.energyTanks, l.missiles))
+                launcher.launch(plan!!, MakerPlayLoadout(l.items, l.beams, l.energyTanks, l.missiles))
             }.getOrElse { MakerPlayLauncher.Result(false, it.message ?: "Play failed") }
             message = if (result.ok) "Playing ${selectedRoom.name} with ${l.name}" else result.message
         }
@@ -418,11 +449,11 @@ private fun MakerScreenContent(
                 editorState = editorState,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                val checks = remember(selectedRoom?.id, romParser) {
+                val checks = remember(selectedRoom?.id, romParser, startPoint) {
                     val parser = romParser ?: return@remember emptyList()
                     val room = selectedRoom ?: return@remember emptyList()
                     val names = rooms.associate { it.getRoomIdAsInt() to it.name }
-                    readyChecks(parser, room.getRoomIdAsInt()) { names[it] ?: "another room" }
+                    readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }) { names[it] ?: "another room" }
                 }
                 ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks)
                 Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0C0C18))) {
@@ -492,7 +523,8 @@ private fun MakerScreenContent(
                                     if (currentTool == MakerTool.SELECT) {
                                         when {
                                             event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
-                                                val obj: Any? = editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
+                                                val obj: Any? = editorState.makerStartPoint()?.takeIf { it.x == bx && it.y == by }
+                                                    ?: editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
                                                     ?: editorState.workingEnemies.firstOrNull { it.x / 16 == bx && it.y / 16 == by }
                                                 if (obj != null) {
                                                     moving = obj; moveFrom = bx to by
@@ -524,11 +556,11 @@ private fun MakerScreenContent(
                                         }
                                         // Drag-painting items/enemies: place one on each new block the pointer reaches.
                                         stamping && lastStamp != null && event.type == PointerEventType.Move && inRoom -> {
-                                            if ((bx to by) != lastStamp) { stampAt(bx, by); lastStamp = bx to by }
+                                            if ((bx to by) != lastStamp) { stampAt(bx, by, dragging = true); lastStamp = bx to by }
                                             event.changes.forEach { it.consume() }
                                         }
                                         stamping && lastStamp != null && event.type == PointerEventType.Release -> {
-                                            if (inRoom && (bx to by) != lastStamp) stampAt(bx, by)
+                                            if (inRoom && (bx to by) != lastStamp) stampAt(bx, by, dragging = true)
                                             lastStamp = null; event.changes.forEach { it.consume() }
                                         }
                                         (stamping || paintTiles) && event.type == PointerEventType.Press && event.buttons.isSecondaryPressed && inRoom -> {
@@ -911,7 +943,11 @@ private fun PartPreview(part: MakerPart, editorState: EditorState, modifier: Mod
             Image(bitmap, contentDescription = part.name, filterQuality = FilterQuality.None, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().padding(5.dp))
         } else {
-            MakerIcon(if (part is MakerPart.AnyTile) MakerIcons.PICK else part.category.icon, part.category.color, 30.dp)
+            when (part) {
+                MakerPart.AnyTile -> MakerIcon(MakerIcons.PICK, part.category.color, 30.dp)
+                MakerPart.StartPoint -> MakerIcon(MakerIcons.START, MakerFixedColors.play, 30.dp, strokeWidth = 2.4f)
+                else -> MakerIcon(part.category.icon, part.category.color, 30.dp)
+            }
         }
         // Item variants: a small shape badge (orb = Chozo ball, dashed square = hidden in a block).
         val variant = (part as? MakerPart.Item)?.let { item ->
@@ -922,6 +958,27 @@ private fun PartPreview(part: MakerPart, editorState: EditorState, modifier: Mod
                 MakerIcon(if (variant == "orb") "M12 4a8 8 0 100 16 8 8 0 000-16z" else "M5 5h4M15 5h4M5 19h4M15 19h4M5 5v4M5 15v4M19 5v4M19 15v4",
                     Color(0xFFF2EBDD), 12.dp, strokeWidth = 2.6f)
             }
+        }
+    }
+}
+
+/** Start point badge: a dark rounded square over the block with the flag in Play green. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStartPoint(
+    sp: MakerStartPoint, px: Float, flag: androidx.compose.ui.graphics.Path,
+) {
+    // Never smaller than 22 canvas pixels, so it stays findable at fit-to-room zoom; centred on its block.
+    val block = maxOf(16f * px, 22f)
+    val centre = androidx.compose.ui.geometry.Offset((sp.x + 0.5f) * 16f * px, (sp.y + 0.5f) * 16f * px)
+    val topLeft = centre - androidx.compose.ui.geometry.Offset(block / 2, block / 2)
+    val size = androidx.compose.ui.geometry.Size(block, block)
+    val radius = androidx.compose.ui.geometry.CornerRadius(block * 0.2f)
+    drawRoundRect(Color(0xE6182226), topLeft, size, radius)
+    drawRoundRect(MakerFixedColors.play, topLeft, size, radius, style = androidx.compose.ui.graphics.drawscope.Stroke(width = maxOf(1.5f, block * 0.08f)))
+    val s = block / 24f
+    translate(topLeft.x, topLeft.y) {
+        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+            drawPath(flag, MakerFixedColors.play, style = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = 2.4f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
     }
 }

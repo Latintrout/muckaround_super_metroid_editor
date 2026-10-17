@@ -1,6 +1,7 @@
 package com.supermetroid.editor.maker
 
 import com.supermetroid.editor.data.ItemStateScope
+import com.supermetroid.editor.data.MakerStartPoint
 import com.supermetroid.editor.data.TileEdit
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.EditorState
@@ -33,6 +34,8 @@ data class MakerRoom(
     val bts: List<Int>,
     val items: List<MakerItem>,
     val doors: List<MakerDoor>,
+    /** Where Samus starts when Maker Play enters this room (block x, y), or null for the default entry. */
+    val startPoint: MakerStartPoint? = null,
 ) {
     fun blockIndex(x: Int, y: Int): Int = y * widthBlocks + x
 }
@@ -64,7 +67,7 @@ object MakerImporter {
             .filter { editorState.isEditorItemPlm(it.id) }
             .map { MakerItem(it.id, it.x, it.y) }
         val doors = editorState.doorEntries.mapIndexed { i, d -> MakerDoor(i, d.destRoomPtr, d.doorDefPtr) }
-        return MakerRoom(editorState.currentRoomId, w, h, terrain, bts, items, doors)
+        return MakerRoom(editorState.currentRoomId, w, h, terrain, bts, items, doors, editorState.makerStartPoint())
     }
 }
 
@@ -102,9 +105,12 @@ object ClassicMakerTranslator {
         for (item in removed) editorState.removePlm(item.x, item.y, item.plmId, ItemStateScope.ALL_STATES)
         // Param 0 matches the editor's own item placement; the exporter assigns the collection bit.
         for (item in added) editorState.addPlm(item.plmId, item.x, item.y, 0, ItemStateScope.ALL_STATES)
+        target.startPoint?.let { require(it.x in 0 until target.widthBlocks && it.y in 0 until target.heightBlocks) { "Start point outside the room" } }
+        editorState.setMakerStartPoint(target.startPoint)
         val after = MakerImporter.fromEditor(editorState)
         check(after.terrain == target.terrain && after.bts == target.bts) { "Terrain did not apply as requested" }
         check(after.items.toSet() == target.items.toSet()) { "Items did not apply as requested: ${after.items}" }
+        check(after.startPoint == target.startPoint) { "Start point did not apply as requested" }
         return Result(edits.size, removed.size, added.size)
     }
 }

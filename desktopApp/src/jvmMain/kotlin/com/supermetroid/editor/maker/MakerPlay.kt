@@ -8,6 +8,11 @@ data class MakerPlayLoadout(val items: Int, val beams: Int, val energyTanks: Int
 /**
  * How Maker Play reaches a room on a freshly booted ROM with no save file:
  * load a station in the room's area, then (if the station is elsewhere) take a door into it.
+ *
+ * With a [startPoint] (block x, y) the plan always enters through a temporary door that
+ * [MakerPlayDoor] writes into the play-test ROM copy, whose screen is the start point's,
+ * so rooms with no door leading in can be played too. [entryDoor] is then filled in by
+ * [withEntryDoor] once that copy is built.
  */
 data class MakerPlayPlan(
     val roomId: Int,
@@ -15,13 +20,23 @@ data class MakerPlayPlan(
     val stationIndex: Int,
     val stationRoomId: Int,
     val entryDoor: RomParser.DoorEntry?,
+    val startPoint: Pair<Int, Int>? = null,
 ) {
+    /** True when the play-test ROM needs a temporary entry door (see [MakerPlayDoor]). */
+    val needsTemporaryDoor: Boolean get() = startPoint != null
+
+    fun withEntryDoor(door: RomParser.DoorEntry) = copy(entryDoor = door)
+
     companion object {
-        fun forRoom(parser: RomParser, roomId: Int): MakerPlayPlan? {
+        fun forRoom(parser: RomParser, roomId: Int, startPoint: Pair<Int, Int>? = null): MakerPlayPlan? {
             val area = parser.readRoomHeader(roomId)?.area ?: return null
             val stations = (0 until parser.saveEntryCount(area).coerceAtMost(RomParser.SAVE_STATION_SLOT_COUNT))
                 .mapNotNull { i -> parser.readSaveEntry(area, i)?.let { i to it } }
                 .filter { it.second.roomId >= 0x8000 }
+            if (startPoint != null) {
+                val (index, station) = stations.firstOrNull() ?: return null
+                return MakerPlayPlan(roomId, area, index, station.roomId, null, startPoint)
+            }
             stations.firstOrNull { it.second.roomId == roomId }?.let { (i, s) ->
                 return MakerPlayPlan(roomId, area, i, s.roomId, null)
             }
@@ -31,6 +46,12 @@ data class MakerPlayPlan(
             val door = doors.firstOrNull { (it.bitflag and 0x40) == 0 } ?: doors.firstOrNull() ?: return null
             return MakerPlayPlan(roomId, area, index, station.roomId, door)
         }
+
+        /** Samus centre (pixels) standing in block [x], [y]: horizontally centred, feet on the block below. */
+        fun startPixel(x: Int, y: Int): Pair<Int, Int> = x * 16 + 8 to (y + 1) * 16 - SAMUS_STAND_Y_RADIUS
+
+        /** Samus's standing hitbox half-height in pixels. */
+        const val SAMUS_STAND_Y_RADIUS = 0x15
 
         /** Samus centre (pixels) just inside [door] in its destination room, or null when the door has no cap. */
         fun arrivalPoint(door: RomParser.DoorEntry): Pair<Int, Int>? {
@@ -44,6 +65,44 @@ data class MakerPlayPlan(
                 else -> capX * 16 + 32 to capY * 16 - 40    // moving up: cap in the floor
             }
         }
+    }
+}
+
+/**
+ * Temporary entry door for Maker Play: a door definition in bank $83 free space of the
+ * play-test ROM copy only (never the project's export or the source ROM) that leads into
+ * a room on the screen of its start point.
+ */
+object MakerPlayDoor {
+    private const val BANK83_PC = 0x018000
+    private const val DOOR_SIZE = 12
+
+    /** Copy of [exportedRom] with the door added, and the door (its [RomParser.DoorEntry.doorDefPtr] set). */
+    fun install(exportedRom: ByteArray, roomId: Int, startPoint: Pair<Int, Int>): Pair<ByteArray, RomParser.DoorEntry> {
+        val header = if (exportedRom.size % 0x8000 == 0x200) 0x200 else 0
+        val rom = exportedRom.copyOf()
+        val bank = (header + BANK83_PC) until (header + BANK83_PC + 0x8000)
+        // A run of unused (0xFF) bytes near the end of the bank, kept clear of its neighbours.
+        val run = DOOR_SIZE + 16
+        val start = (bank.last - run + 1 downTo bank.first).firstOrNull { pc -> (0 until run).all { rom[pc + it] == 0xFF.toByte() } }
+            ?: error("No free space in bank \$83 for the Maker Play entry door")
+        val pc = start + 8
+        val screenX = startPoint.first / 16
+        val screenY = startPoint.second / 16
+        // Destination room, bitflag 0 (same area), direction 0 (right), no door cap, start screen,
+        // default spawn distance (0x8000), no door ASM.
+        val bytes = intArrayOf(roomId and 0xFF, (roomId shr 8) and 0xFF, 0x00, 0x00, 0x00, 0x00, screenX, screenY, 0x00, 0x80, 0x00, 0x00)
+        bytes.forEachIndexed { i, v -> rom[pc + i] = v.toByte() }
+        val ptr = 0x8000 + (pc - header - BANK83_PC)
+        return rom to RomParser.DoorEntry(roomId, 0, 0, screenX, screenY, 0x8000, 0, ptr)
+    }
+
+    /** Writes the play-test copy of [exported] next to it and returns its path and entry door. */
+    fun writePlayCopy(exported: java.io.File, roomId: Int, startPoint: Pair<Int, Int>): Pair<java.io.File, RomParser.DoorEntry> {
+        val (rom, door) = install(exported.readBytes(), roomId, startPoint)
+        val copy = java.io.File(exported.parentFile, exported.nameWithoutExtension + "-maker-play." + exported.extension)
+        copy.writeBytes(rom)
+        return copy to door
     }
 }
 
@@ -93,6 +152,7 @@ class MakerPlayLauncher(
         // frozen) until it ends.
         var waited = 0
         while (read16(SAMUS_POSE) == POSE_SHIP_LANDING && waited < 900) { waitFrames(5); waited += 5 }
+        if (plan.needsTemporaryDoor && plan.entryDoor == null) return Result(false, "The play-test ROM has no entry door for this room")
         val door = plan.entryDoor
         if (door != null) {
             write16(0x078D, door.doorDefPtr)
@@ -100,7 +160,8 @@ class MakerPlayLauncher(
             waitFrames(10)
             if (!waitForState(STATE_GAMEPLAY, 1800)) return Result(false, "The door transition did not finish")
             log("door 0x${door.doorDefPtr.toString(16)} -> room 0x${read16(ROOM).toString(16)} samus=(${read16(SAMUS_X)},${read16(SAMUS_Y)})")
-            if (placeSamus) MakerPlayPlan.arrivalPoint(door)?.let { (x, y) -> write16(SAMUS_X, x); write16(SAMUS_Y, y) }
+            val start = plan.startPoint?.let { (x, y) -> MakerPlayPlan.startPixel(x, y) }
+            if (placeSamus) (start ?: MakerPlayPlan.arrivalPoint(door))?.let { (x, y) -> write16(SAMUS_X, x); write16(SAMUS_Y, y) }
         }
         log("room state header \$8F:${read16(ROOM_STATE).toString(16)} events=${read16(0xD820).toString(16)}/${read16(0xD822).toString(16)}")
         val room = read16(ROOM)

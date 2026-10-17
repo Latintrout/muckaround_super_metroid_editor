@@ -935,6 +935,10 @@ data class ProjectBaseRom(
     val size: Int,
 )
 
+/** Block where Samus stands when Maker Play starts in a room (her feet are in this block). */
+@Serializable
+data class MakerStartPoint(val x: Int, val y: Int)
+
 @Serializable
 data class SmEditProject(
     val romPath: String,
@@ -960,6 +964,8 @@ data class SmEditProject(
     var projectFormatVersion: Int = CURRENT_PROJECT_FORMAT_VERSION,
     val projectId: String = "",
     val baseRom: ProjectBaseRom? = null,
+    /** Maker Play start points, keyed by room destination ("rom:91F8" or "project:<id>"); one per room. */
+    val makerStartPoints: MutableMap<String, MakerStartPoint> = mutableMapOf(),
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
@@ -976,6 +982,10 @@ data class SmEditProject(
         newRooms.firstOrNull { it.previewRoomId == roomId }
 
     fun newRoomDestination(id: String): String = "project:$id"
+
+    /** Durable key for a room: its project id for project-owned rooms, else its ROM room id. */
+    fun roomDestination(roomId: Int): String =
+        newRoomForPreviewId(roomId)?.let { newRoomDestination(it.id) } ?: romRoomDestination(roomId)
 
     fun romRoomDestination(roomId: Int): String =
         "rom:${roomId.toString(16).uppercase().padStart(4, '0')}"

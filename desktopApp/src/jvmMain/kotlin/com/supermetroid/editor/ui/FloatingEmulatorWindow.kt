@@ -235,7 +235,9 @@ fun FloatingEmulatorWindow(
         workspaceState.updateRomPath(editorState.project.romPath.takeIf { it.isNotBlank() })
         val rp = romParser
         if (forceBuild && rp != null) {
+            val transform = workspaceState.playRomTransform.also { workspaceState.playRomTransform = null }
             val patchedPath = editorState.exportToRomAsync(rp, workspaceState::setStatus)
+                ?.let { built -> if (transform == null) built else runCatching { transform(built) }.getOrElse { workspaceState.setStatus("Play setup failed: ${it.message}"); null } }
             if (patchedPath == null) {
                 workspaceState.setStatus("Export failed; emulator was not started.")
                 return

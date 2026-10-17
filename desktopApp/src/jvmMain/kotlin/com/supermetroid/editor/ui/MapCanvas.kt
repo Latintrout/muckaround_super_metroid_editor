@@ -1598,6 +1598,13 @@ fun MapCanvas(
                                             }
                                         }
                                     }
+                                    controls?.drawOverRoom?.let { draw ->
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) { draw(size.width / data.width) }
+                                    }
                                     // Ghost preview: render actual tile graphics for paint or floating selection placement.
                                     if (editorState != null && editorState.brush != null &&
                                         ((editorState.activeTool == EditorTool.PAINT && editorState.hoverBlockX >= 0) ||
@@ -2266,6 +2273,8 @@ class MapCanvasControls {
     internal var dockedPanelKey: Any? = null
     /** Block under a window position, or null when outside the room (set by the canvas). */
     var blockAtWindow: ((androidx.compose.ui.geometry.Offset) -> Pair<Int, Int>?)? = null
+    /** Extra drawing over the room (e.g. the Maker's Start point); [scale] is canvas pixels per room pixel. */
+    var drawOverRoom by mutableStateOf<(androidx.compose.ui.graphics.drawscope.DrawScope.(scale: Float) -> Unit)?>(null)
     /** Opens the block-properties panel for a block (set by the canvas). */
     var openTilePropertiesAt: ((Int, Int) -> Unit)? = null
 

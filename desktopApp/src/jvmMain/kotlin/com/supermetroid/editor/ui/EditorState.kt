@@ -10021,6 +10021,29 @@ class EditorState(
         if (undoStack.size >= 2) joinedWithPrevious.add(undoStack.last())
     }
 
+    /** Operations that only change project-level Maker data; undone/redone by their own callbacks. */
+    private val projectOnlyUndo: MutableMap<EditOperation, Pair<() -> Unit, () -> Unit>> = java.util.IdentityHashMap()
+
+    /** Maker Play start point of [roomId] (block coordinates), or null when the room has none. */
+    fun makerStartPoint(roomId: Int = currentRoomId): com.supermetroid.editor.data.MakerStartPoint? =
+        project.makerStartPoints[project.roomDestination(roomId)]
+
+    /** Set (or with null, remove) the current room's start point as one undoable step. A room has at most one. */
+    fun setMakerStartPoint(point: com.supermetroid.editor.data.MakerStartPoint?, description: String = "Maker start point") {
+        val key = project.roomDestination(currentRoomId)
+        val before = project.makerStartPoints[key]
+        if (before == point) return
+        val owner = project
+        fun put(value: com.supermetroid.editor.data.MakerStartPoint?) {
+            if (value == null) owner.makerStartPoints.remove(key) else owner.makerStartPoints[key] = value
+        }
+        put(point)
+        val op = EditOperation(description)
+        projectOnlyUndo[op] = { put(before) } to { put(point) }
+        undoStack.add(op); redoStack.clear(); undoVersion++
+        dirty = true; editVersion++
+    }
+
     fun undo(): Boolean {
         val top = undoStack.lastOrNull()
         val ok = undoOne()
@@ -10031,6 +10054,11 @@ class EditorState(
     private fun undoOne(): Boolean {
         if (undoStack.isEmpty()) return false
         val pending = undoStack.last()
+        projectOnlyUndo[pending]?.let { (undo, _) ->
+            undo(); undoStack.removeAt(undoStack.lastIndex); redoStack.add(pending)
+            undoVersion++; dirty = true; editVersion++
+            return true
+        }
         if (hasManagedLayouts() && pending.edits.isNotEmpty() && pending !in managedPlmUndo) {
             postStatus("Undo the layout source adoption in ASM before undoing older GUI tile edits."); return false
         }
@@ -10132,6 +10160,11 @@ class EditorState(
     private fun redoOne(): Boolean {
         if (redoStack.isEmpty()) return false
         val pending = redoStack.last()
+        projectOnlyUndo[pending]?.let { (_, redo) ->
+            redo(); redoStack.removeAt(redoStack.lastIndex); undoStack.add(pending)
+            undoVersion++; dirty = true; editVersion++
+            return true
+        }
         if (hasManagedEnemies() && (pending.enemyAdds.isNotEmpty() || pending.enemyRemoves.isNotEmpty() || pending.enemyUpdates.isNotEmpty())) {
             postStatus("Enemy edit blocked: older ROM enemy edits cannot overwrite authored population source."); return false
         }
