@@ -151,11 +151,13 @@ internal fun MakerModeScreen(
     canvasControls: MapCanvasControls = remember { MapCanvasControls() },
     /** Creates a project room (the same action as Advanced mode's room list); returns an error, or null on success. */
     onCreateRoom: ((NewRoomCreationRequest) -> String?)? = null,
+    /** Deletes a project room and selects a neighbour; returns an error, or null on success. */
+    onDeleteRoom: ((Int) -> String?)? = null,
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
             onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen,
-            initialTool, canvasControls, onCreateRoom)
+            initialTool, canvasControls, onCreateRoom, onDeleteRoom)
     }
 }
 
@@ -179,6 +181,7 @@ private fun MakerScreenContent(
     initialTool: MakerTool,
     controls: MapCanvasControls,
     onCreateRoom: ((NewRoomCreationRequest) -> String?)?,
+    onDeleteRoom: ((Int) -> String?)?,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
@@ -365,53 +368,29 @@ private fun MakerScreenContent(
         editorState.eraseAt(bx, by)
     }
 
-    // A new room gets a solid border in this area's ground, the area's own air inside and a plain
-    // background (a blank room's layer 2 is metatile 0) once it has loaded. One undo step.
-    data class NewRoomLook(val roomId: Int, val ground: Int, val air: Int, val background: Int)
-    var borderPending by remember { mutableStateOf<NewRoomLook?>(null) }
-    androidx.compose.runtime.LaunchedEffect(borderPending, selectedRoom?.id, editorState.editVersion) {
-        val (roomId, ground, air, background) = borderPending ?: return@LaunchedEffect
+    // An empty new room gets its look (solid border, air, plain background) once it has loaded.
+    var lookPending by remember { mutableStateOf<Pair<Int, com.supermetroid.editor.ui.maker.MakerNewRoomLook>?>(null) }
+    androidx.compose.runtime.LaunchedEffect(lookPending, selectedRoom?.id, editorState.editVersion) {
+        val (roomId, look) = lookPending ?: return@LaunchedEffect
         if (editorState.currentRoomId != roomId || editorState.workingLevelData == null) return@LaunchedEffect
-        borderPending = null
-        val w = editorState.workingBlocksWide; val h = editorState.workingBlocksTall
-        val edits = (0 until h).flatMap { y -> (0 until w).map { x -> x to y } }.mapNotNull { (x, y) ->
-            val word = if (x == 0 || y == 0 || x == w - 1 || y == h - 1) ground else air
-            val old = editorState.readBlockWord(x, y); val oldBts = editorState.readBts(x, y)
-            if (old == word && oldBts == 0) null else com.supermetroid.editor.data.TileEdit(x, y, old, word, oldBts, 0)
-        }
-        val layer2 = if (!editorState.canEditEmbeddedLayer2()) emptyList() else (0 until h).flatMap { y -> (0 until w).map { x -> x to y } }.mapNotNull { (x, y) ->
-            val old = editorState.readLayer2BlockWord(x, y)
-            if (old == background) null else com.supermetroid.editor.data.TileEdit(x, y, old, background, layer = com.supermetroid.editor.data.TILE_EDIT_LAYER_2)
-        }
-        editorState.applyBulkEdits("Maker new room", edits + layer2)
+        lookPending = null
+        com.supermetroid.editor.ui.maker.applyMakerNewRoomLook(editorState, look)
     }
+    var newRoomOpen by remember { mutableStateOf(false) }
+    var renameOpen by remember { mutableStateOf(false) }
+    var deleteOpen by remember { mutableStateOf(false) }
 
-    /** New room: an empty one-screen room in this area (free map cell, this room's tileset) with a solid border. */
-    fun newRoom() {
-        val create = onCreateRoom ?: return
-        val parser = romParser ?: return
-        val header = selectedRoom?.let { parser.readRoomHeader(it.getRoomIdAsInt())?.let(editorState::applyHeaderChanges) }
-        val area = header?.area ?: 0
-        val areaRooms = parser.roomCatalog.rooms.mapNotNull { info ->
-            parser.readRoomHeader(info.getRoomIdAsInt())?.let(editorState::applyHeaderChanges)
-        }.filter { it.area == area }
-        val spot = findAvailableRoomMapPosition(
-            effectiveMinimapData(parser, editorState.project, area), effectiveMapStationData(parser, editorState.project, area),
-            areaRooms, 1, 1, header?.mapX ?: 0, header?.mapY ?: 0,
-        )
-        if (spot == null) { message = "No free map space left in ${AREA_NAMES.getOrElse(area) { "this area" }}."; return }
-        val ground = 0x8000 or (com.supermetroid.editor.ui.maker.dominantGroundMetatile(editorState) ?: 0x111)
-        val air = com.supermetroid.editor.ui.maker.dominantAirWord(editorState) ?: com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD
-        val background = if (editorState.canEditEmbeddedLayer2()) {
-            (0 until editorState.workingBlocksTall).flatMap { y -> (0 until editorState.workingBlocksWide).map { x -> editorState.readLayer2BlockWord(x, y) } }
-                .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD
-        } else com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD
-        val name = "New room ${editorState.project.newRooms.size + 1}"
-        val error = create(NewRoomCreationRequest(name, cloneCurrentRoom = false, area = area, mapX = spot.first, mapY = spot.second,
-            width = 1, height = 1, tileset = header?.tileset ?: editorState.currentTilesetId))
-        if (error != null) { message = "Couldn't make a room: $error"; return }
-        editorState.project.newRooms.lastOrNull()?.let { borderPending = NewRoomLook(it.previewRoomId, ground, air, background) }
-        message = "Made $name. Paint it, place a Start point (Stations), then Play."
+    /** New room next to this one (see [com.supermetroid.editor.ui.maker.planMakerNewRoom]); returns an error, or null. */
+    fun newRoom(name: String, width: Int, height: Int, start: com.supermetroid.editor.ui.maker.MakerNewRoomStart): String? {
+        val create = onCreateRoom ?: return "Rooms can't be made here."
+        val parser = romParser ?: return "Open a project first."
+        val plan = com.supermetroid.editor.ui.maker.planMakerNewRoom(editorState, parser, selectedRoom?.getRoomIdAsInt(), width, height, start, name)
+            ?: return "No free map space left in ${AREA_NAMES.getOrElse(areaOf(selectedRoom)) { "this area" }} for a ${width}×$height room."
+        create(plan.request)?.let { return it }
+        val made = editorState.project.newRooms.lastOrNull()
+        if (made != null && plan.look != null) lookPending = made.previewRoomId to plan.look
+        message = "Made ${plan.request.name}. Paint it, place a Start point (Stations), then Play."
+        return null
     }
 
     fun playHere() {
@@ -504,7 +483,9 @@ private fun MakerScreenContent(
             themeState = themeState,
             loadout = loadout, onLoadout = { loadout = it },
             onPlay = ::playHere, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
-            onNewRoom = if (onCreateRoom != null && romParser != null) ::newRoom else null,
+            onNewRoom = if (onCreateRoom != null && romParser != null) ({ newRoomOpen = true }) else null,
+            onRename = if (selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ renameOpen = true }) else null,
+            onDelete = if (onDeleteRoom != null && selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ deleteOpen = true }) else null,
         )
         Row(Modifier.weight(1f).fillMaxWidth()) {
             ToolRail(tool) { applyTool(it) }
@@ -708,6 +689,20 @@ private fun MakerScreenContent(
         StatusBar(editorState, message)
     }
     if (appearanceOpen) com.supermetroid.editor.ui.maker.MakerAppearancePanel(themeState) { appearanceOpen = false }
+    if (newRoomOpen) com.supermetroid.editor.ui.maker.MakerNewRoomPanel(
+        defaultName = "New room ${editorState.project.newRooms.size + 1}", currentRoomName = selectedRoom?.name,
+        onCreate = ::newRoom, onClose = { newRoomOpen = false },
+    )
+    if (renameOpen && selectedRoom != null) com.supermetroid.editor.ui.maker.MakerRenameRoomPanel(selectedRoom.name, onRename = { name ->
+        runCatching { editorState.renameProjectRoom(selectedRoom.getRoomIdAsInt(), name); onWorkspaceChanged() }.exceptionOrNull()?.message
+            .also { if (it == null) message = "Renamed to ${name.trim()}" }
+    }, onClose = { renameOpen = false })
+    if (deleteOpen && selectedRoom != null && onDeleteRoom != null) com.supermetroid.editor.ui.maker.MakerDeleteRoomPanel(selectedRoom.name, onDelete = {
+        val name = selectedRoom.name
+        val roomId = selectedRoom.getRoomIdAsInt()
+        val key = editorState.project.roomDestination(roomId)
+        onDeleteRoom(roomId).also { if (it == null) { editorState.project.makerStartPoints.remove(key); message = "Deleted $name" } }
+    }, onClose = { deleteOpen = false })
     if (roomLookOpen && library != null && romParser != null) {
         com.supermetroid.editor.ui.maker.MakerRoomLookPanel(editorState, romParser, library, rooms.associate { it.getRoomIdAsInt() to it.name },
             onApplied = { message = it }, onClose = { roomLookOpen = false })
@@ -811,6 +806,8 @@ private fun CommandBar(
     onAdvanced: () -> Unit,
     onAppearance: () -> Unit,
     onNewRoom: (() -> Unit)? = null,
+    onRename: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     val p = LocalMakerPalette.current
     var roomMenu by remember { mutableStateOf(false) }
@@ -836,6 +833,14 @@ private fun CommandBar(
                 if (onNewRoom != null) DropdownMenuItem(
                     text = { Text("+ New room", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
                     onClick = { roomMenu = false; onNewRoom() },
+                )
+                if (onRename != null) DropdownMenuItem(
+                    text = { Text("Rename this room…", fontSize = 13.sp) },
+                    onClick = { roomMenu = false; onRename() },
+                )
+                if (onDelete != null) DropdownMenuItem(
+                    text = { Text("Delete this room…", fontSize = 13.sp, color = MakerFixedColors.danger) },
+                    onClick = { roomMenu = false; onDelete() },
                 )
                 rooms.forEach { room ->
                     DropdownMenuItem(

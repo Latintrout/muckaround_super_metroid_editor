@@ -67,7 +67,7 @@ class MakerToolsUiTest {
     }
 
     @Test
-    fun `move pans, select boxes and drags, tools show their own cursors, new room works`() {
+    fun `move pans, select boxes and drags, tools show their own cursors`() {
         val rom = File(System.getenv("V1_ROM") ?: "")
         assumeTrue(rom.isFile, "V1_ROM not set")
         val shots = System.getenv("MAKER_UI_SHOTS")?.let { File(it).apply { mkdirs() } }
@@ -149,22 +149,5 @@ class MakerToolsUiTest {
         editor.undo(); scene.frames(3)
         assertEquals(before, (40..42).map { x -> (58..59).map { y -> editor.readBlockWord(x, y) } }, "one undo puts the blocks back")
 
-        // New room: one click makes an empty one-screen room in this area with a solid border, and selects it.
-        val area = parser.readRoomHeader(0x91F8)!!.area
-        val air = requireNotNull(dominantAirWord(editor))
-        scene.click(Offset(350f, 34f)); scene.frames(10)
-        assertEquals(1, editor.project.newRooms.size, "New room creates a project room")
-        val created = editor.project.newRooms.single()
-        assertEquals(created.previewRoomId, room.getRoomIdAsInt(), "the new room is selected")
-        assertEquals(area, created.header.area)
-        repeat(300) { if (editor.currentRoomId != created.previewRoomId || ((editor.readBlockWord(0, 0) shr 12) and 0xF) != 0x8) scene.frames(2) }
-        assertEquals(created.previewRoomId, editor.currentRoomId)
-        val w = editor.workingBlocksWide; val h = editor.workingBlocksTall
-        val border = (0 until w).flatMap { listOf(it to 0, it to h - 1) } + (0 until h).flatMap { listOf(0 to it, w - 1 to it) }
-        assertTrue(border.all { (x, y) -> ((editor.readBlockWord(x, y) shr 12) and 0xF) == 0x8 }, "the border is solid")
-        assertEquals(air, editor.readBlockWord(w / 2, h / 2), "the inside is the area's own air")
-        assertEquals(0, (editor.readBlockWord(w / 2, h / 2) shr 12) and 0xF)
-        if (editor.canEditEmbeddedLayer2()) assertTrue(editor.readLayer2BlockWord(w / 2, h / 2) != 0, "the background is not the blank room's metatile 0")
-        shot("new-room")
     }
 }

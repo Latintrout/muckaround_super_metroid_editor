@@ -8,9 +8,10 @@ import com.supermetroid.editor.emulator.LibretroBackend
 import com.supermetroid.editor.emulator.SessionConfig
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.EditorState
-import com.supermetroid.editor.ui.NewRoomCreationRequest
 import com.supermetroid.editor.ui.ProjectFileService
 import com.supermetroid.editor.ui.ProjectLifecycle
+import com.supermetroid.editor.ui.maker.applyMakerNewRoomLook
+import com.supermetroid.editor.ui.maker.planMakerNewRoom
 import com.supermetroid.editor.ui.maker.readyChecks
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -66,28 +67,19 @@ class MakerStartPointTest {
         val landing = requireNotNull(parser.readRoomHeader(0x91F8))
         editor.loadRoom(0x91F8, parser, landing)
 
-        // Blank two-screen Crateria room in the first free map cells, no doors.
-        var created: com.supermetroid.editor.data.ProjectNewRoom? = null
-        loop@ for (y in 1 until 30) for (x in 0 until 62) {
-            val req = NewRoomCreationRequest("Start Point Room", cloneCurrentRoom = false, area = 0, mapX = x, mapY = y, width = 2, height = 1, tileset = landing.tileset)
-            val r = runCatching { editor.createNewRoomWorkspace(req, parser) }.getOrNull() ?: continue
-            created = r.first; parser = r.second
-            break@loop
-        }
-        val roomId = requireNotNull(created).previewRoomId
+        // A 2x1 empty room made exactly as the Maker's New room does: solid border, air, plain background; no doors.
+        val newPlan = requireNotNull(planMakerNewRoom(editor, parser, 0x91F8, width = 2, height = 1, name = "Start Point Room"))
+        val (created, workspace) = editor.createNewRoomWorkspace(newPlan.request, parser)
+        parser = workspace
+        val roomId = created.previewRoomId
         editor.loadRoom(roomId, parser, requireNotNull(parser.readRoomHeader(roomId)))
+        applyMakerNewRoomLook(editor, requireNotNull(newPlan.look))
         assertTrue(parser.findDoorsLeadingTo(roomId).isEmpty(), "the new room should have no door leading in")
         assertNull(MakerPlayPlan.forRoom(parser, roomId), "without a start point Play cannot reach the room")
         assertTrue(!readyChecks(parser, roomId) { "?" }.first().ok)
 
-        // Floor (bottom 3 rows) and walls, then a start point on the second screen, standing on the floor.
-        val m = MakerImporter.fromEditor(editor)
-        val floored = m.copy(terrain = m.terrain.mapIndexed { i, word ->
-            val x = i % m.widthBlocks; val y = i / m.widthBlocks
-            if (y >= m.heightBlocks - 3 || x == 0 || x == m.widthBlocks - 1) 0x8111 else word
-        })
-        ClassicMakerTranslator.apply(floored, editor)
-        val start = 20 to m.heightBlocks - 4
+        // A start point on the second screen, standing on the floor (its top row is the last one on screen).
+        val start = 20 to editor.workingBlocksTall - 4
         editor.setMakerStartPoint(MakerStartPoint(5, 5))
         editor.setMakerStartPoint(MakerStartPoint(start.first, start.second)) // placing again moves it
         assertEquals(MakerStartPoint(start.first, start.second), editor.makerStartPoint())
@@ -133,6 +125,12 @@ class MakerStartPointTest {
                 assertEquals(0x08, state)
                 assertTrue(abs(x - ex) <= 4 && abs(y - ey) <= 4, "Samus at ($x,$y), expected near ($ex,$ey)")
                 assertTrue(x - camX in 0 until 256 && y - camY in 0 until 224, "Samus off-screen: ($x,$y) camera ($camX,$camY)")
+                // The room's background is plain in game (a blank room's layer 2 would draw a tile pattern).
+                val frame = requireNotNull(b.frameHolder.latestFrame).toAwtImage()
+                val sky = (48 until 120 step 2).flatMap { py -> (40 until 216 step 2).map { px -> frame.getRGB(px, py) } }
+                val share = sky.groupingBy { it }.eachCount().maxOf { it.value } / sky.size.toDouble()
+                println("[START] plain-sky share ${"%.2f".format(share)}")
+                assertTrue(share > 0.9, "the room's inside should be plain, not patterned (top colour share $share)")
                 b.closeSession()
             } finally { b.disconnect() }
         }

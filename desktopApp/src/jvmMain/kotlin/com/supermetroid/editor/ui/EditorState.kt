@@ -4107,6 +4107,16 @@ class EditorState(
     }
 
     /** Delete a project-owned room only after its live references have been proven safe. */
+    /** Renames a project-created room (its durable id and handle stay the same). */
+    fun renameProjectRoom(roomId: Int, name: String) {
+        val room = requireNotNull(project.newRoomForPreviewId(roomId)) { "Only rooms you made can be renamed here." }
+        val cleaned = name.replace('\r', ' ').replace('\n', ' ').trim()
+        require(cleaned.isNotEmpty()) { "Room name cannot be empty" }
+        if (room.name == cleaned) return
+        room.name = cleaned
+        dirty = true; editVersion++
+    }
+
     fun deleteProjectRoom(roomId: Int, romParser: RomParser): ProjectRoomDeletionPreview {
         val preview = previewProjectRoomDeletion(roomId, romParser)
             ?: throw IllegalArgumentException("Only project-created rooms can be deleted. Core ROM rooms remain editable.")

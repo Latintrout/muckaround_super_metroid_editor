@@ -789,6 +789,18 @@ fun main() = application {
                 selectedRoom = editorState.projectRoomInfos().first { it.handle == created.handle }
             }.exceptionOrNull()?.message
 
+            /** Deletes a project-owned room and selects its neighbour; returns an error message, or null on success. */
+            fun deleteProjectRoom(roomId: Int): String? = runCatching {
+                val parser = checkNotNull(romParser) { "Open a ROM first" }
+                val oldIndex = rooms.indexOfFirst { it.getRoomIdAsInt() == roomId }
+                editorState.deleteProjectRoom(roomId, parser)
+                val workspace = editorState.prepareWorkspaceParser()
+                romParser = workspace
+                rooms = workspace.roomCatalog.rooms
+                selectedRoom = rooms.getOrNull(oldIndex.coerceAtMost(rooms.lastIndex))
+                    ?: rooms.firstOrNull()
+            }.exceptionOrNull()?.message
+
             fun runProjectInEmulator() {
                 scope.launch {
                     if (!saveAsmForExecution()) return@launch
@@ -1269,6 +1281,7 @@ fun main() = application {
                             },
                             onPlay = ::runProjectInEmulator,
                             onCreateRoom = ::createProjectRoom,
+                            onDeleteRoom = ::deleteProjectRoom,
                             onExit = { makerMode = false },
                             playing = emulatorEnabled,
                             onStopPlay = {
@@ -1331,18 +1344,7 @@ fun main() = application {
                                             editorState = editorState,
                                             sidebarState = roomsSidebarState,
                                             onCreateRoom = ::createProjectRoom,
-                                            onDeleteRoom = { roomId ->
-                                                runCatching {
-                                                    val parser = checkNotNull(romParser) { "Open a ROM first" }
-                                                    val oldIndex = rooms.indexOfFirst { it.getRoomIdAsInt() == roomId }
-                                                    editorState.deleteProjectRoom(roomId, parser)
-                                                    val workspace = editorState.prepareWorkspaceParser()
-                                                    romParser = workspace
-                                                    rooms = workspace.roomCatalog.rooms
-                                                    selectedRoom = rooms.getOrNull(oldIndex.coerceAtMost(rooms.lastIndex))
-                                                        ?: rooms.firstOrNull()
-                                                }.exceptionOrNull()?.message
-                                            },
+                                            onDeleteRoom = ::deleteProjectRoom,
                                             onWorkspaceChanged = {
                                                 val selectedHandle = selectedRoom?.handle
                                                 val workspace = editorState.prepareWorkspaceParser()
