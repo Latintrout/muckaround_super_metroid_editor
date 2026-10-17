@@ -65,7 +65,10 @@ class LibretroCore(private val corePath: String) {
 
     fun init() {
         // Load with RTLD_LOCAL to prevent symbol conflicts with Compose/Skia's bundled native libs
-        val options = mapOf(
+        // On Windows JNA passes open flags to LoadLibraryEx, where 0x1 is DONT_RESOLVE_DLL_REFERENCES:
+        // the core's imports stay unbound and its first C runtime call crashes.
+        val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        val options = if (isWindows) emptyMap() else mapOf(
             Library.OPTION_OPEN_FLAGS to (RTLD_LAZY or RTLD_LOCAL)
         )
         lib = Native.load(corePath, LibretroLib::class.java, options)
@@ -313,7 +316,10 @@ class LibretroCore(private val corePath: String) {
             LibretroConstants.RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL -> true
             LibretroConstants.RETRO_ENVIRONMENT_SET_MEMORY_MAPS -> true
             LibretroConstants.RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION -> {
-                data?.setInt(0, 0)
+                // Version 2: the core hands us its V2 option table (accepted below) and keeps defaults.
+                // Reporting 0 sends snes9x down its legacy conversion path, which crashes the
+                // MinGW-built Windows core inside retro_set_environment.
+                data?.setInt(0, 2)
                 true
             }
             LibretroConstants.RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2 -> true
