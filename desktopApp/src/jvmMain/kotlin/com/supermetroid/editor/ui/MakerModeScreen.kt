@@ -46,7 +46,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.RoomInfo
+import com.supermetroid.editor.maker.MakerPlayLauncher
+import com.supermetroid.editor.maker.MakerPlayLoadout
+import com.supermetroid.editor.maker.MakerPlayPlan
 import com.supermetroid.editor.rom.RomParser
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -143,16 +147,6 @@ internal fun makerPartsFor(category: MakerCategory, editorState: EditorState): L
     )
 }
 
-/** Find a door in another room that leads into [roomId], so Play can warp straight in. */
-internal fun findEntryDoorDefPtr(romParser: RomParser, rooms: List<RoomInfo>, roomId: Int): Int? {
-    for (room in rooms) {
-        val header = runCatching { romParser.readRoomHeader(room.getRoomIdAsInt()) }.getOrNull() ?: continue
-        val doors = runCatching { romParser.parseDoorList(header.doorOut) }.getOrNull() ?: continue
-        doors.firstOrNull { it.destRoomPtr == roomId }?.let { return it.doorDefPtr }
-    }
-    return null
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MakerModeScreen(
@@ -207,30 +201,39 @@ internal fun MakerModeScreen(
     fun playHere() {
         val parser = romParser ?: return
         val roomId = selectedRoom?.getRoomIdAsInt() ?: return
-        if (!emulatorWorkspaceState.session.active) {
-            onPlay()
-            message = "Starting the game. Load a save or reach gameplay, then press Play here again."
+        val plan = MakerPlayPlan.forRoom(parser, roomId)
+        if (plan == null) {
+            message = "No save station or door leads into this room yet, so Play can't reach it."
             return
         }
-        val doorPtr = findEntryDoorDefPtr(parser, rooms, roomId)
-        if (doorPtr == null) {
-            message = "No door leads into this room yet, so Play can't warp here."
-            return
-        }
+        val l = loadout
+        val wasActive = emulatorWorkspaceState.session.active
+        val previousFrame = emulatorWorkspaceState.session.frameCounter
+        // Build the project and boot a fresh session (no save file), then drive the game into the room.
+        onPlay()
+        message = "Building and booting…"
         scope.launch {
-            val l = loadout
-            val maxHealth = 99 + 100 * l.energyTanks
-            fun word(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
-            emulatorWorkspaceState.writeMemory(0x09A2, word(l.items))
-            emulatorWorkspaceState.writeMemory(0x09A4, word(l.items))
-            emulatorWorkspaceState.writeMemory(0x09A6, word(l.beams))
-            emulatorWorkspaceState.writeMemory(0x09A8, word(l.beams))
-            emulatorWorkspaceState.writeMemory(0x09C2, word(maxHealth))
-            emulatorWorkspaceState.writeMemory(0x09C4, word(maxHealth))
-            emulatorWorkspaceState.writeMemory(0x09C6, word(l.missiles))
-            emulatorWorkspaceState.writeMemory(0x09C8, word(l.missiles))
-            emulatorWorkspaceState.warpToDoor(doorPtr)
-            message = "Warping into ${selectedRoom?.name} with ${l.name}"
+            var waited = 0
+            while (waited < 120_000) {
+                val s = emulatorWorkspaceState.session
+                if (s.active && emulatorWorkspaceState.isMemoryAccessible &&
+                    (!wasActive || s.frameCounter < previousFrame)) break
+                delay(100); waited += 100
+            }
+            if (!emulatorWorkspaceState.isMemoryAccessible) {
+                message = "The emulator did not start."
+                return@launch
+            }
+            message = "Entering ${selectedRoom?.name} with ${l.name}…"
+            val launcher = MakerPlayLauncher(
+                read16 = { a -> emulatorWorkspaceState.readMemory(a, 2).let { (it[0].toInt() and 0xFF) or ((it[1].toInt() and 0xFF) shl 8) } },
+                write16 = { a, v -> emulatorWorkspaceState.writeMemory(a, byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())) },
+                waitFrames = { frames -> delay(frames * 17L) },
+            )
+            val result = runCatching {
+                launcher.launch(plan, MakerPlayLoadout(l.items, l.beams, l.energyTanks, l.missiles))
+            }.getOrElse { MakerPlayLauncher.Result(false, it.message ?: "Play failed") }
+            message = if (result.ok) "Playing ${selectedRoom?.name} with ${l.name}" else result.message
         }
     }
 

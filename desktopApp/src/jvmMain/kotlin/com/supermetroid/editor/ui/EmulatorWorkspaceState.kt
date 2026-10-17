@@ -649,8 +649,9 @@ class EmulatorWorkspaceState(
 
     /**
      * Warp to a room by simulating a door transition.
-     * Writes the DoorDef pointer into WRAM 0x078D and sets game_state to 0x06
-     * (door transition), causing the SM engine to load the target room.
+     * Writes the DoorDef pointer into WRAM 0x078D and sets game_state to 0x09
+     * (hit a door block), so the engine runs its own door transition into the target room.
+     * (0x06 is "loading game data": it reloads the save station room and ignores the door.)
      */
     suspend fun warpToDoor(doorDefPtr: Int) {
         val b = backend ?: return
@@ -663,8 +664,8 @@ class EmulatorWorkspaceState(
             (doorDefPtr and 0xFF).toByte(),
             ((doorDefPtr shr 8) and 0xFF).toByte()
         ))
-        // Set game_state (WRAM 0x0998) to 0x06 = door transition
-        b.writeMemory(0x0998, byteArrayOf(0x06, 0x00))
+        // Set game_state (WRAM 0x0998) to 0x09 = hit a door block
+        b.writeMemory(0x0998, byteArrayOf(0x09, 0x00))
         setStatus("Warping to door 0x${doorDefPtr.toString(16).uppercase()}")
     }
 
