@@ -38,25 +38,34 @@ class MakerScreenRenderTest {
         val themeState = MakerThemeState(userThemesDir = Files.createTempDirectory("t").toFile(), appearanceFile = null)
         editor.hoverBlockX = 69; editor.hoverBlockY = 66
 
-        val combos = listOf(
-            Triple("modret", MakerBrightness.LIGHT, false), Triple("modret", MakerBrightness.DARK, false),
-            Triple("sage", MakerBrightness.LIGHT, true), Triple("slate", MakerBrightness.DARK, false),
+        data class Shot(val name: String, val theme: String, val brightness: MakerBrightness, val solid: Boolean = false,
+                        val playing: Boolean = false, val appearance: Boolean = false,
+                        val backdrop: com.supermetroid.editor.ui.theme.RoomBackdrop = com.supermetroid.editor.ui.theme.RoomBackdrop.GAME)
+        val shots = listOf(
+            Shot("maker-modret-light", "modret", MakerBrightness.LIGHT),
+            Shot("maker-modret-dark", "modret", MakerBrightness.DARK),
+            Shot("maker-sage-light-solid", "sage", MakerBrightness.LIGHT, solid = true),
+            Shot("maker-slate-dark-checker", "slate", MakerBrightness.DARK, backdrop = com.supermetroid.editor.ui.theme.RoomBackdrop.CHECKER),
+            Shot("maker-modret-light-playing", "modret", MakerBrightness.LIGHT, playing = true),
+            Shot("maker-rose-dark-appearance", "rose", MakerBrightness.DARK, appearance = true),
         )
-        for ((theme, brightness, solid) in combos) {
-            themeState.update { it.copy(themeId = theme, brightness = brightness, roomBackdrop = if (theme == "slate") com.supermetroid.editor.ui.theme.RoomBackdrop.CHECKER else it.roomBackdrop) }
+        for (shot in shots) {
+            themeState.update { it.copy(themeId = shot.theme, brightness = shot.brightness, roomBackdrop = shot.backdrop) }
             val scene = ImageComposeScene(width = 1600, height = 960, density = Density(1f)) {
                 MakerModeScreen(
                     editorState = editor, romParser = parser, rooms = rooms, selectedRoom = room,
                     emulatorWorkspaceState = EmulatorWorkspaceState(),
                     onRoomSelected = {}, onWorkspaceChanged = {}, onPlay = {}, onExit = {},
                     themeState = themeState,
-                    initialSolidView = solid,
+                    initialSolidView = shot.solid,
+                    playing = shot.playing,
+                    initialAppearanceOpen = shot.appearance,
                 )
             }
             // Let the room render (it loads off the UI thread) before capturing.
             var t = 0L
             repeat(40) { scene.render(t); t += 100_000_000L; Thread.sleep(100) }
-            val file = File(outDir, "maker-$theme-${brightness.name.lowercase()}${if (solid) "-solid" else ""}.png").apply { parentFile.mkdirs() }
+            val file = File(outDir, "${shot.name}.png").apply { parentFile.mkdirs() }
             file.writeBytes(requireNotNull(scene.render(t).encodeToData(EncodedImageFormat.PNG)).bytes)
             scene.close()
             assertTrue(file.length() > 0)

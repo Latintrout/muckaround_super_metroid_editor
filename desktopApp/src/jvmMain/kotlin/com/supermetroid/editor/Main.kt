@@ -1260,6 +1260,11 @@ fun main() = application {
                             },
                             onPlay = ::runProjectInEmulator,
                             onExit = { makerMode = false },
+                            playing = emulatorEnabled,
+                            onStopPlay = {
+                                emulatorWorkspaceState.disconnectBridge()
+                                emulatorEnabled = false
+                            },
                         )
                     } else {
                     Row(

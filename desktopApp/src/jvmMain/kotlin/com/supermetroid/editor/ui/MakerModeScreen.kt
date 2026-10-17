@@ -133,10 +133,13 @@ internal fun MakerModeScreen(
     modifier: Modifier = Modifier,
     themeState: MakerThemeState = remember { MakerThemeState() },
     initialSolidView: Boolean = false,
+    playing: Boolean = false,
+    onStopPlay: () -> Unit = {},
+    initialAppearanceOpen: Boolean = false,
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
-            onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView)
+            onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen)
     }
 }
 
@@ -154,6 +157,9 @@ private fun MakerScreenContent(
     themeState: MakerThemeState,
     modifier: Modifier,
     initialSolidView: Boolean,
+    playing: Boolean,
+    onStopPlay: () -> Unit,
+    initialAppearanceOpen: Boolean,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
@@ -166,6 +172,7 @@ private fun MakerScreenContent(
     var message by remember { mutableStateOf<String?>(null) }
     val controls = remember { MapCanvasControls() }
     var solidView by remember { mutableStateOf(initialSolidView) }
+    var appearanceOpen by remember { mutableStateOf(initialAppearanceOpen) }
     var markers by remember { mutableStateOf(setOf<MakerMarker>()) }
     androidx.compose.runtime.SideEffect {
         controls.overlays = MAKER_BASE_LAYERS + (if (solidView) SOLID_VIEW_OVERLAYS else emptySet()) + markers.map { it.overlay }
@@ -269,15 +276,18 @@ private fun MakerScreenContent(
         if (activePart == null && category == MakerCategory.TERRAIN) parts.firstOrNull()?.let { choose(it) }
     }
 
+    Box(modifier.fillMaxSize()) {
     Column(
-        modifier
+        Modifier
             .fillMaxSize()
             .background(p.background)
             .onPreviewKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown || searchFocused) return@onPreviewKeyEvent false
                 val mod = e.isCtrlPressed || e.isMetaPressed
                 when {
+                    e.key == Key.Escape && playing -> { onStopPlay(); message = "Stopped. Back to editing."; true }
                     e.key == Key.F5 -> { playHere(); true }
+                    playing -> false
                     mod && e.key == Key.Z -> { editorState.undo(); true }
                     mod && e.key == Key.Y -> { editorState.redo(); true }
                     !mod -> MakerTool.forKey(e.utf16CodePoint.toChar())?.let { applyTool(it); true } ?: false
@@ -285,12 +295,17 @@ private fun MakerScreenContent(
                 }
             },
     ) {
-        CommandBar(
+        if (playing) PlayBar(
+            roomName = { id -> rooms.firstOrNull { it.getRoomIdAsInt() == id }?.name },
+            emulatorWorkspaceState = emulatorWorkspaceState,
+            onStop = { onStopPlay(); message = "Stopped. Back to editing." },
+            onRestart = ::playHere,
+        ) else CommandBar(
             rooms = rooms, selectedRoom = selectedRoom, onRoomSelected = onRoomSelected, areaOf = areaOf,
             onUndo = { editorState.undo() }, onRedo = { editorState.redo() },
             controls = controls, themeState = themeState, solidView = solidView, onSolidView = { solidView = it },
             loadout = loadout, onLoadout = { loadout = it },
-            onPlay = ::playHere, onAdvanced = onExit,
+            onPlay = ::playHere, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
         )
         Row(Modifier.weight(1f).fillMaxWidth()) {
             ToolRail(tool) { applyTool(it) }
@@ -305,11 +320,15 @@ private fun MakerScreenContent(
                     val stamping = tool == MakerTool.PAINT && activePart?.stamps == true
                     val paintTiles = tool == MakerTool.PAINT && activePart is MakerPart.Tile
                     Box(
-                        Modifier.fillMaxSize().pointerInput(stamping, paintTiles) {
+                        Modifier.fillMaxSize().pointerInput(stamping, paintTiles, playing) {
                             awaitPointerEventScope {
                                 var erasing = false
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (playing) {
+                                        if (event.type == PointerEventType.Press) event.changes.forEach { it.consume() }
+                                        continue
+                                    }
                                     val bx = editorState.hoverBlockX
                                     val by = editorState.hoverBlockY
                                     val inRoom = bx >= 0 && by >= 0
@@ -347,11 +366,79 @@ private fun MakerScreenContent(
                     ZoomControls(controls, Modifier.align(Alignment.BottomEnd).padding(12.dp))
                     if (solidView) SolidLegend(Modifier.align(Alignment.BottomStart).padding(12.dp))
                 }
-                if (themeState.appearance.showHintBar) HintBar(tool, activePart)
+                if (playing) PlayingHint() else if (themeState.appearance.showHintBar) HintBar(tool, activePart)
             }
             Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, rooms, markers, { markers = it }, onAdvanced = onExit)
         }
         StatusBar(editorState, message)
+    }
+    if (appearanceOpen) com.supermetroid.editor.ui.maker.MakerAppearancePanel(themeState) { appearanceOpen = false }
+    }
+}
+
+@Composable
+private fun PlayBar(
+    roomName: (Int) -> String?,
+    emulatorWorkspaceState: EmulatorWorkspaceState,
+    onStop: () -> Unit,
+    onRestart: () -> Unit,
+) {
+    val p = LocalMakerPalette.current
+    val snap = emulatorWorkspaceState.snapshot
+    Row(
+        Modifier.fillMaxWidth().height(68.dp).background(p.panel).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            Modifier.background(MakerFixedColors.play, RoundedCornerShape(5.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.size(8.dp).background(MakerFixedColors.onPlay, RoundedCornerShape(4.dp)))
+            Text("PLAYING", color = MakerFixedColors.onPlay, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        MakerButton(onClick = onStop, selected = true, height = 50.dp) { fg ->
+            MakerIcon("M5 5h14v14H5z", fg, 20.dp, filled = true)
+            Text("STOP & EDIT", color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            KeyCap("Esc", fg)
+        }
+        MakerButton(onClick = onRestart) { fg ->
+            MakerIcon("M20 12a8 8 0 11-2.3-5.6M20 4v4h-4", fg, 20.dp)
+            Text("Restart room", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            KeyCap("F5", fg)
+        }
+        val running = emulatorWorkspaceState.isRunning
+        MakerButton(onClick = { emulatorWorkspaceState.setLoopRunning(!running) }) { fg ->
+            if (running) MakerIcon("M6 5h4v14H6zM14 5h4v14h-4z", fg, 20.dp, filled = true) else MakerIcon(MakerIcons.PLAY_FILLED, fg, 20.dp, filled = true)
+            Text(if (running) "Pause" else "Resume", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.weight(1f))
+        LiveChip("Room", snap?.roomId?.let { roomName(it) } ?: "—")
+        LiveChip("Energy", snap?.health?.let { h -> "$h/${snap.maxHealth ?: h}" } ?: "—", mono = true)
+        LiveChip("Missiles", snap?.missiles?.toString() ?: "—", mono = true)
+    }
+}
+
+@Composable
+private fun LiveChip(label: String, value: String, mono: Boolean = false) {
+    val p = LocalMakerPalette.current
+    Column(
+        Modifier.background(p.raised, RoundedCornerShape(7.dp)).border(1.dp, p.border, RoundedCornerShape(7.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(label.uppercase(), color = p.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = if (mono) FontFamily.Monospace else null)
+    }
+}
+
+@Composable
+private fun PlayingHint() {
+    val p = LocalMakerPalette.current
+    Row(
+        Modifier.fillMaxWidth().height(42.dp).background(MakerFixedColors.play.copy(alpha = 0.25f)).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        MakerIcon(MakerIcons.PLAY_FILLED, p.text, 18.dp, filled = true)
+        Text("Playing. Editing is paused. Press Esc or STOP & EDIT to change the room; playing never changes it.", color = p.text, fontSize = 14.sp)
     }
 }
 
@@ -371,6 +458,7 @@ private fun CommandBar(
     onLoadout: (MakerLoadout) -> Unit,
     onPlay: () -> Unit,
     onAdvanced: () -> Unit,
+    onAppearance: () -> Unit,
 ) {
     val p = LocalMakerPalette.current
     var roomMenu by remember { mutableStateOf(false) }
@@ -430,6 +518,7 @@ private fun CommandBar(
                         onClick = { themeState.update { it.copy(brightness = b) } },
                     )
                 }
+                DropdownMenuItem(text = { Text("   Appearance settings…", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }, onClick = { themeMenu = false; onAppearance() })
                 RoomBackdrop.entries.forEach { b ->
                     DropdownMenuItem(
                         text = { Text((if (b == themeState.appearance.roomBackdrop) "● " else "   ") + "Room backdrop: " + b.label, fontSize = 13.sp) },
