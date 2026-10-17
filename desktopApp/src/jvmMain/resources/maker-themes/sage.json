@@ -1,0 +1,8 @@
+{
+  "id": "sage",
+  "name": "Sage",
+  "tag": "calm",
+  "accent": { "main": "#7FAE96", "deep": "#527F70", "on": "#18302A" },
+  "light": { "desk": "#B8C2AE", "background": "#EEF0E6", "panel": "#E1E6D9", "raised": "#F5F7EF", "inset": "#D8DFCF", "border": "#C3CDB8", "text": "#22292A", "muted": "#566262" },
+  "dark":  { "desk": "#0A110F", "background": "#121D1A", "panel": "#1A2925", "raised": "#22342F", "inset": "#0E1714", "border": "#33493F", "text": "#EEF0E6", "muted": "#A6B6AE" }
+}

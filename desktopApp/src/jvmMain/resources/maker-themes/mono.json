@@ -1,0 +1,8 @@
+{
+  "id": "mono",
+  "name": "Mono",
+  "tag": "quiet",
+  "accent": { "main": "#9AA1A8", "deep": "#657587", "on": "#1C2024" },
+  "light": { "desk": "#B4B4AF", "background": "#ECECEA", "panel": "#E0E0DD", "raised": "#F5F5F3", "inset": "#D6D6D2", "border": "#C2C2BD", "text": "#202224", "muted": "#585C60" },
+  "dark":  { "desk": "#0D0E10", "background": "#17191B", "panel": "#202326", "raised": "#2A2E32", "inset": "#121416", "border": "#3A3F45", "text": "#ECECEA", "muted": "#AAAFB4" }
+}

@@ -1,0 +1,8 @@
+{
+  "id": "modret",
+  "name": "MODRET",
+  "tag": "default",
+  "accent": { "main": "#E77D73", "deep": "#C9675D", "on": "#252B30" },
+  "light": { "desk": "#C9BFAE", "background": "#F2EBDD", "panel": "#E8E1D4", "raised": "#F7F1E6", "inset": "#E2D9C9", "border": "#CFC3AE", "text": "#252B30", "muted": "#5B6470" },
+  "dark":  { "desk": "#0B141C", "background": "#101C27", "panel": "#1A2733", "raised": "#22313E", "inset": "#0E1822", "border": "#33465A", "text": "#F2EBDD", "muted": "#A9B4BF" }
+}

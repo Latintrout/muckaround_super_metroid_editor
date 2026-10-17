@@ -1,0 +1,8 @@
+{
+  "id": "slate",
+  "name": "Slate",
+  "tag": "cool",
+  "accent": { "main": "#7E9FBE", "deep": "#4F6F8E", "on": "#16222E" },
+  "light": { "desk": "#AEB8C3", "background": "#E9ECEF", "panel": "#DDE2E7", "raised": "#F3F5F7", "inset": "#D3D9E0", "border": "#BEC7D1", "text": "#1F262D", "muted": "#545F6B" },
+  "dark":  { "desk": "#0A0F15", "background": "#121A23", "panel": "#1B2531", "raised": "#23303E", "inset": "#0D141B", "border": "#33445A", "text": "#E9ECEF", "muted": "#A6B2BF" }
+}

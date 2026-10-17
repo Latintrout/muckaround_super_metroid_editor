@@ -1,0 +1,8 @@
+{
+  "id": "rose",
+  "name": "Rose",
+  "tag": "warm",
+  "accent": { "main": "#D98A9C", "deep": "#B5677A", "on": "#2A1F24" },
+  "light": { "desk": "#CDB8B3", "background": "#F4EAE6", "panel": "#EADDD9", "raised": "#F9F1EE", "inset": "#E4D4D0", "border": "#D6C1BC", "text": "#2A2226", "muted": "#64575C" },
+  "dark":  { "desk": "#120E13", "background": "#1E1820", "panel": "#2A2129", "raised": "#352A33", "inset": "#181318", "border": "#4A3A45", "text": "#F4EAE6", "muted": "#B9A9B0" }
+}
