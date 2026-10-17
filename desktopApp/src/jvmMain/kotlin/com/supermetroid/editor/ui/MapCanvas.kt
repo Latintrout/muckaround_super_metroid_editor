@@ -64,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -274,13 +275,17 @@ fun MapCanvas(
     highlightItems: Boolean = true,
     showEnemyNames: Boolean = true,
     showFlatSlopeSurfaces: Boolean = true,
+    /** When set (Maker), the caller owns zoom/grid/overlays/backdrop and the compact toolbar is hidden. */
+    controls: MapCanvasControls? = null,
     modifier: Modifier = Modifier
 ) {
-    val zoomState = remember { mutableStateOf(1f) }
+    val internalZoomState = remember { mutableStateOf(1f) }
+    val zoomState = controls?.zoom ?: internalZoomState
     val zoomLevel = zoomState.value
     AttachMacPinchZoom(LocalSwingWindow.current, zoomState, minZoom = ROOM_MIN_ZOOM, maxZoom = ROOM_MAX_ZOOM)
     var zoomInitializedRoomId by remember { mutableStateOf<Int?>(null) }
-    var showGrid by remember { mutableStateOf(true) }
+    var showGridInternal by remember { mutableStateOf(true) }
+    val showGrid = controls?.showGrid ?: showGridInternal
     var showShortChargeRuler by remember { mutableStateOf(false) }
     var shortChargeStutters by remember { mutableStateOf(0) }
     var shortChargeTaps by remember { mutableStateOf(0) }
@@ -504,7 +509,7 @@ fun MapCanvas(
                 }
 
                 // ─── Compact toolbar ─────────────────────────────
-                FlowRow(
+                if (controls == null) FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -525,7 +530,7 @@ fun MapCanvas(
                     // Grid toggle
                     FilterChip(
                         selected = showGrid,
-                        onClick = { showGrid = !showGrid; mapFocusReq.requestFocus() },
+                        onClick = { showGridInternal = !showGridInternal; mapFocusReq.requestFocus() },
                         label = { Text("Grid", fontSize = 9.sp) },
                         modifier = Modifier.height(28.dp)
                     )
@@ -950,7 +955,7 @@ fun MapCanvas(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(EditorColors.romBackground),
+                        .background(controls?.backdrop ?: EditorColors.romBackground),
                     contentAlignment = Alignment.Center
                 ) {
                     when {
@@ -1077,6 +1082,7 @@ fun MapCanvas(
                                 contentWidthPx = data.width,
                                 contentHeightPx = data.height,
                             )
+                            SideEffect { controls?.fitZoom = fitZoom }
                             LaunchedEffect(currentRoomId, fitZoom, data.width, data.height) {
                                 val targetFit = fitZoom ?: return@LaunchedEffect
                                 val savedZoom = inMemoryRoomZooms[currentRoomId]
@@ -2213,3 +2219,17 @@ private data class SaveSpawnMarker(
     val label: String,
     val source: String,
 )
+
+
+/** Canvas state owned by the Maker screen (zoom, grid, backdrop, overlays) instead of the compact toolbar. */
+class MapCanvasControls {
+    val zoom = mutableStateOf(1f)
+    var showGrid by mutableStateOf(true)
+    /** Last fit-to-viewport zoom the canvas computed, for a "Fit room" button. */
+    var fitZoom by mutableStateOf<Float?>(null)
+    /** Fill behind the room image; null keeps the editor default. Game pixels are never recoloured. */
+    var backdrop by mutableStateOf<androidx.compose.ui.graphics.Color?>(null)
+
+    fun zoomBy(factor: Float) { zoom.value = (zoom.value * factor).coerceIn(ROOM_MIN_ZOOM, ROOM_MAX_ZOOM) }
+    fun fit() { fitZoom?.let { zoom.value = it.coerceIn(ROOM_MIN_ZOOM, ROOM_MAX_ZOOM) } }
+}
