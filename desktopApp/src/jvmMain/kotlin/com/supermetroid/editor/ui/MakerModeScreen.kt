@@ -229,6 +229,7 @@ internal fun MakerModeScreen(
                 read16 = { a -> emulatorWorkspaceState.readMemory(a, 2).let { (it[0].toInt() and 0xFF) or ((it[1].toInt() and 0xFF) shl 8) } },
                 write16 = { a, v -> emulatorWorkspaceState.writeMemory(a, byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())) },
                 waitFrames = { frames -> delay(frames * 17L) },
+                writeBlock = { a, bytes -> emulatorWorkspaceState.writeMemory(a, bytes) },
             )
             val result = runCatching {
                 launcher.launch(plan, MakerPlayLoadout(l.items, l.beams, l.energyTanks, l.missiles))

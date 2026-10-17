@@ -56,6 +56,9 @@ class MakerPlayLauncher(
     private val write16: suspend (Int, Int) -> Unit,
     private val waitFrames: suspend (Int) -> Unit,
     private val log: (String) -> Unit = {},
+    private val writeBlock: suspend (Int, ByteArray) -> Unit = { a, bytes ->
+        for (i in bytes.indices step 2) write16(a + i, (bytes[i].toInt() and 0xFF) or ((bytes.getOrElse(i + 1) { 0 }.toInt() and 0xFF) shl 8))
+    },
 ) {
     data class Result(val ok: Boolean, val message: String)
 
@@ -70,6 +73,12 @@ class MakerPlayLauncher(
 
     suspend fun launch(plan: MakerPlayPlan, loadout: MakerPlayLoadout, placeSamus: Boolean = true): Result {
         if (!waitForState(STATE_TITLE, 1800)) return Result(false, "The game did not reach the title screen")
+        // Skipping file select skips the game's new-file setup, so the save-data mirror still holds
+        // power-on RAM (e.g. 0x60 bytes: the "Zebes timebomb" event bit selects the escape states).
+        // Clear it as a fresh file would: equipment block, then events/bosses/items/doors/stations.
+        writeBlock(SAMUS_DATA.first, ByteArray(SAMUS_DATA.count()))
+        writeBlock(SAVE_MIRROR.first, ByteArray(SAVE_MIRROR.count()))
+        DEFAULT_CONTROLS.forEach { (a, v) -> write16(a, v) }
         val maxHealth = 99 + 100 * loadout.energyTanks
         for (a in listOf(0x09A2, 0x09A4)) write16(a, loadout.items)
         for (a in listOf(0x09A6, 0x09A8)) write16(a, loadout.beams)
@@ -93,6 +102,7 @@ class MakerPlayLauncher(
             log("door 0x${door.doorDefPtr.toString(16)} -> room 0x${read16(ROOM).toString(16)} samus=(${read16(SAMUS_X)},${read16(SAMUS_Y)})")
             if (placeSamus) MakerPlayPlan.arrivalPoint(door)?.let { (x, y) -> write16(SAMUS_X, x); write16(SAMUS_Y, y) }
         }
+        log("room state header \$8F:${read16(ROOM_STATE).toString(16)} events=${read16(0xD820).toString(16)}/${read16(0xD822).toString(16)}")
         val room = read16(ROOM)
         return if (room == plan.roomId) Result(true, "Playing room 0x${room.toString(16).uppercase()}")
         else Result(false, "Landed in room 0x${room.toString(16).uppercase()} instead of 0x${plan.roomId.toString(16).uppercase()}")
@@ -101,9 +111,19 @@ class MakerPlayLauncher(
     companion object {
         const val GAME_STATE = 0x0998
         const val ROOM = 0x079B
+        const val ROOM_STATE = 0x07BB
         const val SAMUS_X = 0x0AF6
         const val SAMUS_Y = 0x0AFA
         const val SAMUS_POSE = 0x0A1C
+        /** $7E:09A2-09FF: Samus equipment/ammo/controls, the block a save file stores. */
+        val SAMUS_DATA = 0x09A2..0x09FF
+        /** $7E:D7C0-DE1B: save-file mirror (events $D820, bosses $D828, items $D870, doors $D8B0, stations). */
+        val SAVE_MIRROR = 0xD7C0..0xDE1B
+        /** New-file button bindings: shot X, jump A, dash B, item select Select, cancel Y, angle R / L. */
+        val DEFAULT_CONTROLS = listOf(
+            0x09B2 to 0x0040, 0x09B4 to 0x0080, 0x09B6 to 0x8000, 0x09B8 to 0x2000,
+            0x09BA to 0x4000, 0x09BC to 0x0010, 0x09BE to 0x0020,
+        )
         const val POSE_SHIP_LANDING = 0x9B
         const val STATE_TITLE = 0x01
         const val STATE_LOAD_GAME = 0x06
