@@ -98,6 +98,7 @@ kotlin {
             dependencies {
                 implementation(kotlin("test"))
                 implementation("org.junit.jupiter:junit-jupiter:5.10.0")
+                implementation(compose.desktop.uiTestJUnit4)
             }
         }
     }

@@ -97,6 +97,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import java.awt.event.MouseEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1072,6 +1073,7 @@ fun MapCanvas(
 
                             val hScrollState = rememberScrollState()
                             val vScrollState = rememberScrollState()
+                            val viewportCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
                             SideEffect { controls?.hScroll = hScrollState; controls?.vScroll = vScrollState }
                             val coroutineScope = rememberCoroutineScope()
                             var canvasViewW by remember { mutableStateOf(0) }
@@ -1218,6 +1220,7 @@ fun MapCanvas(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .onSizeChanged { canvasViewW = it.width; canvasViewH = it.height }
+                                    .onGloballyPositioned { viewportCoords[0] = it }
                                     .then(
                                         if (editorState != null)
                                             Modifier.pointerHoverIcon(PixelEditorCursors.forEditorTool(editorState.activeTool))
@@ -1897,7 +1900,20 @@ fun MapCanvas(
                                 )
                             }
 
+                            SideEffect {
+                                controls?.blockAtWindow = { w ->
+                                    viewportCoords[0]?.takeIf { it.isAttached }?.let { c ->
+                                        val l = c.windowToLocal(w)
+                                        if (l.x < 0f || l.y < 0f || l.x > c.size.width || l.y > c.size.height) null
+                                        else pointerToBlock(l.x, l.y).takeIf { (bx, by) -> bx in 0 until effectiveBlocksWide && by in 0 until effectiveBlocksTall }
+                                    }
+                                }
+                                controls?.openTilePropertiesAt = { bx, by -> openTileProperties(bx, by) }
+                            }
                             // ─── Right-click tile properties panel (floating, non-modal) ──────
+                            if (!(propsExpanded && editorState != null)) SideEffect {
+                                if (controls?.dockedPanel != null) { controls.dockedPanel = null; controls.dockedPanelKey = null }
+                            }
                             if (propsExpanded && editorState != null) {
                                 val panelAlignment = if (propsPanelOnLeft) Alignment.TopStart else Alignment.TopEnd
                                 fun dragPropertiesPanel(dragAmount: androidx.compose.ui.geometry.Offset) {
@@ -1915,33 +1931,43 @@ fun MapCanvas(
                                         absoluteY,
                                     )
                                 }
-                                TilePropertiesPanel(
-                                    blockX = propsBlockX,
-                                    blockY = propsBlockY,
-                                    metatile = propsMetatile,
-                                    initialBlockType = propsBlockType,
-                                    initialBts = propsBts,
-                                    initialBtsMixed = propsBtsMixed,
-                                    selectionEndX = propsSelectionEndX,
-                                    selectionEndY = propsSelectionEndY,
-                                    selectionTileCount = propsSelectionTileCount,
-                                    editorState = editorState,
-                                    romParser = romParser,
-                                    rooms = rooms,
-                                    roomHeader = roomHeader,
-                                    roomId = room.getRoomIdAsInt(),
-                                    emulatorConnected = emulatorConnected,
-                                    onMoveSamusHere = onMoveSamusHere,
-                                    onWorkspaceChanged = onWorkspaceChanged,
-                                    onNavigateToAsm = onNavigateToAsm,
-                                    onNavigateToDoorArrival = onNavigateToDoorArrival,
-                                    onNavigateToPlmPlacement = onNavigateToPlmPlacement,
-                                    onNavigateToScrollCommands = onNavigateToScrollCommands,
-                                    onNavigateToSaveSpawn = onNavigateToSaveSpawn,
-                                    onNavigateToEnemyPlacement = onNavigateToEnemyPlacement,
-                                    onDismiss = { propsExpanded = false; mapFocusReq.requestFocus() },
-                                    onDrag = ::dragPropertiesPanel,
-                                    modifier = Modifier
+                                val panelContent: @Composable (Modifier) -> Unit = { panelModifier ->
+                                    TilePropertiesPanel(
+                                        blockX = propsBlockX,
+                                        blockY = propsBlockY,
+                                        metatile = propsMetatile,
+                                        initialBlockType = propsBlockType,
+                                        initialBts = propsBts,
+                                        initialBtsMixed = propsBtsMixed,
+                                        selectionEndX = propsSelectionEndX,
+                                        selectionEndY = propsSelectionEndY,
+                                        selectionTileCount = propsSelectionTileCount,
+                                        editorState = editorState,
+                                        romParser = romParser,
+                                        rooms = rooms,
+                                        roomHeader = roomHeader,
+                                        roomId = room.getRoomIdAsInt(),
+                                        emulatorConnected = emulatorConnected,
+                                        onMoveSamusHere = onMoveSamusHere,
+                                        onWorkspaceChanged = onWorkspaceChanged,
+                                        onNavigateToAsm = onNavigateToAsm,
+                                        onNavigateToDoorArrival = onNavigateToDoorArrival,
+                                        onNavigateToPlmPlacement = onNavigateToPlmPlacement,
+                                        onNavigateToScrollCommands = onNavigateToScrollCommands,
+                                        onNavigateToSaveSpawn = onNavigateToSaveSpawn,
+                                        onNavigateToEnemyPlacement = onNavigateToEnemyPlacement,
+                                        onDismiss = { propsExpanded = false; mapFocusReq.requestFocus() },
+                                        onDrag = ::dragPropertiesPanel,
+                                        modifier = panelModifier,
+                                    )
+                                }
+                                if (controls?.dockTileProperties == true) {
+                                    // Hand over a new panel only when what it shows changes (avoids a recomposition loop).
+                                    val key = listOf(propsBlockX, propsBlockY, propsSelectionEndX, propsSelectionEndY, propsSelectionTileCount,
+                                        propsMetatile, propsBlockType, propsBts, propsBtsMixed, roomHeader, editVersion, room.id)
+                                    SideEffect { if (controls.dockedPanelKey != key) { controls.dockedPanelKey = key; controls.dockedPanel = panelContent } }
+                                } else panelContent(
+                                    Modifier
                                         .align(panelAlignment)
                                         .offset {
                                             androidx.compose.ui.unit.IntOffset(
@@ -2232,6 +2258,16 @@ class MapCanvasControls {
     var backdrop by mutableStateOf<androidx.compose.ui.graphics.Brush?>(null)
     /** Editor overlays drawn over the room (e.g. the Maker's collision view); null uses the toolbar's choice. */
     var overlays by mutableStateOf<Set<TileOverlay>?>(null)
+
+    /** Maker: show the block-properties panel in the side panel instead of floating it over the room. */
+    var dockTileProperties: Boolean = false
+    /** The docked panel's content while it is open (set by the canvas), else null. */
+    var dockedPanel by mutableStateOf<(@Composable (Modifier) -> Unit)?>(null)
+    internal var dockedPanelKey: Any? = null
+    /** Block under a window position, or null when outside the room (set by the canvas). */
+    var blockAtWindow: ((androidx.compose.ui.geometry.Offset) -> Pair<Int, Int>?)? = null
+    /** Opens the block-properties panel for a block (set by the canvas). */
+    var openTilePropertiesAt: ((Int, Int) -> Unit)? = null
 
     /** The canvas's scroll positions, so the Maker's Move tool can pan the room. */
     var hScroll: androidx.compose.foundation.ScrollState? = null

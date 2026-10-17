@@ -1,6 +1,12 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -178,7 +184,14 @@ private fun MakerScreenContent(
     var message by remember { mutableStateOf<String?>(null) }
     var solidView by remember { mutableStateOf(initialSolidView) }
     var appearanceOpen by remember { mutableStateOf(initialAppearanceOpen) }
-    var markers by remember { mutableStateOf(setOf<MakerMarker>()) }
+    // Item and enemy markers start on: at fit-to-room zoom a 16-pixel item is only a few pixels wide.
+    var markers by remember { mutableStateOf(setOf(MakerMarker.ITEMS, MakerMarker.ENEMIES)) }
+    // Library drag-and-drop: the part being dragged and the pointer's window position.
+    var dragPart by remember { mutableStateOf<MakerPart?>(null) }
+    var dragPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val rootCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    // Block properties live in the side panel, never floating over the room.
+    androidx.compose.runtime.SideEffect { controls.dockTileProperties = true }
     androidx.compose.runtime.SideEffect {
         controls.overlays = MAKER_BASE_LAYERS + (if (solidView) SOLID_VIEW_OVERLAYS else emptySet()) + markers.map { it.overlay }
     }
@@ -220,11 +233,39 @@ private fun MakerScreenContent(
 
     fun stampAt(bx: Int, by: Int) {
         when (val part = activePart) {
-            is MakerPart.Item -> editorState.addPlm(part.plmId, bx, by, 0)
+            is MakerPart.Item -> editorState.addPlm(part.plmId, bx, by, 0, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
             is MakerPart.Enemy -> editorState.addEnemy(part.enemyId, bx * 16 + 8, by * 16 + 8)
             else -> return
         }
         message = "Placed ${activePart?.name} at block $bx, $by"
+    }
+
+    /** Place [part] at one block: used by library drag-and-drop. Selects the part and switches to Paint. */
+    fun placePartAt(part: MakerPart, bx: Int, by: Int) {
+        choose(part)
+        when (part) {
+            is MakerPart.Item, is MakerPart.Enemy -> stampAt(bx, by)
+            is MakerPart.Tile, is MakerPart.Pattern -> {
+                editorState.beginStroke(); editorState.paintAt(bx, by); editorState.endStroke("Maker place ${part.name}")
+                message = "Placed ${part.name} at block $bx, $by"
+            }
+            MakerPart.AnyTile -> Unit
+        }
+    }
+
+    /** Select tool: move a placed item or enemy to another block (keeps its identity and parameters). */
+    fun movePlaced(obj: Any, to: Pair<Int, Int>) {
+        when (obj) {
+            is RomParser.PlmEntry -> {
+                editorState.removePlm(obj.x, obj.y, obj.id, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
+                editorState.addPlm(obj.id, to.first, to.second, obj.param, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
+                message = "Moved ${RomParser.plmDisplayName(obj.id)} to block ${to.first}, ${to.second}"
+            }
+            is RomParser.EnemyEntry -> {
+                editorState.updateEnemy(obj, obj.copy(x = to.first * 16 + obj.x % 16, y = to.second * 16 + obj.y % 16))
+                message = "Moved ${RomParser.enemyName(obj.id)} to block ${to.first}, ${to.second}"
+            }
+        }
     }
 
     /** Box tool: fill (or clear) every block between two corners as one undo step. */
@@ -300,7 +341,7 @@ private fun MakerScreenContent(
         if (activePart == null && category == MakerCategory.TERRAIN) parts.firstOrNull()?.let { choose(it, switchTool = false) }
     }
 
-    Box(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize().onGloballyPositioned { rootCoords[0] = it }) {
     Column(
         Modifier
             .fillMaxSize()
@@ -327,7 +368,7 @@ private fun MakerScreenContent(
         ) else CommandBar(
             rooms = rooms, selectedRoom = selectedRoom, onRoomSelected = onRoomSelected, areaOf = areaOf,
             onUndo = { editorState.undo() }, onRedo = { editorState.redo() },
-            controls = controls, themeState = themeState, solidView = solidView, onSolidView = { solidView = it },
+            themeState = themeState,
             loadout = loadout, onLoadout = { loadout = it },
             onPlay = ::playHere, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
         )
@@ -336,10 +377,30 @@ private fun MakerScreenContent(
             PartsPanel(
                 category = category, onCategory = { category = it; search = "" },
                 parts = shownParts, active = activePart, onChoose = ::choose,
+                onDragStart = { part, windowPos -> dragPart = part; dragPos = windowPos },
+                onDragTo = { windowPos ->
+                    dragPos = windowPos
+                    val target = controls.blockAtWindow?.invoke(dragPos)
+                    editorState.mapSelStart = target; editorState.mapSelEnd = target
+                },
+                onDragEnd = {
+                    val part = dragPart
+                    val target = controls.blockAtWindow?.invoke(dragPos)
+                    editorState.mapSelStart = null; editorState.mapSelEnd = null
+                    dragPart = null
+                    if (part != null && target != null) placePartAt(part, target.first, target.second)
+                },
                 search = search, onSearch = { search = it }, onSearchFocus = { searchFocused = it },
                 editorState = editorState,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
+                val checks = remember(selectedRoom?.id, romParser) {
+                    val parser = romParser ?: return@remember emptyList()
+                    val room = selectedRoom ?: return@remember emptyList()
+                    val names = rooms.associate { it.getRoomIdAsInt() to it.name }
+                    readyChecks(parser, room.getRoomIdAsInt()) { names[it] ?: "another room" }
+                }
+                ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks)
                 Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0C0C18))) {
                     val stamping = tool == MakerTool.PAINT && activePart?.stamps == true
                     val paintTiles = tool == MakerTool.PAINT && activePart is MakerPart.Tile
@@ -353,6 +414,10 @@ private fun MakerScreenContent(
                                 var boxStart: Pair<Int, Int>? = null
                                 var boxClear = false
                                 var last = androidx.compose.ui.geometry.Offset.Zero
+                                var lastStamp: Pair<Int, Int>? = null
+                                var moving: Any? = null
+                                var moveFrom: Pair<Int, Int>? = null
+                                var selectPress: Pair<Int, Int>? = null
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     if (playing) {
@@ -400,9 +465,47 @@ private fun MakerScreenContent(
                                     val bx = editorState.hoverBlockX
                                     val by = editorState.hoverBlockY
                                     val inRoom = bx >= 0 && by >= 0
+                                    if (currentTool == MakerTool.SELECT) {
+                                        when {
+                                            event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
+                                                val obj: Any? = editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
+                                                    ?: editorState.workingEnemies.firstOrNull { it.x / 16 == bx && it.y / 16 == by }
+                                                if (obj != null) {
+                                                    moving = obj; moveFrom = bx to by
+                                                    editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
+                                                    event.changes.forEach { it.consume() }
+                                                } else selectPress = bx to by // the canvas handles the click; properties open on release
+                                            }
+                                            moving != null && event.type == PointerEventType.Move && inRoom -> {
+                                                editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
+                                            }
+                                            moving != null && event.type == PointerEventType.Release -> {
+                                                val from = moveFrom!!
+                                                val to = if (inRoom) bx to by else from
+                                                editorState.mapSelStart = null; editorState.mapSelEnd = null
+                                                if (to != from) movePlaced(moving!!, to) else controls.openTilePropertiesAt?.invoke(from.first, from.second)
+                                                moving = null; moveFrom = null
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                            selectPress != null && event.type == PointerEventType.Release -> {
+                                                if (inRoom && (bx to by) == selectPress) controls.openTilePropertiesAt?.invoke(bx, by)
+                                                selectPress = null
+                                            }
+                                        }
+                                        continue
+                                    }
                                     when {
                                         stamping && event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
-                                            stampAt(bx, by); event.changes.forEach { it.consume() }
+                                            stampAt(bx, by); lastStamp = bx to by; event.changes.forEach { it.consume() }
+                                        }
+                                        // Drag-painting items/enemies: place one on each new block the pointer reaches.
+                                        stamping && lastStamp != null && event.type == PointerEventType.Move && inRoom -> {
+                                            if ((bx to by) != lastStamp) { stampAt(bx, by); lastStamp = bx to by }
+                                            event.changes.forEach { it.consume() }
+                                        }
+                                        stamping && lastStamp != null && event.type == PointerEventType.Release -> {
+                                            if (inRoom && (bx to by) != lastStamp) stampAt(bx, by)
+                                            lastStamp = null; event.changes.forEach { it.consume() }
                                         }
                                         (stamping || paintTiles) && event.type == PointerEventType.Press && event.buttons.isSecondaryPressed && inRoom -> {
                                             erasing = !stamping
@@ -436,11 +539,26 @@ private fun MakerScreenContent(
                 }
                 if (playing) PlayingHint() else if (themeState.appearance.showHintBar) HintBar(tool, activePart)
             }
-            Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, rooms, markers, { markers = it }, onAdvanced = onExit)
+            Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, controls, onAdvanced = onExit)
         }
         StatusBar(editorState, message)
     }
     if (appearanceOpen) com.supermetroid.editor.ui.maker.MakerAppearancePanel(themeState) { appearanceOpen = false }
+    dragPart?.let { part ->
+        val local = rootCoords[0]?.windowToLocal(dragPos) ?: dragPos
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        Row(
+            Modifier.offset { androidx.compose.ui.unit.IntOffset(local.x.toInt() + 12, local.y.toInt() + 12) }
+                .background(p.raised.copy(alpha = 0.95f), RoundedCornerShape(8.dp)).border(2.dp, part.category.color, RoundedCornerShape(8.dp))
+                .padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PartPreview(part, editorState, Modifier.size(40.dp))
+            Text(if (controls.blockAtWindow?.invoke(dragPos) != null) "Drop to place ${part.name}" else part.name,
+                color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (density.density < 0f) Unit
+    }
     }
 }
 
@@ -518,10 +636,7 @@ private fun CommandBar(
     areaOf: (RoomInfo?) -> Int,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    controls: MapCanvasControls,
     themeState: MakerThemeState,
-    solidView: Boolean,
-    onSolidView: (Boolean) -> Unit,
     loadout: MakerLoadout,
     onLoadout: (MakerLoadout) -> Unit,
     onPlay: () -> Unit,
@@ -561,12 +676,6 @@ private fun CommandBar(
         MakerButton(onClick = onUndo) { fg -> MakerIcon(MakerIcons.UNDO, fg, 20.dp); Text("Undo", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         MakerButton(onClick = onRedo) { fg -> MakerIcon(MakerIcons.REDO, fg, 20.dp); Text("Redo", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         Divider()
-        MakerButton(onClick = { controls.showGrid = !controls.showGrid }, selected = controls.showGrid) { fg ->
-            MakerIcon(MakerIcons.GRID, fg, 18.dp); Text("Grid", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
-        MakerButton(onClick = { onSolidView(!solidView) }, selected = solidView) { fg ->
-            MakerIcon(MakerIcons.SOLID, fg, 18.dp); Text("What's solid?", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
         Spacer(Modifier.weight(1f))
         Box {
             MakerButton(onClick = { themeMenu = true }) { fg ->
@@ -665,6 +774,9 @@ private fun PartsPanel(
     onSearch: (String) -> Unit,
     onSearchFocus: (Boolean) -> Unit,
     editorState: EditorState,
+    onDragStart: (MakerPart, androidx.compose.ui.geometry.Offset) -> Unit = { _, _ -> },
+    onDragTo: (androidx.compose.ui.geometry.Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     Column(Modifier.width(304.dp).fillMaxHeight().background(p.background).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -710,8 +822,19 @@ private fun PartsPanel(
         LazyVerticalGrid(GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(parts, key = { it.id }) { part ->
                 val on = active?.id == part.id
+                val cardCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
                 Column(
                     Modifier.height(108.dp)
+                        .onGloballyPositioned { cardCoords[0] = it }
+                        // Drag a card onto the room to place it there; a plain click selects it.
+                        .pointerInput(part.id) {
+                            detectDragGestures(
+                                onDragStart = { o -> cardCoords[0]?.let { onDragStart(part, it.localToWindow(o)) } },
+                                onDrag = { change, _ -> change.consume(); cardCoords[0]?.let { onDragTo(it.localToWindow(change.position)) } },
+                                onDragEnd = onDragEnd,
+                                onDragCancel = onDragEnd,
+                            )
+                        }
                         .background(p.raised, RoundedCornerShape(8.dp))
                         .border(2.dp, if (on) part.category.color.darker() else p.border, RoundedCornerShape(8.dp))
                         .clickable(role = androidx.compose.ui.semantics.Role.Button) { onChoose(part) }
@@ -779,80 +902,142 @@ private fun HintBar(tool: MakerTool, part: MakerPart?) {
 
 @Composable
 private fun Inspector(
-    editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?, rooms: List<RoomInfo>,
-    markers: Set<MakerMarker>, onMarkers: (Set<MakerMarker>) -> Unit, onAdvanced: () -> Unit,
+    editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?,
+    controls: MapCanvasControls, onAdvanced: () -> Unit,
 ) {
     val p = LocalMakerPalette.current
+    val docked = controls.dockedPanel
     Column(
-        Modifier.width(300.dp).fillMaxHeight().background(p.panel).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.width(340.dp).fillMaxHeight().background(p.panel).padding(horizontal = 10.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SectionLabel("Selected part")
+        SectionLabel("Selected part", Modifier.padding(horizontal = 6.dp))
         Row(
-            Modifier.fillMaxWidth().background(p.raised, RoundedCornerShape(8.dp)).border(1.dp, p.border, RoundedCornerShape(8.dp)).padding(12.dp),
+            Modifier.fillMaxWidth().background(p.raised, RoundedCornerShape(8.dp)).border(1.dp, p.border, RoundedCornerShape(8.dp)).padding(10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (part != null) {
-                PartPreview(part, editorState, Modifier.size(52.dp))
+                PartPreview(part, editorState, Modifier.size(48.dp))
                 Column {
-                    Text(part.name, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(part.name, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Text("${part.category.label} · ${part.hint}", color = p.muted, fontSize = 12.sp)
                 }
             } else {
                 Text("Choose a part from the library to start building.", color = p.muted, fontSize = 13.sp)
             }
         }
-        SectionLabel("Under the cursor")
-        val bx = editorState.hoverBlockX
-        val by = editorState.hoverBlockY
-        if (bx >= 0 && by >= 0) {
-            val word = editorState.readBlockWord(bx, by)
-            InfoGrid(listOf("Block" to "x $bx  y $by", "Type" to blockTypeName(word), "Tile" to "0x%03X".format(word and 0x3FF)), mono = setOf("Block", "Tile"))
-        } else {
-            Text("Point at the room to see a block's position and type.", color = p.muted, fontSize = 13.sp)
+        SectionLabel(if (docked != null) "Block properties" else "Under the cursor", Modifier.padding(horizontal = 6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (docked != null) {
+                // SMEDIT's block-properties panel, docked here (its close button returns to this summary).
+                docked(Modifier.fillMaxWidth())
+            } else Column(Modifier.padding(horizontal = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val bx = editorState.hoverBlockX
+                val by = editorState.hoverBlockY
+                if (bx >= 0 && by >= 0) {
+                    val word = editorState.readBlockWord(bx, by)
+                    InfoGrid(listOf("Block" to "x $bx  y $by", "Type" to blockTypeName(word), "Tile" to "0x%03X".format(word and 0x3FF)), mono = setOf("Block", "Tile"))
+                } else {
+                    Text("Point at the room to see a block's position and type.", color = p.muted, fontSize = 13.sp)
+                }
+                Text("With Select (V), click a block to see and edit its properties here, or drag an item or enemy to move it.",
+                    color = p.muted, fontSize = 12.sp)
+            }
         }
-        SectionLabel("Room")
+        SectionLabel("Room", Modifier.padding(horizontal = 6.dp))
         if (room != null) {
             val roomId = room.getRoomIdAsInt()
             val doorsIn = remember(roomId, romParser) { romParser?.findDoorsLeadingTo(roomId)?.size ?: 0 }
-            InfoGrid(listOf(
-                "Size" to "${editorState.workingBlocksWide / 16} × ${editorState.workingBlocksTall / 16} screens",
-                "Area" to AREA_NAMES.getOrElse(area) { "?" },
-                "Doors" to "${editorState.doorEntries.size} out · $doorsIn lead in",
-            ), mono = setOf("Size"))
-        }
-        if (room != null && romParser != null) {
-            val roomId = room.getRoomIdAsInt()
-            val checks = remember(roomId, romParser) {
-                val names = rooms.associate { it.getRoomIdAsInt() to it.name }
-                readyChecks(romParser, roomId) { names[it] ?: "another room" }
-            }
-            val todo = checks.count { !it.ok }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("Ready to play?", Modifier.weight(1f))
-                Text(if (todo == 0) "All good" else "$todo to fix", color = if (todo == 0) MakerFixedColors.ok else MakerFixedColors.warning,
-                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-            checks.forEach { c -> ReadyRow(c) }
-        }
-        SectionLabel("Show on canvas")
-        MakerMarker.entries.forEach { m ->
-            val on = m in markers
-            Row(
-                Modifier.fillMaxWidth().height(38.dp).background(p.raised, RoundedCornerShape(6.dp)).border(1.dp, p.border, RoundedCornerShape(6.dp))
-                    .clickable(role = androidx.compose.ui.semantics.Role.Checkbox) { onMarkers(if (on) markers - m else markers + m) }.padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(Modifier.size(12.dp).background(Color(m.overlay.color), RoundedCornerShape(3.dp)))
-                Text(m.label, color = p.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                Box(
-                    Modifier.size(20.dp).background(if (on) MakerFixedColors.ok else p.inset, RoundedCornerShape(4.dp)).border(1.dp, if (on) MakerFixedColors.ok else p.border, RoundedCornerShape(4.dp)),
-                    contentAlignment = Alignment.Center,
-                ) { if (on) MakerIcon(MakerIcons.CHECK, Color.White, 14.dp, strokeWidth = 2.8f) }
+            Box(Modifier.padding(horizontal = 6.dp)) {
+                InfoGrid(listOf(
+                    "Size" to "${editorState.workingBlocksWide / 16} × ${editorState.workingBlocksTall / 16} screens",
+                    "Area" to AREA_NAMES.getOrElse(area) { "?" },
+                    "Doors" to "${editorState.doorEntries.size} out · $doorsIn lead in",
+                ), mono = setOf("Size"))
             }
         }
         Text("Advanced room settings ›", color = p.accentDeep.takeIf { !p.isDark } ?: p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onAdvanced).padding(vertical = 4.dp))
+            modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onAdvanced).padding(horizontal = 6.dp, vertical = 4.dp))
+    }
+}
+
+/** One fixed bar above the room: view toggles on the left, "Ready to play?" checks on the right. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ViewBar(
+    controls: MapCanvasControls, solidView: Boolean, onSolidView: (Boolean) -> Unit,
+    markers: Set<MakerMarker>, onMarkers: (Set<MakerMarker>) -> Unit, checks: List<ReadyCheck>,
+) {
+    val p = LocalMakerPalette.current
+    Row(
+        Modifier.fillMaxWidth().height(48.dp).background(p.panel).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        MakerButton(onClick = { controls.showGrid = !controls.showGrid }, selected = controls.showGrid, height = 36.dp) { fg ->
+            MakerIcon(MakerIcons.GRID, fg, 16.dp); Text("Grid", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        MakerButton(onClick = { onSolidView(!solidView) }, selected = solidView, height = 36.dp) { fg ->
+            MakerIcon(MakerIcons.SOLID, fg, 16.dp); Text("What's solid?", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        MakerMarker.entries.forEach { m ->
+            val on = m in markers
+            androidx.compose.foundation.TooltipArea(tooltip = { TooltipText("Show ${m.label.lowercase()}") }) {
+                MakerButton(onClick = { onMarkers(if (on) markers - m else markers + m) }, selected = on, height = 36.dp,
+                    modifier = Modifier.semantics { contentDescription = "Show ${m.label.lowercase()}" }) { fg ->
+                    MakerIcon(m.icon, fg, 16.dp)
+                    Box(Modifier.size(8.dp).background(Color(m.overlay.color), RoundedCornerShape(2.dp)))
+                }
+            }
+        }
+        // Ready checks sit at the right and scroll sideways on narrow windows instead of being clipped.
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+        ) {
+            if (checks.isNotEmpty()) {
+                val todo = checks.count { !it.ok }
+                Text(if (todo == 0) "READY" else "$todo TO FIX", color = if (todo == 0) MakerFixedColors.ok else MakerFixedColors.warning,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, modifier = Modifier.padding(start = 6.dp))
+                checks.forEach { ReadyChip(it) }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ReadyChip(c: ReadyCheck) {
+    val p = LocalMakerPalette.current
+    var open by remember { mutableStateOf(false) }
+    val warnBg = if (p.isDark) Color(0xFF3A3220) else Color(0xFFF6E6C4)
+    Box {
+        androidx.compose.foundation.TooltipArea(tooltip = { TooltipText(c.title + ": " + c.detail) }) {
+            Row(
+                Modifier.height(30.dp)
+                    .background(if (c.ok) p.raised else warnBg, RoundedCornerShape(15.dp))
+                    .border(1.dp, if (c.ok) p.border else MakerFixedColors.hazards, RoundedCornerShape(15.dp))
+                    .clickable(role = androidx.compose.ui.semantics.Role.Button) { open = !open }
+                    .semantics { contentDescription = "${c.title}: ${c.detail}" }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                MakerIcon(if (c.ok) MakerIcons.CHECK else MakerIcons.WARN, if (c.ok) MakerFixedColors.ok else MakerFixedColors.warning, 14.dp, strokeWidth = 2.8f)
+                Text(c.short, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp).width(260.dp)) {
+                Text(c.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(c.detail, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TooltipText(text: String) {
+    Box(Modifier.background(Color(0xF0252B30), RoundedCornerShape(5.dp)).padding(horizontal = 8.dp, vertical = 5.dp)) {
+        Text(text, color = Color(0xFFF2EBDD), fontSize = 12.sp)
     }
 }
 
@@ -891,25 +1076,6 @@ private fun StatusBar(editorState: EditorState, message: String?) {
 
 private fun Color.darker(f: Float = 0.72f) = Color(red * f, green * f, blue * f, alpha)
 
-
-@Composable
-private fun ReadyRow(c: ReadyCheck) {
-    val p = LocalMakerPalette.current
-    val warnBg = if (p.isDark) Color(0xFF3A3220) else Color(0xFFF6E6C4)
-    Row(
-        Modifier.fillMaxWidth()
-            .background(if (c.ok) p.raised else warnBg, RoundedCornerShape(6.dp))
-            .border(1.dp, if (c.ok) p.border else MakerFixedColors.hazards, RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        MakerIcon(if (c.ok) MakerIcons.CHECK else MakerIcons.WARN, if (c.ok) MakerFixedColors.ok else MakerFixedColors.warning, 18.dp, strokeWidth = 2.6f)
-        Column {
-            Text(c.title, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(c.detail, color = p.muted, fontSize = 12.sp)
-        }
-    }
-}
 
 @Composable
 private fun SolidLegend(modifier: Modifier) {

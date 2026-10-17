@@ -111,7 +111,7 @@ fun makerHint(tool: MakerTool, part: MakerPart?): String {
         MakerTool.PAINT -> when {
             part == null -> "Choose a part on the left, then click or drag to place it."
             part is MakerPart.AnyTile -> "Click any block in the room to copy it, then paint with it."
-            part.stamps -> "Click to place $name. Right-click removes the item or enemy under the cursor."
+            part.stamps -> "Click or drag to place $name. Right-click removes the item or enemy under the cursor."
             else -> "Click or drag to place $name. Right-click or right-drag removes blocks."
         }
         MakerTool.FILL -> "Click inside an enclosed area to flood it with $name."

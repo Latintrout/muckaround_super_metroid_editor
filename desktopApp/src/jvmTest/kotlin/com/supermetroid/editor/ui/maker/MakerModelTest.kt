@@ -24,7 +24,7 @@ class MakerModelTest {
         val item = MakerPart.Item("item-1", "Missile", "+5", 0xEEDB)
         assertTrue(makerHint(MakerTool.PAINT, tile).startsWith("Click or drag to place Ground."))
         assertTrue("Right-click" in makerHint(MakerTool.PAINT, tile))
-        assertTrue(makerHint(MakerTool.PAINT, item).startsWith("Click to place Missile."))
+        assertTrue(makerHint(MakerTool.PAINT, item).startsWith("Click or drag to place Missile."))
         assertTrue("Choose a part" in makerHint(MakerTool.PAINT, null))
         assertTrue("flood" in makerHint(MakerTool.FILL, tile))
         assertTrue("empty air" in makerHint(MakerTool.ERASE, null))
