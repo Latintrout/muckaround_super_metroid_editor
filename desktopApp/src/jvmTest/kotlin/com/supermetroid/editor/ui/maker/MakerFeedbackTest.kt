@@ -71,6 +71,8 @@ class MakerFeedbackTest {
                 themeState = themes, canvasControls = controls)
         }
         scene.frames(40)
+        // The library sweep runs on first composition; wait until the canvas is up.
+        repeat(100) { if (controls.openTilePropertiesAt == null) scene.frames(2) }
         fun shot(name: String) { shots?.let { File(it, "$name.png").writeBytes(scene.render(System.nanoTime()).encodeToData(EncodedImageFormat.PNG)!!.bytes) } }
         fun pointOf(bx: Int, by: Int): Offset {
             for (y in 120 until 880 step 3) for (x in 395 until 1255 step 3) {

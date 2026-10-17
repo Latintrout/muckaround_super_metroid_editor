@@ -1,6 +1,7 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.semantics.semantics
@@ -184,6 +185,7 @@ private fun MakerScreenContent(
     var message by remember { mutableStateOf<String?>(null) }
     var solidView by remember { mutableStateOf(initialSolidView) }
     var appearanceOpen by remember { mutableStateOf(initialAppearanceOpen) }
+    var roomLookOpen by remember { mutableStateOf(false) }
     // Item and enemy markers start on: at fit-to-room zoom a 16-pixel item is only a few pixels wide.
     var markers by remember { mutableStateOf(setOf(MakerMarker.ITEMS, MakerMarker.ENEMIES)) }
     // Library drag-and-drop: the part being dragged and the pointer's window position.
@@ -203,9 +205,13 @@ private fun MakerScreenContent(
         ({ room: RoomInfo? -> areas[room?.id] ?: -1 })
     }
 
-    val parts = remember(category, editorState.editVersion, editorState.patternVersion, selectedRoom) {
+    // The library: everything the game uses (ROM sweep) that passed the in-game check.
+    val library = remember(romParser) {
+        romParser?.let { EnemySpriteCache.setRomParser(it); runCatching { com.supermetroid.editor.ui.maker.MakerLibrary.build(it) }.getOrNull() }
+    }
+    val parts = remember(category, editorState.editVersion, editorState.patternVersion, selectedRoom, library, editorState.currentTilesetId) {
         if (category == MakerCategory.DOORS || category == MakerCategory.STATIONS) editorState.seedBuiltInPatterns(romParser)
-        makerPartsFor(category, editorState)
+        makerPartsFor(category, editorState, library, romParser)
     }
     val shownParts = if (search.isBlank()) parts else parts.filter { it.name.contains(search.trim(), ignoreCase = true) }
 
@@ -221,9 +227,21 @@ private fun MakerScreenContent(
 
     /** Picking a part switches to Paint unless the current tool already uses it; [switchTool] false keeps the tool. */
     fun choose(part: MakerPart, switchTool: Boolean = true) {
+        if (part is MakerPart.Enemy && part.blocked != null) {
+            message = "${part.name} can't go in this room: ${part.blocked}."
+            return
+        }
         activePart = part
         when (part) {
-            is MakerPart.Tile -> editorState.selectMetatile(part.metatile)
+            is MakerPart.Tile -> if (part.blockType != null) {
+                // Paint the block exactly as the game uses it: type, BTS and flips.
+                editorState.brush = TileBrush(
+                    tiles = listOf(listOf(part.metatile)),
+                    blockType = part.blockType,
+                    btsOverrides = if (part.bts != 0) mapOf(0L to part.bts) else emptyMap(),
+                    flipOverrides = ((if (part.hFlip) 1 else 0) or (if (part.vFlip) 2 else 0)).takeIf { it != 0 }?.let { mapOf(0L to it) } ?: emptyMap(),
+                )
+            } else editorState.selectMetatile(part.metatile)
             is MakerPart.Pattern -> editorState.selectAndApplyPattern(part.patternId)
             else -> Unit
         }
@@ -234,7 +252,10 @@ private fun MakerScreenContent(
     fun stampAt(bx: Int, by: Int) {
         when (val part = activePart) {
             is MakerPart.Item -> editorState.addPlm(part.plmId, bx, by, 0, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
-            is MakerPart.Enemy -> editorState.addEnemy(part.enemyId, bx * 16 + 8, by * 16 + 8)
+            is MakerPart.Enemy -> {
+                if (part.blocked != null) { message = "${part.name} can't go in this room: ${part.blocked}."; return }
+                editorState.addEnemy(part.enemyId, bx * 16 + 8, by * 16 + 8, part.initParam, part.properties)
+            }
             else -> return
         }
         message = "Placed ${activePart?.name} at block $bx, $by"
@@ -542,11 +563,16 @@ private fun MakerScreenContent(
                 }
                 if (playing) PlayingHint() else if (themeState.appearance.showHintBar) HintBar(tool, activePart)
             }
-            Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, controls, onAdvanced = onExit)
+            Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, controls, onAdvanced = onExit,
+                onRoomLook = if (library != null && romParser != null) ({ roomLookOpen = true }) else null)
         }
         StatusBar(editorState, message)
     }
     if (appearanceOpen) com.supermetroid.editor.ui.maker.MakerAppearancePanel(themeState) { appearanceOpen = false }
+    if (roomLookOpen && library != null && romParser != null) {
+        com.supermetroid.editor.ui.maker.MakerRoomLookPanel(editorState, romParser, library, rooms.associate { it.getRoomIdAsInt() to it.name },
+            onApplied = { message = it }, onClose = { roomLookOpen = false })
+    }
     dragPart?.let { part ->
         val local = rootCoords[0]?.windowToLocal(dragPos) ?: dragPos
         val density = androidx.compose.ui.platform.LocalDensity.current
@@ -827,8 +853,10 @@ private fun PartsPanel(
             items(parts, key = { it.id }) { part ->
                 val on = active?.id == part.id
                 val cardCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+                val blocked = (part as? MakerPart.Enemy)?.blocked != null
                 Column(
                     Modifier.height(108.dp)
+                        .alpha(if (blocked) 0.45f else 1f)
                         .onGloballyPositioned { cardCoords[0] = it }
                         // Drag a card onto the room to place it there; a plain click selects it.
                         .pointerInput(part.id) {
@@ -854,17 +882,24 @@ private fun PartsPanel(
     }
 }
 
-/** Game art for a part: real metatile pixels or item sprite, nearest-neighbour, never themed. */
+/** Game art for a part, from the ROM, nearest-neighbour, never themed. Abstract parts get a MODRET icon. */
 @Composable
 private fun PartPreview(part: MakerPart, editorState: EditorState, modifier: Modifier) {
     val bitmap: ImageBitmap? = remember(part.id, editorState.tileGraphics) {
         when (part) {
             is MakerPart.Tile -> editorState.tileGraphics?.renderMetatile(part.metatile)?.let { px ->
-                BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB).apply { setRGB(0, 0, 16, 16, px, 0, 16) }.toComposeImageBitmap()
+                val img = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
+                for (y in 0 until 16) for (x in 0 until 16) {
+                    val sx = if (part.hFlip) 15 - x else x
+                    val sy = if (part.vFlip) 15 - y else y
+                    img.setRGB(x, y, px[sy * 16 + sx])
+                }
+                img.toComposeImageBitmap()
             }
-            is MakerPart.Item -> ROOM_ITEM_SPRITE_COORDS[part.name]?.let { c ->
-                ItemSpriteSheetCache.get()?.getSubimage(c.x, c.y, 16, 16)?.toComposeImageBitmap()
-            }
+            is MakerPart.Item -> RomParser.ITEM_DEFS.firstOrNull { part.plmId in setOf(it.visibleId, it.chozoId, it.hiddenId) }
+                ?.let { ROOM_ITEM_SPRITE_COORDS[it.name] }
+                ?.let { c -> ItemSpriteSheetCache.get()?.getSubimage(c.x, c.y, 16, 16)?.toComposeImageBitmap() }
+            is MakerPart.Enemy -> EnemySpriteCache.get("%04X".format(part.enemyId), part.initParam)?.toComposeImageBitmap()
             // Doors and stations: the pattern's real metatiles from this room's tileset.
             is MakerPart.Pattern -> editorState.project.patterns.firstOrNull { it.id == part.patternId }
                 ?.let { renderPatternThumbnail(it, editorState.tileGraphics) }?.toComposeImageBitmap()
@@ -874,9 +909,19 @@ private fun PartPreview(part: MakerPart, editorState: EditorState, modifier: Mod
     Box(modifier.background(Color(0xFF0C0C18), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
         if (bitmap != null) {
             Image(bitmap, contentDescription = part.name, filterQuality = FilterQuality.None, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                modifier = Modifier.fillMaxHeight().padding(4.dp))
+                modifier = Modifier.fillMaxSize().padding(5.dp))
         } else {
-            MakerIcon(part.category.icon, part.category.color, 30.dp)
+            MakerIcon(if (part is MakerPart.AnyTile) MakerIcons.PICK else part.category.icon, part.category.color, 30.dp)
+        }
+        // Item variants: a small shape badge (orb = Chozo ball, dashed square = hidden in a block).
+        val variant = (part as? MakerPart.Item)?.let { item ->
+            RomParser.ITEM_DEFS.firstOrNull { it.chozoId == item.plmId }?.let { "orb" } ?: RomParser.ITEM_DEFS.firstOrNull { it.hiddenId == item.plmId }?.let { "hidden" }
+        }
+        if (variant != null) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(3.dp).size(16.dp).background(Color(0xE6252B30), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                MakerIcon(if (variant == "orb") "M12 4a8 8 0 100 16 8 8 0 000-16z" else "M5 5h4M15 5h4M5 19h4M15 19h4M5 5v4M5 15v4M19 5v4M19 15v4",
+                    Color(0xFFF2EBDD), 12.dp, strokeWidth = 2.6f)
+            }
         }
     }
 }
@@ -911,7 +956,7 @@ private fun HintBar(tool: MakerTool, part: MakerPart?) {
 @Composable
 private fun Inspector(
     editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?,
-    controls: MapCanvasControls, onAdvanced: () -> Unit,
+    controls: MapCanvasControls, onAdvanced: () -> Unit, onRoomLook: (() -> Unit)? = null,
 ) {
     val p = LocalMakerPalette.current
     val docked = controls.dockedPanel
@@ -963,6 +1008,9 @@ private fun Inspector(
                     "Doors" to "${editorState.doorEntries.size} out · $doorsIn lead in",
                 ), mono = setOf("Size"))
             }
+        }
+        if (onRoomLook != null) MakerButton(onClick = onRoomLook, modifier = Modifier.fillMaxWidth(), height = 40.dp) { fg ->
+            MakerIcon(MakerIcons.THEME, fg, 18.dp); Text("Room look: tileset & effects", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
         Text("Advanced room settings ›", color = p.accentDeep.takeIf { !p.isDark } ?: p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onAdvanced).padding(horizontal = 6.dp, vertical = 4.dp))

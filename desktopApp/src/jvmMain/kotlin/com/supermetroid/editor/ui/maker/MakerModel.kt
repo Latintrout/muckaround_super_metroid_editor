@@ -27,18 +27,29 @@ enum class MakerCategory(val label: String, val icon: String, val color: Color, 
     HAZARDS("Hazards", MakerIcons.HAZARDS, MakerFixedColors.hazards, ""),
     DOORS("Doors", MakerIcons.DOORS, MakerFixedColors.doors, "Door patterns load with the project."),
     ITEMS("Items", MakerIcons.ITEMS, MakerFixedColors.items, ""),
-    ENEMIES("Enemies", MakerIcons.ENEMIES, MakerFixedColors.enemies, "Only enemies whose graphics this room already loads can be placed."),
+    ENEMIES("Enemies", MakerIcons.ENEMIES, MakerFixedColors.enemies, "No verified enemies yet."),
     DECOR("Decor", MakerIcons.DECOR, MakerFixedColors.decor, ""),
     STATIONS("Stations", MakerIcons.STATIONS, MakerFixedColors.stations, "Station patterns load with the project."),
 }
 
 /** Something that can be placed. [hint] says what it does in-game, in a few words. */
 sealed class MakerPart(val id: String, val name: String, val hint: String, val category: MakerCategory) {
-    /** Paint one metatile; collision comes from the tileset defaults. */
-    class Tile(id: String, name: String, hint: String, category: MakerCategory, val metatile: Int) : MakerPart(id, name, hint, category)
+    /**
+     * Paint one block. With [blockType] set it is painted exactly as the game uses it (type, BTS, flips);
+     * without, collision comes from the tileset defaults.
+     */
+    class Tile(
+        id: String, name: String, hint: String, category: MakerCategory, val metatile: Int,
+        val blockType: Int? = null, val bts: Int = 0, val hFlip: Boolean = false, val vFlip: Boolean = false,
+    ) : MakerPart(id, name, hint, category)
     class Pattern(id: String, name: String, hint: String, category: MakerCategory, val patternId: String) : MakerPart(id, name, hint, category)
     class Item(id: String, name: String, hint: String, val plmId: Int) : MakerPart(id, name, hint, MakerCategory.ITEMS)
-    class Enemy(id: String, name: String, hint: String, val enemyId: Int) : MakerPart(id, name, hint, MakerCategory.ENEMIES)
+    class Enemy(
+        id: String, name: String, hint: String, val enemyId: Int,
+        val initParam: Int = 0, val properties: Int = 0x2800,
+        /** Why it can't be placed in this room (graphics limits), or null when it can. */
+        val blocked: String? = null,
+    ) : MakerPart(id, name, hint, MakerCategory.ENEMIES)
     /** Copy any tile from the room (switches to Pick). */
     object AnyTile : MakerPart("decor-any", "Any room tile", "Pick it from the room", MakerCategory.DECOR)
 
@@ -53,12 +64,30 @@ private val SHARED_TERRAIN = listOf(
     Triple("grapple", "Grapple block", 155) to "Grapple latches",
 )
 
-private val ITEM_HINTS = mapOf(
-    "Energy Tank" to "+100 energy", "Missile" to "+5 Missiles", "Super Missile" to "+5 Supers", "Power Bomb" to "+5 Power Bombs",
-    "Reserve Tank" to "+100 reserve",
-)
+/**
+ * Parts for [category]. With a [library] (the ROM sweep + in-game verification) terrain, hazards, decor,
+ * items and enemies come from what the game really uses; without one, a small built-in set is used.
+ */
+fun makerPartsFor(category: MakerCategory, editorState: EditorState, library: MakerLibrary? = null, parser: RomParser? = null): List<MakerPart> {
+    if (library != null) when (category) {
+        // The room's own ground first, then what the game uses with this tileset, then the shared (CRE) blocks for
+        // kinds this tileset never uses, so every kind is always available.
+        MakerCategory.TERRAIN, MakerCategory.HAZARDS -> {
+            val fromGame = library.tileParts(editorState.currentTilesetId, category, editorState)
+            val basics = basicPartsFor(category, editorState).filterIsInstance<MakerPart.Tile>()
+            val ground = basics.filter { it.id == "ground" }
+            val shared = basics.filter { it.id != "ground" && fromGame.none { g -> g.name.substringBefore(" ").equals(it.name.substringBefore(" "), true) } }
+            return ground + fromGame.filter { g -> ground.none { it.metatile == g.metatile } } + shared
+        }
+        MakerCategory.DECOR -> return listOf(MakerPart.AnyTile) + library.tileParts(editorState.currentTilesetId, category, editorState)
+        MakerCategory.ITEMS -> return library.itemParts()
+        MakerCategory.ENEMIES -> if (parser != null) return library.enemyParts(editorState, parser)
+        else -> Unit
+    }
+    return basicPartsFor(category, editorState)
+}
 
-fun makerPartsFor(category: MakerCategory, editorState: EditorState): List<MakerPart> = when (category) {
+private fun basicPartsFor(category: MakerCategory, editorState: EditorState): List<MakerPart> = when (category) {
     MakerCategory.TERRAIN -> buildList {
         dominantGroundMetatile(editorState)?.let { add(MakerPart.Tile("ground", "Ground", "solid, this area's look", category, it)) }
         SHARED_TERRAIN.forEach { (t, hint) -> add(MakerPart.Tile(t.first, t.second, hint, category, t.third)) }
