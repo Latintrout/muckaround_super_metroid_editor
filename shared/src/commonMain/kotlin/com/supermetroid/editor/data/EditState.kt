@@ -935,9 +935,9 @@ data class ProjectBaseRom(
     val size: Int,
 )
 
-/** Block where Samus stands when Maker Play starts in a room (her feet are in this block). */
+/** Block where Samus stands when Maker Play starts in a room (her feet are in this block), and which way she faces. */
 @Serializable
-data class MakerStartPoint(val x: Int, val y: Int)
+data class MakerStartPoint(val x: Int, val y: Int, val facingLeft: Boolean = false)
 
 @Serializable
 data class SmEditProject(

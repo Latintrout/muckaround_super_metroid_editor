@@ -271,8 +271,14 @@ private fun MakerScreenContent(
         when (val part = activePart) {
             MakerPart.StartPoint -> {
                 if (dragging) return
-                editorState.setMakerStartPoint(MakerStartPoint(bx, by), "Maker place start point")
-                message = "Samus starts at block $bx, $by"
+                val current = editorState.makerStartPoint()
+                if (current != null && current.x == bx && current.y == by) {
+                    editorState.setMakerStartPoint(current.copy(facingLeft = !current.facingLeft), "Maker turn start point")
+                    message = "Samus starts facing ${if (current.facingLeft) "right" else "left"}"
+                } else {
+                    editorState.setMakerStartPoint(MakerStartPoint(bx, by, current?.facingLeft ?: false), "Maker place start point")
+                    message = "Samus starts at block $bx, $by. Click it again to turn her around."
+                }
                 return
             }
             is MakerPart.Item -> editorState.addPlm(part.plmId, bx, by, 0, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
@@ -302,7 +308,7 @@ private fun MakerScreenContent(
     fun movePlaced(obj: Any, to: Pair<Int, Int>) {
         when (obj) {
             is MakerStartPoint -> {
-                editorState.setMakerStartPoint(MakerStartPoint(to.first, to.second), "Maker move start point")
+                editorState.setMakerStartPoint(obj.copy(x = to.first, y = to.second), "Maker move start point")
                 message = "Moved the Start point to block ${to.first}, ${to.second}"
             }
             is RomParser.PlmEntry -> {
@@ -377,6 +383,8 @@ private fun MakerScreenContent(
         com.supermetroid.editor.ui.maker.applyMakerNewRoomLook(editorState, look)
     }
     var newRoomOpen by remember { mutableStateOf(false) }
+    // Select's right-click menu: the block and where the pointer was (canvas pixels).
+    var blockMenu by remember { mutableStateOf<Pair<Pair<Int, Int>, androidx.compose.ui.geometry.Offset>?>(null) }
     var renameOpen by remember { mutableStateOf(false) }
     var deleteOpen by remember { mutableStateOf(false) }
 
@@ -393,11 +401,13 @@ private fun MakerScreenContent(
         return null
     }
 
-    fun playHere() {
+    /** PLAY. [from] plays once from that block instead of the saved Start point ("Play from here"). */
+    fun playHere(from: MakerStartPoint? = null) {
         val parser = romParser ?: return
         val roomId = selectedRoom?.getRoomIdAsInt() ?: return
-        val start = editorState.makerStartPoint(roomId)?.let { it.x to it.y }
-        var plan = MakerPlayPlan.forRoom(parser, roomId, start)
+        val saved = from ?: editorState.makerStartPoint(roomId)
+        val start = saved?.let { it.x to it.y }
+        var plan = MakerPlayPlan.forRoom(parser, roomId, start, facingLeft = saved?.facingLeft ?: false)
         if (plan == null) {
             message = if (start == null) "No save station or door leads into this room yet. Place a Start point (Stations) so Play can reach it."
             else "There is no save station in this area for Play to boot from."
@@ -405,7 +415,7 @@ private fun MakerScreenContent(
         }
         // A start point enters through a temporary door added to a play-test copy of the build only.
         if (plan!!.needsTemporaryDoor) emulatorWorkspaceState.playRomTransform = { built ->
-            val (copy, door) = com.supermetroid.editor.maker.MakerPlayDoor.writePlayCopy(java.io.File(built), roomId, start!!)
+            val (copy, door) = com.supermetroid.editor.maker.MakerPlayDoor.writePlayCopy(java.io.File(built), plan!!)
             plan = plan!!.withEntryDoor(door)
             copy.absolutePath
         }
@@ -476,13 +486,13 @@ private fun MakerScreenContent(
             roomName = { id -> rooms.firstOrNull { it.getRoomIdAsInt() == id }?.name },
             emulatorWorkspaceState = emulatorWorkspaceState,
             onStop = { onStopPlay(); message = "Stopped. Back to editing." },
-            onRestart = ::playHere,
+            onRestart = { playHere() },
         ) else CommandBar(
             rooms = rooms, selectedRoom = selectedRoom, onRoomSelected = onRoomSelected, areaOf = areaOf,
             onUndo = { editorState.undo() }, onRedo = { editorState.redo() },
             themeState = themeState,
             loadout = loadout, onLoadout = { loadout = it },
-            onPlay = ::playHere, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
+            onPlay = { playHere() }, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
             onNewRoom = if (onCreateRoom != null && romParser != null) ({ newRoomOpen = true }) else null,
             onRename = if (selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ renameOpen = true }) else null,
             onDelete = if (onDeleteRoom != null && selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ deleteOpen = true }) else null,
@@ -509,11 +519,15 @@ private fun MakerScreenContent(
                 editorState = editorState,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                val checks = remember(selectedRoom?.id, romParser, startPoint) {
+                val checks = remember(selectedRoom?.id, romParser, startPoint, editorState.editVersion) {
                     val parser = romParser ?: return@remember emptyList()
                     val room = selectedRoom ?: return@remember emptyList()
                     val names = rooms.associate { it.getRoomIdAsInt() to it.name }
-                    readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }) { names[it] ?: "another room" }
+                    val loaded = editorState.currentRoomId == room.getRoomIdAsInt()
+                    val blockType = { x: Int, y: Int ->
+                        if (x in 0 until editorState.workingBlocksWide && y in 0 until editorState.workingBlocksTall) (editorState.readBlockWord(x, y) shr 12) and 0xF else null
+                    }
+                    readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }, if (loaded) blockType else null) { names[it] ?: "another room" }
                 }
                 ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks)
                 Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0C0C18))) {
@@ -534,6 +548,7 @@ private fun MakerScreenContent(
                                 var moveFrom: Pair<Int, Int>? = null
                                 var selectPress: Pair<Int, Int>? = null
                                 var blockMove: IntArray? = null // selected box being dragged (minX, minY, maxX, maxY)
+                                var menuPress: Pair<Int, Int>? = null
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     if (playing) {
@@ -583,6 +598,14 @@ private fun MakerScreenContent(
                                     val inRoom = bx >= 0 && by >= 0
                                     if (currentTool == MakerTool.SELECT) {
                                         when {
+                                            // Right-click: a small menu (Play from here, Start point here, properties).
+                                            event.type == PointerEventType.Press && event.buttons.isSecondaryPressed && inRoom -> {
+                                                menuPress = bx to by; event.changes.forEach { it.consume() }
+                                            }
+                                            menuPress != null && event.type == PointerEventType.Release -> {
+                                                blockMenu = menuPress!! to pos; menuPress = null
+                                                event.changes.forEach { it.consume() }
+                                            }
                                             event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
                                                 val obj: Any? = editorState.makerStartPoint()?.takeIf { it.x == bx && it.y == by }
                                                     ?: editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
@@ -677,6 +700,26 @@ private fun MakerScreenContent(
                             controls = controls,
                             modifier = Modifier.fillMaxSize(),
                         )
+                    }
+                    blockMenu?.let { (block, at) ->
+                        val density = androidx.compose.ui.platform.LocalDensity.current
+                        Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(at.x.toInt(), at.y.toInt()) }) {
+                            DropdownMenu(expanded = true, onDismissRequest = { blockMenu = null }) {
+                                DropdownMenuItem(text = { Text("Play from here", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }, onClick = {
+                                    blockMenu = null
+                                    playHere(MakerStartPoint(block.first, block.second, editorState.makerStartPoint()?.facingLeft ?: false))
+                                })
+                                DropdownMenuItem(text = { Text("Put the Start point here", fontSize = 13.sp) }, onClick = {
+                                    blockMenu = null
+                                    editorState.setMakerStartPoint(MakerStartPoint(block.first, block.second, editorState.makerStartPoint()?.facingLeft ?: false), "Maker place start point")
+                                    message = "Samus starts at block ${block.first}, ${block.second}"
+                                })
+                                DropdownMenuItem(text = { Text("Block properties", fontSize = 13.sp) }, onClick = {
+                                    blockMenu = null; controls.openTilePropertiesAt?.invoke(block.first, block.second)
+                                })
+                            }
+                        }
+                        if (density.density < 0f) Unit
                     }
                     ZoomControls(controls, Modifier.align(Alignment.BottomEnd).padding(12.dp))
                     if (solidView) SolidLegend(Modifier.align(Alignment.BottomStart).padding(12.dp))
@@ -1088,6 +1131,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStartPoint(
 ) {
     // Never smaller than 22 canvas pixels, so it stays findable at fit-to-room zoom; centred on its block.
     val block = maxOf(16f * px, 22f)
+    val mirror = sp.facingLeft
     val centre = androidx.compose.ui.geometry.Offset((sp.x + 0.5f) * 16f * px, (sp.y + 0.5f) * 16f * px)
     val topLeft = centre - androidx.compose.ui.geometry.Offset(block / 2, block / 2)
     val size = androidx.compose.ui.geometry.Size(block, block)
@@ -1095,8 +1139,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStartPoint(
     drawRoundRect(Color(0xE6182226), topLeft, size, radius)
     drawRoundRect(MakerFixedColors.play, topLeft, size, radius, style = androidx.compose.ui.graphics.drawscope.Stroke(width = maxOf(1.5f, block * 0.08f)))
     val s = block / 24f
-    translate(topLeft.x, topLeft.y) {
-        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) {
+    translate(topLeft.x + (if (mirror) block else 0f), topLeft.y) {
+        scale(if (mirror) -s else s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) {
             drawPath(flag, MakerFixedColors.play, style = androidx.compose.ui.graphics.drawscope.Stroke(
                 width = 2.4f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }

@@ -176,7 +176,7 @@ fun dominantAirWord(editorState: EditorState): Int? {
 fun makerHint(tool: MakerTool, part: MakerPart?): String {
     val name = part?.name ?: "the chosen part"
     return when (tool) {
-        MakerTool.SELECT -> "Click to inspect. Drag a part or a selected box to move it; drag empty space to select."
+        MakerTool.SELECT -> "Click to inspect. Drag a part or a selected box to move it; drag empty space to select. Right-click: Play from here."
         MakerTool.MOVE -> "Drag to move around the room. Middle-drag moves the view with any tool."
         MakerTool.BOX -> when (part) {
             is MakerPart.Tile -> "Drag a box to fill it with $name. Right-drag a box to clear it."
@@ -185,7 +185,7 @@ fun makerHint(tool: MakerTool, part: MakerPart?): String {
         MakerTool.PAINT -> when {
             part == null -> "Choose a part on the left, then click or drag to place it."
             part is MakerPart.AnyTile -> "Click any block in the room to copy it, then paint with it."
-            part is MakerPart.StartPoint -> "Click the block Samus should stand in when Play starts. Placing it again moves it; right-click removes it."
+            part is MakerPart.StartPoint -> "Click where Samus stands when Play starts; click it again to turn her around. Right-click removes it."
             part.stamps -> "Click or drag to place $name. Right-click removes the item or enemy under the cursor."
             else -> "Click or drag to place $name. Right-click or right-drag removes blocks."
         }

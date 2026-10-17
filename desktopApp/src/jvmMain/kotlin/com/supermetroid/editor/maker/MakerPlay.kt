@@ -7,20 +7,25 @@ data class MakerPlayLoadout(val items: Int, val beams: Int, val energyTanks: Int
 
 /**
  * How Maker Play reaches a room on a freshly booted ROM with no save file:
- * load a station in the room's area, then (if the station is elsewhere) take a door into it.
+ * load a station (in [area]), then (if the station is elsewhere) take a door into it.
  *
  * With a [startPoint] (block x, y) the plan always enters through a temporary door that
  * [MakerPlayDoor] writes into the play-test ROM copy, whose screen is the start point's,
  * so rooms with no door leading in can be played too. [entryDoor] is then filled in by
- * [withEntryDoor] once that copy is built.
+ * [withEntryDoor] once that copy is built. The door moves left when [facingLeft], so Samus
+ * arrives facing left. When the room's area has no save station, the station comes from
+ * another area and the door changes area ([areaChange]).
  */
 data class MakerPlayPlan(
     val roomId: Int,
+    /** Area of the station Play boots from (the room's own area unless [areaChange]). */
     val area: Int,
     val stationIndex: Int,
     val stationRoomId: Int,
     val entryDoor: RomParser.DoorEntry?,
     val startPoint: Pair<Int, Int>? = null,
+    val facingLeft: Boolean = false,
+    val areaChange: Boolean = false,
 ) {
     /** True when the play-test ROM needs a temporary entry door (see [MakerPlayDoor]). */
     val needsTemporaryDoor: Boolean get() = startPoint != null
@@ -28,14 +33,27 @@ data class MakerPlayPlan(
     fun withEntryDoor(door: RomParser.DoorEntry) = copy(entryDoor = door)
 
     companion object {
-        fun forRoom(parser: RomParser, roomId: Int, startPoint: Pair<Int, Int>? = null): MakerPlayPlan? {
-            val area = parser.readRoomHeader(roomId)?.area ?: return null
-            val stations = (0 until parser.saveEntryCount(area).coerceAtMost(RomParser.SAVE_STATION_SLOT_COUNT))
+        /** Save stations Play can boot from in [area]: (slot index, entry). */
+        fun stationsIn(parser: RomParser, area: Int) =
+            (0 until parser.saveEntryCount(area).coerceAtMost(RomParser.SAVE_STATION_SLOT_COUNT))
                 .mapNotNull { i -> parser.readSaveEntry(area, i)?.let { i to it } }
                 .filter { it.second.roomId >= 0x8000 }
+
+        /**
+         * [bootArea] forces the station's area (a start point can then cross areas through its door);
+         * by default it is the room's own area, falling back to Crateria's when that area has none.
+         */
+        fun forRoom(
+            parser: RomParser, roomId: Int, startPoint: Pair<Int, Int>? = null,
+            facingLeft: Boolean = false, bootArea: Int? = null,
+        ): MakerPlayPlan? {
+            val area = parser.readRoomHeader(roomId)?.area ?: return null
+            val stations = stationsIn(parser, area)
             if (startPoint != null) {
-                val (index, station) = stations.firstOrNull() ?: return null
-                return MakerPlayPlan(roomId, area, index, station.roomId, null, startPoint)
+                val stationArea = bootArea ?: area.takeIf { stations.isNotEmpty() }
+                    ?: (0..5).firstOrNull { stationsIn(parser, it).isNotEmpty() } ?: return null
+                val (index, station) = stationsIn(parser, stationArea).firstOrNull() ?: return null
+                return MakerPlayPlan(roomId, stationArea, index, station.roomId, null, startPoint, facingLeft, stationArea != area)
             }
             stations.firstOrNull { it.second.roomId == roomId }?.let { (i, s) ->
                 return MakerPlayPlan(roomId, area, i, s.roomId, null)
@@ -78,7 +96,10 @@ object MakerPlayDoor {
     private const val DOOR_SIZE = 12
 
     /** Copy of [exportedRom] with the door added, and the door (its [RomParser.DoorEntry.doorDefPtr] set). */
-    fun install(exportedRom: ByteArray, roomId: Int, startPoint: Pair<Int, Int>): Pair<ByteArray, RomParser.DoorEntry> {
+    fun install(
+        exportedRom: ByteArray, roomId: Int, startPoint: Pair<Int, Int>,
+        facingLeft: Boolean = false, areaChange: Boolean = false,
+    ): Pair<ByteArray, RomParser.DoorEntry> {
         val header = if (exportedRom.size % 0x8000 == 0x200) 0x200 else 0
         val rom = exportedRom.copyOf()
         val bank = (header + BANK83_PC) until (header + BANK83_PC + 0x8000)
@@ -89,17 +110,28 @@ object MakerPlayDoor {
         val pc = start + 8
         val screenX = startPoint.first / 16
         val screenY = startPoint.second / 16
-        // Destination room, bitflag 0 (same area), direction 0 (right), no door cap, start screen,
-        // default spawn distance (0x8000), no door ASM.
-        val bytes = intArrayOf(roomId and 0xFF, (roomId shr 8) and 0xFF, 0x00, 0x00, 0x00, 0x00, screenX, screenY, 0x00, 0x80, 0x00, 0x00)
+        // Destination room, bitflag (0x40 = area change), direction (0 right, 1 left: Samus faces the way she
+        // moves), no door cap, start screen, default spawn distance (0x8000), no door ASM.
+        val flags = if (areaChange) 0x40 else 0x00
+        val direction = if (facingLeft) 0x01 else 0x00
+        val bytes = intArrayOf(roomId and 0xFF, (roomId shr 8) and 0xFF, flags, direction, 0x00, 0x00, screenX, screenY, 0x00, 0x80, 0x00, 0x00)
         bytes.forEachIndexed { i, v -> rom[pc + i] = v.toByte() }
         val ptr = 0x8000 + (pc - header - BANK83_PC)
-        return rom to RomParser.DoorEntry(roomId, 0, 0, screenX, screenY, 0x8000, 0, ptr)
+        return rom to RomParser.DoorEntry(roomId, flags or (direction shl 8), 0, screenX, screenY, 0x8000, 0, ptr)
     }
 
     /** Writes the play-test copy of [exported] next to it and returns its path and entry door. */
     fun writePlayCopy(exported: java.io.File, roomId: Int, startPoint: Pair<Int, Int>): Pair<java.io.File, RomParser.DoorEntry> {
         val (rom, door) = install(exported.readBytes(), roomId, startPoint)
+        val copy = java.io.File(exported.parentFile, exported.nameWithoutExtension + "-maker-play." + exported.extension)
+        copy.writeBytes(rom)
+        return copy to door
+    }
+
+    /** [writePlayCopy] for [plan]'s start point, facing and area change. */
+    fun writePlayCopy(exported: java.io.File, plan: MakerPlayPlan): Pair<java.io.File, RomParser.DoorEntry> {
+        val start = requireNotNull(plan.startPoint) { "The plan has no start point" }
+        val (rom, door) = install(exported.readBytes(), plan.roomId, start, plan.facingLeft, plan.areaChange)
         val copy = java.io.File(exported.parentFile, exported.nameWithoutExtension + "-maker-play." + exported.extension)
         copy.writeBytes(rom)
         return copy to door
@@ -162,6 +194,13 @@ class MakerPlayLauncher(
             log("door 0x${door.doorDefPtr.toString(16)} -> room 0x${read16(ROOM).toString(16)} samus=(${read16(SAMUS_X)},${read16(SAMUS_Y)})")
             val start = plan.startPoint?.let { (x, y) -> MakerPlayPlan.startPixel(x, y) }
             if (placeSamus) (start ?: MakerPlayPlan.arrivalPoint(door))?.let { (x, y) -> write16(SAMUS_X, x); write16(SAMUS_Y, y) }
+            // At a Start point Samus stands facing its way (she'd otherwise keep the station's arrival pose).
+            if (placeSamus && start != null) {
+                val pose = if (plan.facingLeft) POSE_STAND_LEFT else POSE_STAND_RIGHT
+                val direction = if (plan.facingLeft) DIRECTION_LEFT else DIRECTION_RIGHT
+                for (a in listOf(SAMUS_POSE, SAMUS_PREVIOUS_POSE)) write16(a, pose)
+                for (a in listOf(SAMUS_POSE_DIRECTION, SAMUS_PREVIOUS_POSE_DIRECTION)) write16(a, direction)
+            }
         }
         log("room state header \$8F:${read16(ROOM_STATE).toString(16)} events=${read16(0xD820).toString(16)}/${read16(0xD822).toString(16)}")
         val room = read16(ROOM)
@@ -186,6 +225,14 @@ class MakerPlayLauncher(
             0x09BA to 0x4000, 0x09BC to 0x0010, 0x09BE to 0x0020,
         )
         const val POSE_SHIP_LANDING = 0x9B
+        /** $0A1E/$0A22: low byte = facing (4 right, 8 left), high byte = movement type (0 standing). */
+        const val SAMUS_POSE_DIRECTION = 0x0A1E
+        const val SAMUS_PREVIOUS_POSE = 0x0A20
+        const val SAMUS_PREVIOUS_POSE_DIRECTION = 0x0A22
+        const val POSE_STAND_RIGHT = 0x01
+        const val POSE_STAND_LEFT = 0x02
+        const val DIRECTION_RIGHT = 0x0004
+        const val DIRECTION_LEFT = 0x0008
         const val STATE_TITLE = 0x01
         const val STATE_LOAD_GAME = 0x06
         const val STATE_GAMEPLAY = 0x08
