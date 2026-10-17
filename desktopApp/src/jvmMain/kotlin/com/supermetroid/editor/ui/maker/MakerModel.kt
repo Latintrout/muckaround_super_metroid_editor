@@ -29,6 +29,7 @@ enum class MakerCategory(val label: String, val icon: String, val color: Color, 
     ITEMS("Items", MakerIcons.ITEMS, MakerFixedColors.items, ""),
     ENEMIES("Enemies", MakerIcons.ENEMIES, MakerFixedColors.enemies, "Only enemies whose graphics this room already loads can be placed."),
     DECOR("Decor", MakerIcons.DECOR, MakerFixedColors.decor, ""),
+    STATIONS("Stations", MakerIcons.STATIONS, MakerFixedColors.stations, "Station patterns load with the project."),
 }
 
 /** Something that can be placed. [hint] says what it does in-game, in a few words. */
@@ -63,14 +64,25 @@ fun makerPartsFor(category: MakerCategory, editorState: EditorState): List<Maker
         SHARED_TERRAIN.forEach { (t, hint) -> add(MakerPart.Tile(t.first, t.second, hint, category, t.third)) }
     }
     MakerCategory.HAZARDS -> listOf(MakerPart.Tile("spikes", "Spikes", "hurts on touch", category, 86))
-    MakerCategory.DOORS -> editorState.project.patterns
-        .filter { it.builtIn && it.id.startsWith("builtin_") }
+    MakerCategory.DOORS, MakerCategory.STATIONS -> editorState.project.patterns
+        .filter { it.builtIn && it.id.startsWith("builtin_") && isDoorPattern(it.id) == (category == MakerCategory.DOORS) }
         .sortedBy { it.name }
-        .map { MakerPart.Pattern(it.id, it.name, doorHint(it.name), category, it.id) }
+        .map { MakerPart.Pattern(it.id, it.name, if (category == MakerCategory.DOORS) doorHint(it.name) else stationHint(it.id), category, it.id) }
     MakerCategory.ITEMS -> RomParser.ITEM_DEFS.map { MakerPart.Item("item-${it.visibleId}", it.name, ITEM_HINTS[it.name] ?: "upgrade", it.visibleId) }
     MakerCategory.ENEMIES -> editorState.workingEnemies.map { it.id }.distinct()
         .map { MakerPart.Enemy("enemy-$it", RomParser.enemyName(it), "loaded in this room", it) }
     MakerCategory.DECOR -> listOf(MakerPart.AnyTile)
+}
+
+/** Built-in patterns that are doors or gates; the rest (stations, refills, statues) go under Stations. */
+fun isDoorPattern(patternId: String): Boolean = "door" in patternId || "gate" in patternId
+
+private fun stationHint(id: String): String = when {
+    "save" in id -> "saves the game"
+    "energy_refill" in id -> "refills energy"
+    "missile_refill" in id -> "refills ammo"
+    "chozo" in id -> "statue"
+    else -> "station"
 }
 
 private fun doorHint(name: String): String {

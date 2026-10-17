@@ -95,7 +95,7 @@ class MakerFeedbackTest {
 
         // 2. Items: pick the Items tab and the first card, then click and drag-paint on the room.
         scene.click(Offset(146f, 204f)); scene.frames(5) // Items tab
-        scene.click(Offset(168f, 380f)); scene.frames(5) // first item card (Energy Tank)
+        scene.click(Offset(168f, 442f)); scene.frames(5) // first item card (Energy Tank)
         val before = editor.workingPlms.size
         scene.click(pointOf(62, 60))
         results["paint click places an item"] = editor.workingPlms.any { it.x == 62 && it.y == 60 && editor.isEditorItemPlm(it.id) }
@@ -106,7 +106,7 @@ class MakerFeedbackTest {
 
         // 3. Library drag-and-drop: drag the second item card onto block (70, 62).
         val dropAt = pointOf(70, 62)
-        scene.drag(Offset(310f, 380f), dropAt, steps = 12)
+        scene.drag(Offset(310f, 442f), dropAt, steps = 12)
         println("[FB] after card drop: near (70,62) = ${editor.workingPlms.filter { kotlin.math.abs(it.x - 70) <= 4 && kotlin.math.abs(it.y - 62) <= 4 }}")
         results["drag a card onto the room places it there"] = editor.workingPlms.any { it.x == 70 && it.y == 62 && editor.isEditorItemPlm(it.id) }
         shot("feedback-items-placed")
@@ -117,6 +117,25 @@ class MakerFeedbackTest {
         scene.drag(pointOf(62, 60), pointOf(62, 63))
         results["select drag moves an item"] = editor.workingPlms.any { it.id == moved.id && it.x == 62 && it.y == 63 } &&
             editor.workingPlms.none { it.x == 62 && it.y == 60 && it.id == moved.id }
+        editor.undo(); scene.frames(3)
+        results["one undo puts a moved item back"] = editor.workingPlms.any { it.id == moved.id && it.x == 62 && it.y == 60 } &&
+            editor.workingPlms.none { it.id == moved.id && it.x == 62 && it.y == 63 }
+        editor.redo(); scene.frames(3)
+        results["one redo moves it again"] = editor.workingPlms.any { it.id == moved.id && it.x == 62 && it.y == 63 } &&
+            editor.workingPlms.none { it.id == moved.id && it.x == 62 && it.y == 60 }
+
+        // Doors holds only doors/gates; stations, refills and statues have their own category; all show real tiles.
+        editor.seedBuiltInPatterns(parser)
+        val doors = makerPartsFor(MakerCategory.DOORS, editor)
+        val stations = makerPartsFor(MakerCategory.STATIONS, editor)
+        println("[FB] doors=${doors.map { it.name }} stations=${stations.map { it.name }}")
+        results["doors category holds only doors and gates"] = doors.isNotEmpty() && doors.all { isDoorPattern(it.id) }
+        results["stations category holds the save station, refills and statue"] =
+            setOf("builtin_save_station", "builtin_energy_refill", "builtin_missile_refill", "builtin_chozo_statue").all { id -> stations.any { it.id == id } }
+        val noPreview = (doors + stations).filterIsInstance<MakerPart.Pattern>().filter { part ->
+            editor.project.patterns.first { it.id == part.patternId }.let { com.supermetroid.editor.ui.renderPatternThumbnail(it, editor.tileGraphics) } == null
+        }.map { it.name }
+        results["every door/station card has a real tile preview (missing: $noPreview)"] = noPreview.isEmpty()
 
         // 5. Every item type places (the same call the Maker makes).
         val failed = RomParser.ITEM_DEFS.withIndex().filterNot { (i, def) ->
@@ -128,7 +147,7 @@ class MakerFeedbackTest {
         // 6. Terrain/hazard/door cards paint with a click (canvas paint path).
         for ((tab, tabName) in listOf(Offset(146f, 142f) to "Terrain", Offset(240f, 142f) to "Hazards", Offset(334f, 142f) to "Doors")) {
             scene.click(tab); scene.frames(5)
-            scene.click(Offset(168f, 380f)); scene.frames(5)
+            scene.click(Offset(168f, 442f)); scene.frames(5)
             val bx = 50; val by = if (tabName == "Doors") 48 else 58
             val beforeWord = editor.readBlockWord(bx, by); val beforePlms = editor.workingPlms.size
             scene.click(pointOf(bx, by))
@@ -136,6 +155,8 @@ class MakerFeedbackTest {
             results["$tabName first card paints with a click"] = changed
             println("[FB] $tabName: word ${"%04x".format(beforeWord)} -> ${"%04x".format(editor.readBlockWord(bx, by))}, plms $beforePlms -> ${editor.workingPlms.size} status='${editor.statusMessage}'")
         }
+        scene.click(Offset(146f, 266f)); scene.frames(8) // Stations tab
+        shot("feedback-stations")
         shot("feedback-final")
         scene.close()
         results.forEach { (k, v) -> println("[FB] ${if (v) "PASS" else "FAIL"} $k") }

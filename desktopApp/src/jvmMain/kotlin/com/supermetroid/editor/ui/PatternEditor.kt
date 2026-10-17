@@ -1210,7 +1210,7 @@ fun PatternThumbnailList(
     }
 }
 
-private fun renderPatternThumbnail(
+internal fun renderPatternThumbnail(
     pattern: TilePattern,
     tg: TileGraphics?
 ): BufferedImage? {

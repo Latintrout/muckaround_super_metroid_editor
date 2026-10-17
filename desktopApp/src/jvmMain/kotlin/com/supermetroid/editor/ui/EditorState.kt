@@ -10013,7 +10013,22 @@ class EditorState(
 
     // ─── Undo / Redo ────────────────────────────────────────────
 
+    /** Operations that undo/redo together with the one recorded just before them (e.g. a Maker move = remove + add). */
+    private val joinedWithPrevious: MutableSet<EditOperation> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+
+    /** Make the last recorded operation undo and redo as one step with the operation before it. */
+    fun joinLastUndoStepWithPrevious() {
+        if (undoStack.size >= 2) joinedWithPrevious.add(undoStack.last())
+    }
+
     fun undo(): Boolean {
+        val top = undoStack.lastOrNull()
+        val ok = undoOne()
+        if (ok && top != null && top in joinedWithPrevious) undoOne()
+        return ok
+    }
+
+    private fun undoOne(): Boolean {
         if (undoStack.isEmpty()) return false
         val pending = undoStack.last()
         if (hasManagedLayouts() && pending.edits.isNotEmpty() && pending !in managedPlmUndo) {
@@ -10109,6 +10124,12 @@ class EditorState(
     }
 
     fun redo(): Boolean {
+        val ok = redoOne()
+        if (ok && redoStack.lastOrNull()?.let { it in joinedWithPrevious } == true) redoOne()
+        return ok
+    }
+
+    private fun redoOne(): Boolean {
         if (redoStack.isEmpty()) return false
         val pending = redoStack.last()
         if (hasManagedEnemies() && (pending.enemyAdds.isNotEmpty() || pending.enemyRemoves.isNotEmpty() || pending.enemyUpdates.isNotEmpty())) {

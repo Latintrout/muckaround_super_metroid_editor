@@ -69,6 +69,7 @@ object MakerFixedColors {
     val items = Color(0xFFE77D73)
     val enemies = Color(0xFFA78BC3)
     val decor = Color(0xFFF0B79C)
+    val stations = Color(0xFF5FA7A0)
     val play = Color(0xFF8FB7A0)
     val playDeep = Color(0xFF527F70)
     val onPlay = Color(0xFF18302A)

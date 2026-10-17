@@ -204,7 +204,7 @@ private fun MakerScreenContent(
     }
 
     val parts = remember(category, editorState.editVersion, editorState.patternVersion, selectedRoom) {
-        if (category == MakerCategory.DOORS) editorState.seedBuiltInPatterns(romParser)
+        if (category == MakerCategory.DOORS || category == MakerCategory.STATIONS) editorState.seedBuiltInPatterns(romParser)
         makerPartsFor(category, editorState)
     }
     val shownParts = if (search.isBlank()) parts else parts.filter { it.name.contains(search.trim(), ignoreCase = true) }
@@ -257,8 +257,11 @@ private fun MakerScreenContent(
     fun movePlaced(obj: Any, to: Pair<Int, Int>) {
         when (obj) {
             is RomParser.PlmEntry -> {
+                val before = editorState.undoStack.size
                 editorState.removePlm(obj.x, obj.y, obj.id, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
                 editorState.addPlm(obj.id, to.first, to.second, obj.param, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
+                // One Undo reverses the whole move.
+                if (editorState.undoStack.size == before + 2) editorState.joinLastUndoStepWithPrevious()
                 message = "Moved ${RomParser.plmDisplayName(obj.id)} to block ${to.first}, ${to.second}"
             }
             is RomParser.EnemyEntry -> {
@@ -803,6 +806,7 @@ private fun PartsPanel(
                             Text(c.label, color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -861,12 +865,16 @@ private fun PartPreview(part: MakerPart, editorState: EditorState, modifier: Mod
             is MakerPart.Item -> ROOM_ITEM_SPRITE_COORDS[part.name]?.let { c ->
                 ItemSpriteSheetCache.get()?.getSubimage(c.x, c.y, 16, 16)?.toComposeImageBitmap()
             }
+            // Doors and stations: the pattern's real metatiles from this room's tileset.
+            is MakerPart.Pattern -> editorState.project.patterns.firstOrNull { it.id == part.patternId }
+                ?.let { renderPatternThumbnail(it, editorState.tileGraphics) }?.toComposeImageBitmap()
             else -> null
         }
     }
     Box(modifier.background(Color(0xFF0C0C18), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
         if (bitmap != null) {
-            Image(bitmap, contentDescription = part.name, filterQuality = FilterQuality.None, modifier = Modifier.size(48.dp))
+            Image(bitmap, contentDescription = part.name, filterQuality = FilterQuality.None, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                modifier = Modifier.fillMaxHeight().padding(4.dp))
         } else {
             MakerIcon(part.category.icon, part.category.color, 30.dp)
         }

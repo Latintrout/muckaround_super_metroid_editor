@@ -62,6 +62,7 @@ object MakerIcons {
     const val DOORS = "M6 3h12v18H6zM14 12h.5"
     const val ITEMS = "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"
     const val ENEMIES = "M5 11a7 7 0 0114 0v6l-2-1-2 1-2-1-2 1-2-1-2 1zM9 10h.5M14.5 10h.5"
+    const val STATIONS = "M5 20h14M7 20V9h10v11M9 9V5h6v4M10 14h4"
     const val DECOR = "M12 21V11M12 11c0-4 3-7 7-7 0 4-3 7-7 7zM12 14c0-3-2.5-5-6-5 0 3 2.5 5 6 5z"
 }
 
