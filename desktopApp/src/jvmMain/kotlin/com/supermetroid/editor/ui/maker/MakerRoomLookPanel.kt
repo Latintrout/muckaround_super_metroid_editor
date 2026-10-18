@@ -65,6 +65,8 @@ fun MakerRoomLookPanel(
     roomNames: Map<Int, String>,
     onApplied: (String) -> Unit,
     onClose: () -> Unit,
+    /** After a background change: rebuild the workspace so the room redraws. */
+    onBackgroundChanged: () -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     // Only looks that passed the in-game check (boot, run 10 s) are offered.
@@ -110,6 +112,38 @@ fun MakerRoomLookPanel(
                     }
                 }
             }
+            // Backgrounds: rooms you made can use any background the game's rooms with this tileset use.
+            val roomId = editorState.currentRoomId
+            if (editorState.project.newRoomForPreviewId(roomId) != null) {
+                val projectIds = remember(editorState.project.newRooms.size) { editorState.project.newRooms.map { it.previewRoomId }.toSet() }
+                val choices = remember(parser, editorState.currentTilesetId) { makerBackgroundChoices(parser, editorState.currentTilesetId, projectIds).take(7) }
+                val bgThumbs = remember(choices) { choices.associateWith { backgroundThumbnail(parser, it) } }
+                val current = editorState.editVersion.let { editorState.makerBackground(roomId)?.bgDataPtr ?: 0 }
+                SectionLabel("Background")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    @Composable
+                    fun BgCard(label: String, on: Boolean, thumb: ImageBitmap?, pick: () -> Unit) {
+                        Column(
+                            Modifier.width(118.dp).background(p.raised, RoundedCornerShape(8.dp)).border(2.dp, if (on) p.accentDeep else p.border, RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button, onClick = pick).padding(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Box(Modifier.fillMaxWidth().height(62.dp).background(Color(0xFF0C0C18), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
+                                thumb?.let { Image(it, contentDescription = label, filterQuality = FilterQuality.None, modifier = Modifier.fillMaxSize()) }
+                            }
+                            Text(label, color = p.text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    BgCard("Plain", current == 0, null) {
+                        onApplied(editorState.setMakerBackground(roomId, null) ?: "Background: plain".also { onBackgroundChanged() })
+                    }
+                    choices.forEach { bg ->
+                        BgCard(roomNames[bg.exampleRoomId] ?: "Background", current == bg.bgDataPtr, bgThumbs[bg]) {
+                            onApplied(editorState.setMakerBackground(roomId, bg) ?: "Background from ${roomNames[bg.exampleRoomId] ?: "the game"}".also { onBackgroundChanged() })
+                        }
+                    }
+                }
+            }
             SectionLabel("Tileset")
             LazyVerticalGrid(GridCells.Adaptive(150.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(tilesets) { ts ->
@@ -134,6 +168,18 @@ fun MakerRoomLookPanel(
         }
     }
 }
+
+/** The first screen of [bg], as its example room draws it. */
+private fun backgroundThumbnail(parser: RomParser, bg: MakerBackground): ImageBitmap? = runCatching {
+    val room = parser.readRoomHeader(bg.exampleRoomId) ?: return null
+    val tg = TileGraphics(parser)
+    if (!tg.loadTileset(room.tileset)) return null
+    val pixels = com.supermetroid.editor.rom.MapRenderer(parser, tg).renderLayer2(room) ?: return null
+    val w = room.width * 256
+    val img = BufferedImage(256, 224, BufferedImage.TYPE_INT_ARGB)
+    for (y in 0 until 224) for (x in 0 until 256) img.setRGB(x, y, pixels[y * w + x] or (0xFF shl 24))
+    img.toComposeImageBitmap()
+}.getOrNull()
 
 /** A 6×4 sample of the tileset's most-used tiles, drawn from the ROM. */
 private fun tilesetThumbnail(parser: RomParser, library: MakerLibrary, tileset: Int): ImageBitmap? {

@@ -140,5 +140,17 @@ class MakerRoomsUiTest {
         assertTrue((0 until editor.workingBlocksWide).count { x -> ((editor.readBlockWord(x, 20) shr 12) and 0xF) != 0x8 } > 10, "open middle")
         assertTrue(onAllNodesWithText("${editor.workingBlocksWide / 16} × ${editor.workingBlocksTall / 16} screens").fetchSemanticsNodes().isNotEmpty())
         onNodeWithText("Done").performClick(); waitForIdle()
+
+        // Room look › Background (rooms you made): pick the first game background, then back to Plain.
+        onNodeWithText("Room look: tileset & effects").performClick(); waitForIdle()
+        onNodeWithText("Background", ignoreCase = true).assertExists()
+        val firstBg = makerBackgroundChoices(parser, editor.currentTilesetId, editor.project.newRooms.map { it.previewRoomId }.toSet()).first()
+        val label = rooms.first { it.getRoomIdAsInt() == firstBg.exampleRoomId }.name
+        onAllNodesWithText(label).onFirst().performClick(); waitForIdle()
+        assertEquals(firstBg.bgDataPtr, editor.makerBackground(shaft.previewRoomId)?.bgDataPtr)
+        shot("room-look-background")
+        onNodeWithText("Plain").performClick(); waitForIdle()
+        assertEquals(null, editor.makerBackground(shaft.previewRoomId))
+        onAllNodesWithText("Done").onFirst().performClick(); waitForIdle()
     }
 }

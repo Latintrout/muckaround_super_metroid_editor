@@ -417,6 +417,9 @@ class EditorState(
         _roomEditOrder[currentRoomId] = ++_editCounter
     }
 
+    /** A project-level change made outside EditorState (e.g. a Maker room's background): save it and redraw. */
+    fun markProjectChanged() { dirty = true; editVersion++ }
+
     private var asmModeRevision by mutableStateOf(0)
     internal val asmNavigationEnabled: Boolean get() {
         asmModeRevision // Nested project flags are not Compose state; mode changes must invalidate links.

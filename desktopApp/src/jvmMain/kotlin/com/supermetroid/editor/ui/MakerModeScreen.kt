@@ -847,7 +847,7 @@ private fun MakerScreenContent(
     }, onClose = { deleteOpen = false })
     if (roomLookOpen && library != null && romParser != null) {
         com.supermetroid.editor.ui.maker.MakerRoomLookPanel(editorState, romParser, library, rooms.associate { it.getRoomIdAsInt() to it.name },
-            onApplied = { message = it }, onClose = { roomLookOpen = false })
+            onApplied = { message = it }, onClose = { roomLookOpen = false }, onBackgroundChanged = onWorkspaceChanged)
     }
     dragPart?.let { part ->
         val local = rootCoords[0]?.windowToLocal(dragPos) ?: dragPos

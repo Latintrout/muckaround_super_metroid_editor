@@ -11,6 +11,9 @@ import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.ProjectFileService
 import com.supermetroid.editor.ui.ProjectLifecycle
 import com.supermetroid.editor.ui.maker.applyMakerNewRoomLook
+import com.supermetroid.editor.ui.maker.makerBackground
+import com.supermetroid.editor.ui.maker.makerBackgroundChoices
+import com.supermetroid.editor.ui.maker.setMakerBackground
 import com.supermetroid.editor.ui.maker.planMakerNewRoom
 import com.supermetroid.editor.ui.maker.readyChecks
 import com.supermetroid.editor.ui.maker.startPointCheck
@@ -93,6 +96,19 @@ class MakerStartPointTest {
         assertEquals(0x08, r.facing, "Samus faces left")
     }
 
+    /** Opt-in: a Maker room given one of the game's backgrounds (Room look) shows it in game. */
+    @Test
+    fun `a maker room shows a game background`() {
+        playMakerRoom("background", sourceRoomId = 0x91F8, expectPlainBackground = false) { editor, parser, roomId ->
+            val choices = makerBackgroundChoices(parser, editor.currentTilesetId, setOf(roomId))
+            println("[START] background choices: ${choices.map { "%04X".format(it.bgDataPtr) to "%04X".format(it.exampleRoomId) }}")
+            val pick = choices[(System.getenv("MAKER_BG_INDEX") ?: "0").toInt().coerceIn(choices.indices)]
+            assertNull(editor.setMakerBackground(roomId, pick))
+            assertEquals(pick.bgDataPtr, editor.makerBackground(roomId)?.bgDataPtr)
+            MakerStartPoint(20, editor.workingBlocksTall - 4)
+        } ?: return
+    }
+
     @Test
     fun `start point placement checks`() {
         // A 10x10 room: walls at x=0, floor at y=9, a pillar at x=5 for y in 3..8.
@@ -113,7 +129,7 @@ class MakerStartPointTest {
 
     /** Makes an empty 2x1 room next to [sourceRoomId] as New room does, sets its Start point via [setup], exports and plays it. */
     private fun playMakerRoom(
-        tag: String, sourceRoomId: Int, bootArea: Int? = null,
+        tag: String, sourceRoomId: Int, bootArea: Int? = null, expectPlainBackground: Boolean = true,
         setup: (EditorState, RomParser, Int) -> MakerStartPoint,
     ): PlayResult? {
         val baseRom = File(System.getenv("V1_ROM") ?: "")
@@ -178,7 +194,8 @@ class MakerStartPointTest {
                 val sky = (48 until 120 step 2).flatMap { py -> (40 until 216 step 2).map { px -> frame.getRGB(px, py) } }
                 val share = sky.groupingBy { it }.eachCount().maxOf { it.value } / sky.size.toDouble()
                 println("[START] $tag plain-sky share ${"%.2f".format(share)}")
-                assertTrue(share > 0.9, "the room's inside should be plain, not patterned (top colour share $share)")
+                if (expectPlainBackground) assertTrue(share > 0.9, "the room's inside should be plain, not patterned (top colour share $share)")
+                else assertTrue(share < 0.8, "the room should show its background (top colour share $share)")
                 // Samus answers the controls: hold Right (or Left) and she moves.
                 val dirButton = List(12) { if (it == (if (start.facingLeft) 6 else 7)) 1 else 0 }
                 b.step(EmulatorInput(buttons = dirButton, repeat = 30, includeFrame = false))

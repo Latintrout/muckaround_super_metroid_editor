@@ -4,6 +4,7 @@ import com.supermetroid.editor.data.TILE_EDIT_LAYER_2
 import com.supermetroid.editor.data.TileEdit
 import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.rom.parseLibraryBackground
 import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.NewRoomCreationRequest
 import com.supermetroid.editor.ui.effectiveMapStationData
@@ -259,5 +260,45 @@ fun EditorState.resizeMakerRoom(parser: RomParser, side: MakerSide, grow: Boolea
         val change = (project.getOrCreateRoom(roomId).effectiveHeaderChange ?: com.supermetroid.editor.data.RoomHeaderChange())
         setRoomHeaderChange(change.copy(mapX = mapX, mapY = mapY))
     }
+    return null
+}
+
+/** A background the game uses: a library background program and how layer 2 scrolls with it. */
+data class MakerBackground(val bgDataPtr: Int, val bgScrolling: Int, val exampleRoomId: Int)
+
+/** Backgrounds vanilla rooms with [tileset] use (one per background program), with a room that shows each. */
+fun makerBackgroundChoices(parser: RomParser, tileset: Int, projectRoomIds: Set<Int> = emptySet()): List<MakerBackground> =
+    parser.roomCatalog.rooms.asSequence()
+        .map { it.getRoomIdAsInt() }.filter { it !in projectRoomIds }
+        .mapNotNull { id -> parser.readRoomHeader(id)?.takeIf { it.tileset == tileset && it.bgDataPtr in 0x8000..0xFFFE }?.let { MakerBackground(it.bgDataPtr, it.bgScrolling, id) } }
+        // Whole backgrounds only: programs that pick their tilemap by the incoming door (our play-test door
+        // isn't one of the game's) are left out.
+        .filter { bg ->
+            runCatching {
+                val program = parser.parseLibraryBackground(bg.bgDataPtr) ?: return@runCatching false
+                program.commands.none { it.type == com.supermetroid.editor.rom.LibraryBackgroundCommandType.DOOR_DEPENDENT_TRANSFER } &&
+                    parser.readBgTilemapLayout(bg.bgDataPtr) != null
+            }.getOrDefault(false)
+        }
+        .distinctBy { it.bgDataPtr }
+        .toList()
+
+/** The background of a room you made, or null for a plain one (layer 2 in its own layout). */
+fun EditorState.makerBackground(roomId: Int): MakerBackground? =
+    project.newRoomForPreviewId(roomId)?.initialState?.takeIf { it.bgDataPtr != 0 }?.let { MakerBackground(it.bgDataPtr, it.bgScrolling, 0) }
+
+/**
+ * Gives a room you made [background] (null: plain). Only project rooms can change background here;
+ * the caller rebuilds the workspace afterwards. Returns an error to show, or null.
+ */
+fun EditorState.setMakerBackground(roomId: Int, background: MakerBackground?): String? {
+    val room = project.newRoomForPreviewId(roomId) ?: return "Backgrounds can be changed for rooms you made. Use Advanced mode for the game's rooms."
+    val state = room.initialState
+    val ptr = background?.bgDataPtr ?: 0
+    val scroll = background?.bgScrolling ?: 0
+    if (state.bgDataPtr == ptr && state.bgScrolling == scroll) return null
+    state.bgDataPtr = ptr
+    state.bgScrolling = scroll
+    markProjectChanged()
     return null
 }
