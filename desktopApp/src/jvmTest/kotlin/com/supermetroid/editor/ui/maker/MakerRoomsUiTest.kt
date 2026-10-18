@@ -116,5 +116,29 @@ class MakerRoomsUiTest {
         val copy = editor.project.newRooms.single()
         val landing = parser.readRoomHeader(0x91F8)!!
         assertEquals(landing.width to landing.height, copy.header.width to copy.header.height)
+
+        // A Shaft from its template chip (1×3 suggested), then Resize: + on the right makes it 2×3.
+        waitLoaded(copy.previewRoomId)
+        onNodeWithText("New room").performClick(); waitForIdle()
+        onNodeWithText("Shaft").performClick(); waitForIdle()
+        shot("new-room-templates")
+        onNodeWithText("Make room").performClick(); waitForIdle()
+        val shaft = editor.project.newRooms.last()
+        assertEquals(1 to 3, shaft.header.width to shaft.header.height)
+        waitLoaded(shaft.previewRoomId)
+        waitUntil(10_000) { ((editor.readBlockWord(1, 20) shr 12) and 0xF) == 0x8 } // the shaft's thick wall
+        onNodeWithText("Resize room").performClick(); waitForIdle()
+        // Top, Left, Right, Bottom: the first side with free map space grows (others say what's in the way).
+        val blocks0 = editor.workingBlocksWide * editor.workingBlocksTall
+        for (i in listOf(2, 3, 1, 0)) {
+            onAllNodesWithText("+")[i].performClick(); waitForIdle()
+            if (editor.workingBlocksWide * editor.workingBlocksTall > blocks0) break
+        }
+        shot("resize-panel")
+        assertTrue(editor.workingBlocksWide * editor.workingBlocksTall > blocks0, "a row or column of screens added")
+        // The new screens carry on the shaft: the middle of the room stays open.
+        assertTrue((0 until editor.workingBlocksWide).count { x -> ((editor.readBlockWord(x, 20) shr 12) and 0xF) != 0x8 } > 10, "open middle")
+        assertTrue(onAllNodesWithText("${editor.workingBlocksWide / 16} × ${editor.workingBlocksTall / 16} screens").fetchSemanticsNodes().isNotEmpty())
+        onNodeWithText("Done").performClick(); waitForIdle()
     }
 }

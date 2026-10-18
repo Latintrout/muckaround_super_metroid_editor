@@ -97,6 +97,22 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier:
     }
 }
 
+/** A tiny drawing of [template] at [size] screens: solid blocks in the area-neutral terrain colour. */
+@Composable
+private fun TemplatePreview(template: MakerNewRoomStart, screens: Pair<Int, Int>) {
+    val w = screens.first * 16; val h = screens.second * 16
+    val solid = remember(template, screens) { makerTemplateSolid(template, w, h, seed = 7) }
+    val scale = minOf(56f / w, 40f / h)
+    androidx.compose.foundation.Canvas(Modifier.size(56.dp, 40.dp)) {
+        val px = scale * density
+        val ox = (size.width - w * px) / 2; val oy = (size.height - h * px) / 2
+        drawRect(Color(0xFF0C0C18), androidx.compose.ui.geometry.Offset(ox, oy), androidx.compose.ui.geometry.Size(w * px, h * px))
+        for (y in 0 until h) for (x in 0 until w) if (solid[y * w + x]) {
+            drawRect(MakerFixedColors.terrain, androidx.compose.ui.geometry.Offset(ox + x * px, oy + y * px), androidx.compose.ui.geometry.Size(px + 0.5f, px + 0.5f))
+        }
+    }
+}
+
 /** A room-shaped preview: [w] × [h] screens drawn as cells. */
 @Composable
 private fun SizeShape(w: Int, h: Int) {
@@ -130,11 +146,14 @@ fun MakerNewRoomPanel(
         NameField(name, { name = it; error = null }, ::create)
         SectionLabel("Start from")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("Empty room", start == MakerNewRoomStart.EMPTY, { start = MakerNewRoomStart.EMPTY }, Modifier.weight(1f))
-            Chip(if (currentRoomName != null) "Copy of $currentRoomName" else "Copy of this room", start == MakerNewRoomStart.COPY,
-                { if (currentRoomName != null) start = MakerNewRoomStart.COPY }, Modifier.weight(1f))
+            MakerNewRoomStart.entries.filter { it.isTemplate }.forEach { t ->
+                Chip(t.label, start == t, { start = t; size = t.size }, Modifier.weight(1f), preview = { TemplatePreview(t, t.size) })
+            }
         }
-        if (start == MakerNewRoomStart.EMPTY) {
+        Chip(if (currentRoomName != null) "Copy of $currentRoomName" else "Copy of this room", start == MakerNewRoomStart.COPY,
+            { if (currentRoomName != null) start = MakerNewRoomStart.COPY }, Modifier.fillMaxWidth())
+        if (start.isTemplate) {
+            Text("${start.label}: ${start.hint}.", color = p.muted, fontSize = 13.sp)
             SectionLabel("Size (screens)")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
                 MAKER_ROOM_SIZES.forEach { s ->
@@ -186,6 +205,45 @@ fun MakerDeleteRoomPanel(roomName: String, onDelete: () -> String?, onClose: () 
             Spacer(Modifier.width(8.dp))
             MakerButton(onClick = { error = onDelete(); if (error == null) onClose() }, fill = MakerFixedColors.danger, onFill = Color.White) { fg ->
                 MakerIcon(MakerIcons.TRASH, fg, 18.dp); Text("Delete room", color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/**
+ * Resize: add or remove a screen on any side. Each press applies straight away; [onResize] returns an
+ * error to show, or null. [size] is the room's current size in screens.
+ */
+@Composable
+fun MakerResizeRoomPanel(size: Pair<Int, Int>, onResize: (MakerSide, Boolean) -> String?, onClose: () -> Unit) {
+    val p = LocalMakerPalette.current
+    var error by remember { mutableStateOf<String?>(null) }
+    @Composable
+    fun SideButtons(side: MakerSide) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            MakerButton(onClick = { error = onResize(side, false) }, height = 34.dp) { fg -> Text("−", color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            Text(side.label, color = p.muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            MakerButton(onClick = { error = onResize(side, true) }, height = 34.dp) { fg -> Text("+", color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        }
+    }
+    MakerCard("Resize room", "Add or remove a screen on any side. New screens carry on the floor and ceiling. This starts a fresh Undo history.", onClose) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SideButtons(MakerSide.TOP)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SideButtons(MakerSide.LEFT)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SizeShape(size.first.coerceAtMost(8), size.second.coerceAtMost(8))
+                    Text("${size.first} × ${size.second} screens", color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                SideButtons(MakerSide.RIGHT)
+            }
+            SideButtons(MakerSide.BOTTOM)
+        }
+        error?.let { Text(it, color = MakerFixedColors.danger, fontSize = 13.sp) }
+        Row {
+            Spacer(Modifier.weight(1f))
+            MakerButton(onClick = onClose, fill = MakerFixedColors.play, onFill = MakerFixedColors.onPlay) { fg ->
+                Text("Done", color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

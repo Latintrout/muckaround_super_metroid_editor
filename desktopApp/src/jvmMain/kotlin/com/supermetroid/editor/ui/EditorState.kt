@@ -7458,8 +7458,11 @@ class EditorState(
             .copy(width = newWidth, height = newHeight)
         setRoomHeaderChange(change)
 
-        // Clear tile edit history (no longer valid for new dimensions)
+        // Old tile edits can't be replayed onto the new size: replace them with one edit that turns the
+        // room's base layout, resized the same way, into what's in the room now. (Clearing them alone
+        // lost every earlier tile edit the next time the room loaded or the project was built.)
         currentOperations().clear()
+        rebasedTileEdits(newData, newWidth, newHeight)?.let { if (it.isNotEmpty()) currentOperations().add(EditOperation("Resize room", it)) }
         currentScrollChanges().clear()
         undoStack.clear()
         managedPlmUndo.clear()
@@ -7470,6 +7473,31 @@ class EditorState(
         editVersion++
         dirty = true
         return true
+    }
+
+    /**
+     * Tile edits (layer 1 with BTS, and embedded layer 2) from the room's base layout resized to
+     * [width] × [height] screens to [data]; null when the base layout can't be read.
+     */
+    private fun rebasedTileEdits(data: ByteArray, width: Int, height: Int): List<TileEdit>? {
+        val parser = currentRomParser ?: return null
+        val rom = parser.readRoomHeader(currentRoomId) ?: return null
+        val base = runCatching { resizeLevelData(parser.decompressLZ2(rom.levelDataPtr), rom.width, rom.height, width, height) }.getOrNull() ?: return null
+        val w = width * 16; val n = w * height * 16
+        fun word(d: ByteArray, o: Int) = if (o + 1 < d.size) (d[o].toInt() and 0xFF) or ((d[o + 1].toInt() and 0xFF) shl 8) else 0
+        fun byte(d: ByteArray, o: Int) = if (o < d.size) d[o].toInt() and 0xFF else 0
+        val edits = mutableListOf<TileEdit>()
+        for (i in 0 until n) {
+            val ow = word(base, 2 + i * 2); val nw = word(data, 2 + i * 2)
+            val ob = byte(base, 2 + n * 2 + i); val nb = byte(data, 2 + n * 2 + i)
+            if (ow != nw || ob != nb) edits += TileEdit(i % w, i / w, ow, nw, ob, nb)
+        }
+        val baseL2 = embeddedLayer2StartOffset(base, n); val dataL2 = embeddedLayer2StartOffset(data, n)
+        if (baseL2 != null && dataL2 != null) for (i in 0 until n) {
+            val ow = word(base, baseL2 + i * 2); val nw = word(data, dataL2 + i * 2)
+            if (ow != nw) edits += TileEdit(i % w, i / w, ow, nw, layer = TILE_EDIT_LAYER_2)
+        }
+        return edits
     }
 
     private fun resizeIncomingDoors(roomId: Int, parser: RomParser): List<Pair<Int, DoorChange>> = buildList {

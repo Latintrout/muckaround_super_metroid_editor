@@ -93,6 +93,7 @@ import com.supermetroid.editor.ui.maker.MakerTool
 import com.supermetroid.editor.ui.maker.SectionLabel
 import com.supermetroid.editor.ui.maker.blockTypeName
 import com.supermetroid.editor.ui.maker.makerHint
+import com.supermetroid.editor.ui.maker.resizeMakerRoom
 import com.supermetroid.editor.ui.maker.makerSelection
 import com.supermetroid.editor.ui.maker.selectBox
 import com.supermetroid.editor.ui.maker.copyBox
@@ -409,6 +410,7 @@ private fun MakerScreenContent(
         com.supermetroid.editor.ui.maker.applyMakerNewRoomLook(editorState, look)
     }
     var newRoomOpen by remember { mutableStateOf(false) }
+    var resizeOpen by remember { mutableStateOf(false) }
     // Select's right-click menu: the block and where the pointer was (canvas pixels).
     var blockMenu by remember { mutableStateOf<Pair<Pair<Int, Int>, androidx.compose.ui.geometry.Offset>?>(null) }
     var renameOpen by remember { mutableStateOf(false) }
@@ -815,11 +817,20 @@ private fun MakerScreenContent(
                 if (playing) PlayingHint() else if (themeState.appearance.showHintBar) HintBar(tool, activePart)
             }
             Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, controls, onAdvanced = onExit,
-                onRoomLook = if (library != null && romParser != null) ({ roomLookOpen = true }) else null)
+                onRoomLook = if (library != null && romParser != null) ({ roomLookOpen = true }) else null,
+                onResize = if (romParser != null) ({ resizeOpen = true }) else null)
         }
         StatusBar(editorState, message)
     }
     if (appearanceOpen) com.supermetroid.editor.ui.maker.MakerAppearancePanel(themeState) { appearanceOpen = false }
+    if (resizeOpen && romParser != null) com.supermetroid.editor.ui.maker.MakerResizeRoomPanel(
+        size = (editorState.workingBlocksWide / 16).coerceAtLeast(1) to (editorState.workingBlocksTall / 16).coerceAtLeast(1),
+        onResize = { side, grow ->
+            editorState.resizeMakerRoom(romParser, side, grow)
+                .also { if (it == null) { onWorkspaceChanged(); message = "${if (grow) "Added" else "Removed"} a screen on the ${side.label.lowercase()}" } }
+        },
+        onClose = { resizeOpen = false },
+    )
     if (newRoomOpen) com.supermetroid.editor.ui.maker.MakerNewRoomPanel(
         defaultName = "New room ${editorState.project.newRooms.size + 1}", currentRoomName = selectedRoom?.name,
         onCreate = ::newRoom, onClose = { newRoomOpen = false },
@@ -1285,6 +1296,7 @@ private fun HintBar(tool: MakerTool, part: MakerPart?) {
 private fun Inspector(
     editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?,
     controls: MapCanvasControls, onAdvanced: () -> Unit, onRoomLook: (() -> Unit)? = null,
+    onResize: (() -> Unit)? = null,
 ) {
     val p = LocalMakerPalette.current
     val docked = controls.dockedPanel
@@ -1336,6 +1348,9 @@ private fun Inspector(
                     "Doors" to "${editorState.doorEntries.size} out · $doorsIn lead in",
                 ), mono = setOf("Size"))
             }
+        }
+        if (onResize != null && room != null) MakerButton(onClick = onResize, modifier = Modifier.fillMaxWidth(), height = 40.dp) { fg ->
+            MakerIcon(MakerIcons.ROOM, fg, 18.dp); Text("Resize room", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
         if (onRoomLook != null) MakerButton(onClick = onRoomLook, modifier = Modifier.fillMaxWidth(), height = 40.dp) { fg ->
             MakerIcon(MakerIcons.THEME, fg, 18.dp); Text("Room look: tileset & effects", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
