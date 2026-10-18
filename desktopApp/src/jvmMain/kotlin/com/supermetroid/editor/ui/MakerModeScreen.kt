@@ -253,6 +253,9 @@ private fun MakerScreenContent(
     androidx.compose.runtime.SideEffect { controls.backdrop = backdrop }
     // Space held: drag with any tool to pan. panningNow: a pan drag is under way (closed-hand cursor).
     var spaceHeld by remember { mutableStateOf(false) }
+    // Pieces: Select takes a whole placed part (door, statue, station, enemy…) by default; unlocked, single tiles.
+    var piecesLocked by remember { mutableStateOf(true) }
+    val piecesLockedNow = androidx.compose.runtime.rememberUpdatedState(piecesLocked)
     var panningNow by remember { mutableStateOf(false) }
     var clip by remember { mutableStateOf<com.supermetroid.editor.ui.maker.MakerClip?>(null) }
     androidx.compose.runtime.SideEffect { controls.wheelZooms = true }
@@ -719,6 +722,10 @@ private fun MakerScreenContent(
                     }
                     e.key == Key.Escape && playing -> { stopAndEditHere(); true }
                     e.key == Key.R && playing -> { restartPlay(); true }
+                    !playing && !mod && e.key == Key.U -> {
+                        piecesLocked = !piecesLocked
+                        message = if (piecesLocked) "Pieces locked: Select takes whole parts" else "Pieces unlocked: Select takes single tiles"; true
+                    }
                     !playing && e.utf16CodePoint.toChar() == '?' -> { helpOpen = !helpOpen; true }
                     e.key == Key.F5 -> { playHere(); true }
                     playing -> false
@@ -784,7 +791,8 @@ private fun MakerScreenContent(
                     readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }, if (loaded) blockType else null) { names[it] ?: "another room" } +
                         (if (loaded) com.supermetroid.editor.ui.maker.makerRoomChecks(editorState, startPoint?.let { it.x to it.y }) else emptyList())
                 }
-                ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks, hiddenLayers, { hiddenLayers = it })
+                ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks, hiddenLayers, { hiddenLayers = it },
+                    piecesLocked = piecesLocked, onPiecesLocked = { piecesLocked = it })
                 stoppedAt?.takeIf { !playing && it.first == editorState.currentRoomId }?.let { (roomId, bx, by) ->
                     Row(
                         Modifier.fillMaxWidth().background(MakerFixedColors.play.copy(alpha = 0.25f)).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -907,9 +915,10 @@ private fun MakerScreenContent(
                                                 val obj: Any? = editorState.makerStartPoint()?.takeIf { it.x == bx && it.y == by }
                                                     ?: editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
                                                 // A door (blocks and cap), a station or a stray door cap: the whole object, as a box.
-                                                val whole = if (obj == null) editorState.objectBoxAt(bx, by, romParser) else null
+                                                val locked = piecesLockedNow.value
+                                                val whole = if (obj == null && locked) editorState.objectBoxAt(bx, by, romParser) else null
                                                 val enemy = if (obj == null && whole == null) editorState.workingEnemies.firstOrNull { e ->
-                                                    (e.x / 16 == bx && e.y / 16 == by) || (romParser != null && (bx to by) in romParser.enemyBlockBox(e))
+                                                    (e.x / 16 == bx && e.y / 16 == by) || (locked && romParser != null && (bx to by) in romParser.enemyBlockBox(e))
                                                 } else null
                                                 val ss = editorState.mapSelStart; val se = editorState.mapSelEnd
                                                 val sel = if (ss != null && se != null) intArrayOf(minOf(ss.first, se.first), minOf(ss.second, se.second),
@@ -1801,6 +1810,7 @@ private fun ViewBar(
     controls: MapCanvasControls, solidView: Boolean, onSolidView: (Boolean) -> Unit,
     markers: Set<MakerMarker>, onMarkers: (Set<MakerMarker>) -> Unit, checks: List<ReadyCheck>,
     hiddenLayers: Set<TileOverlay> = emptySet(), onHiddenLayers: (Set<TileOverlay>) -> Unit = {},
+    piecesLocked: Boolean = true, onPiecesLocked: (Boolean) -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     Row(
@@ -1821,6 +1831,15 @@ private fun ViewBar(
                     MakerIcon(m.icon, fg, 16.dp)
                     Box(Modifier.size(8.dp).background(Color(m.overlay.color), RoundedCornerShape(2.dp)))
                 }
+            }
+        }
+        // Pieces: Select takes whole parts (locked) or single tiles (unlocked). U toggles.
+        androidx.compose.foundation.TooltipArea(tooltip = { TooltipText(if (piecesLocked) "Select takes whole parts (doors, statues, enemies). U unlocks single tiles."
+            else "Select takes single tiles. U locks whole parts again.") }) {
+            MakerButton(onClick = { onPiecesLocked(!piecesLocked) }, selected = !piecesLocked, height = 36.dp,
+                modifier = Modifier.semantics { contentDescription = if (piecesLocked) "Unlock pieces" else "Lock pieces" }) { fg ->
+                MakerIcon(if (piecesLocked) MakerIcons.LOCK else MakerIcons.UNLOCK, fg, 16.dp)
+                Text(if (piecesLocked) "Pieces" else "Tiles", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
         // Layer eyes: background and liquid.

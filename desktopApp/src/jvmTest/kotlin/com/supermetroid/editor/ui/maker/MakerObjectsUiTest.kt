@@ -56,6 +56,7 @@ class MakerObjectsUiTest {
         fun paintPattern(id: String, x: Int, y: Int) { e.selectAndApplyPattern(id); e.beginStroke(); e.paintAt(x, y); e.endStroke(id) }
         paintPattern("builtin_door_blue_right", w - 1, 9)
         paintPattern("builtin_save_station", 10, 8)
+        paintPattern("builtin_chozo_statue", 20, 8)
         // A leftover cap with no door (as an older project might have): cleaned up when the room opens.
         e.addPlm(0xC8A2, 4, 3, 0, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
         val caps = { e.workingPlms.filter { RomParser.isDoorCapPlm(it.id) } }
@@ -124,5 +125,20 @@ class MakerObjectsUiTest {
         waitForIdle()
         assertEquals(MakerBox(10, 8, 11, 12), e.makerSelection(), "the whole station")
         shot("station-selected")
+
+        // The Chozo statue (no item marker: found by its tiles) is one piece too.
+        val body = pointOf(21, 9)
+        root.performMouseInput { moveTo(Offset(body.x, body.y - 30)); moveTo(body); click(body) }
+        waitForIdle()
+        assertEquals(MakerBox(20, 8, 22, 10), e.makerSelection(), "the whole statue")
+        shot("statue-selected")
+
+        // U unlocks pieces: the same click no longer takes the whole statue.
+        e.selectBox(null)
+        root.performKeyInput { pressKey(Key.U) }; waitForIdle()
+        root.performMouseInput { moveTo(Offset(body.x, body.y - 30)); moveTo(body); click(body) }
+        waitForIdle()
+        assertTrue(e.makerSelection() != MakerBox(20, 8, 22, 10), "unlocked: single tiles, not the whole statue")
+        root.performKeyInput { pressKey(Key.U) }; waitForIdle()
     }
 }

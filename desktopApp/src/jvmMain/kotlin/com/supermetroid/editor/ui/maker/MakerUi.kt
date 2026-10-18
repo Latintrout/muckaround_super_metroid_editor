@@ -53,6 +53,9 @@ object MakerIcons {
     /** Open hand (Space held: drag to pan) and closed hand (panning). */
     const val HAND_OPEN = "M8 12V5.5a1.5 1.5 0 013 0V11M11 10.5V4a1.5 1.5 0 013 0v6.5M14 10.5V5.5a1.5 1.5 0 013 0V14c0 4-2.5 7-6 7-2.5 0-4-1.2-5.5-3.5L3.2 14a1.5 1.5 0 012.4-1.8L8 15"
     const val HAND_CLOSED = "M7 11.5V9.5a1.5 1.5 0 013 0V11M10 10V8.5a1.5 1.5 0 013 0V10.5M13 10.5V9a1.5 1.5 0 013 0v2M16 11a1.5 1.5 0 013 0v3c0 3.5-2.5 7-6.5 7-3 0-5-2-6-4.5L5.5 14a1.5 1.5 0 012.5-1.5"
+    /** Pieces locked (whole parts) / unlocked (single tiles). */
+    const val LOCK = "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 017 0v3"
+    const val UNLOCK = "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 016.6-1.6"
     /** Layer shown / hidden. */
     const val EYE = "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
     const val EYE_OFF = "M3 3l18 18M10.6 5.1A10 10 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 4.1M6.6 6.6C3.7 8.5 2 12 2 12s3.5 7 10 7a9.6 9.6 0 005.4-1.6"

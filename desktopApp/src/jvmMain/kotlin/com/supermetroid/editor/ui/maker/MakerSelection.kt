@@ -19,6 +19,28 @@ data class MakerBox(val x0: Int, val y0: Int, val x1: Int, val y1: Int) {
     }
 }
 
+/**
+ * A built-in part (two or more tiles) whose tiles are all in place around block ([bx], [by]): its footprint.
+ * Matches each pattern at every offset that puts one of its tiles on this block (metatile and flips).
+ */
+fun EditorState.patternPieceAt(bx: Int, by: Int): MakerBox? {
+    for (pattern in project.patterns.filter { it.builtIn && !isDoorPattern(it.id) }) {
+        val cells = pattern.cells.withIndex().filter { it.value != null }
+        if (cells.size < 2) continue
+        for ((i, cell) in cells) {
+            val ox = bx - i % pattern.cols; val oy = by - i / pattern.cols
+            if (ox < 0 || oy < 0 || ox + pattern.cols > workingBlocksWide || oy + pattern.rows > workingBlocksTall) continue
+            if (cell == null) continue
+            val all = cells.all { (j, c) ->
+                val word = readBlockWord(ox + j % pattern.cols, oy + j / pattern.cols)
+                c != null && (word and 0x3FF) == c.metatile && ((word shr 10) and 1 == 1) == c.hFlip && ((word shr 11) and 1 == 1) == c.vFlip
+            }
+            if (all) return MakerBox(ox, oy, ox + pattern.cols - 1, oy + pattern.rows - 1)
+        }
+    }
+    return null
+}
+
 /** The editor's selected box, if any. */
 fun EditorState.makerSelection(): MakerBox? {
     val s = mapSelStart ?: return null
@@ -207,6 +229,8 @@ fun EditorState.objectBoxAt(bx: Int, by: Int, parser: RomParser?): MakerBox? {
         val x0 = minOf(doorway.x, cap?.x ?: doorway.x); val x1 = maxOf(doorway.x, cap?.x ?: doorway.x)
         return clamp(MakerBox(x0, doorway.top, x1, doorway.top + doorway.height - 1))
     }
+    // A part from a built-in pattern found by its tiles around this block (the Chozo statue, refills, stations…).
+    patternPieceAt(bx, by)?.let { return clamp(it) }
     // A part from a built-in pattern: any of its PLMs whose footprint covers this block.
     for (plm in workingPlms) {
         if (isEditorItemPlm(plm.id) || RomParser.isDoorCapPlm(plm.id)) continue

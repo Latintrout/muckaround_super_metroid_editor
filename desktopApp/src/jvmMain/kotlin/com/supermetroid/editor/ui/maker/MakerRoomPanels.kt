@@ -301,7 +301,7 @@ fun MakerShortcutSheet(onClose: () -> Unit) {
         "Tools" to MakerTool.entries.map { it.key.toString() to it.label },
         "Editing" to listOf("Ctrl Z / Ctrl Y" to "Undo / Redo", "Ctrl S" to "Save", "Shift-drag (Paint)" to "Straight line",
             "Right-click (Paint)" to "Remove or erase"),
-        "Select" to listOf("Drag empty space" to "Select a box", "Drag a part or box" to "Move it", "Shift-click" to "Grow the box",
+        "Select" to listOf("Click a part" to "Takes the whole part (door, statue, enemy…)", "U" to "Unlock pieces: single tiles", "Drag empty space" to "Select a box", "Drag a part or box" to "Move it", "Shift-click" to "Grow the box",
             "Arrows" to "Nudge the box", "Delete" to "Clear the box", "Ctrl C / Ctrl V" to "Copy / paste at the pointer",
             "Ctrl D" to "Duplicate beside", "Right-click" to "Play from here, Start point, door, properties"),
         "View" to listOf("Space-drag / middle-drag" to "Pan", "Wheel" to "Zoom at the pointer", "Shift / Ctrl + wheel" to "Pan sideways / up and down"),
