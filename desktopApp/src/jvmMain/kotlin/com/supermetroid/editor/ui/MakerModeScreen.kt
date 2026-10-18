@@ -61,6 +61,7 @@ import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -92,6 +93,14 @@ import com.supermetroid.editor.ui.maker.MakerTool
 import com.supermetroid.editor.ui.maker.SectionLabel
 import com.supermetroid.editor.ui.maker.blockTypeName
 import com.supermetroid.editor.ui.maker.makerHint
+import com.supermetroid.editor.ui.maker.makerSelection
+import com.supermetroid.editor.ui.maker.selectBox
+import com.supermetroid.editor.ui.maker.copyBox
+import com.supermetroid.editor.ui.maker.pasteClip
+import com.supermetroid.editor.ui.maker.duplicateSpot
+import com.supermetroid.editor.ui.maker.clearBox
+import com.supermetroid.editor.ui.maker.moveBox
+import com.supermetroid.editor.ui.maker.fillRegion
 import com.supermetroid.editor.ui.maker.makerPartsFor
 import com.supermetroid.editor.ui.theme.LocalMakerPalette
 import com.supermetroid.editor.ui.theme.MakerBrightness
@@ -201,6 +210,7 @@ private fun MakerScreenContent(
     var dragPart by remember { mutableStateOf<MakerPart?>(null) }
     var dragPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val rootCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    val canvasBoxCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
     // Block properties live in the side panel, never floating over the room.
     androidx.compose.runtime.SideEffect { controls.dockTileProperties = true; controls.skipConsumedPresses = true }
     androidx.compose.runtime.SideEffect {
@@ -209,13 +219,46 @@ private fun MakerScreenContent(
     val backdropChoice = themeState.appearance.roomBackdrop
     val backdrop = remember(backdropChoice, editorState.tileGraphics) { roomBackdropBrush(backdropChoice, editorState) }
     androidx.compose.runtime.SideEffect { controls.backdrop = backdrop }
-    // Each tool shows its own icon as the mouse cursor over the room.
-    androidx.compose.runtime.SideEffect { controls.cursor = com.supermetroid.editor.ui.maker.makerCursor(tool, activePart) }
+    // Space held: drag with any tool to pan. panningNow: a pan drag is under way (closed-hand cursor).
+    var spaceHeld by remember { mutableStateOf(false) }
+    var panningNow by remember { mutableStateOf(false) }
+    var clip by remember { mutableStateOf<com.supermetroid.editor.ui.maker.MakerClip?>(null) }
+    androidx.compose.runtime.SideEffect { controls.wheelZooms = true }
+    // Each tool shows its own icon as the mouse cursor over the room; a hand while panning.
+    // Read in composition (not inside SideEffect) so a change recomposes and updates the cursor.
+    val cursor = when {
+        panningNow -> com.supermetroid.editor.ui.maker.makerPanCursor(grabbing = true)
+        spaceHeld -> com.supermetroid.editor.ui.maker.makerPanCursor(grabbing = false)
+        else -> com.supermetroid.editor.ui.maker.makerCursor(tool, activePart)
+    }
+    androidx.compose.runtime.SideEffect { controls.cursor = cursor }
     // The room's Start point, drawn as a flag badge on its block.
     val startPoint = editorState.editVersion.let { editorState.makerStartPoint() }
     val startFlag = remember { androidx.compose.ui.graphics.vector.PathParser().parsePathString(MakerIcons.START).toPath() }
+    // Ghosts at the pointer: where a stamped part lands, and the area a Fill click would flood.
+    val ghostPart = activePart?.takeIf { tool == MakerTool.PAINT && it.stamps }
+    val fillGhost = tool == MakerTool.FILL && activePart is MakerPart.Tile
+    val fillCache = remember { arrayOfNulls<Pair<Triple<Int, Int, Int>, Set<Pair<Int, Int>>>>(1) }
     androidx.compose.runtime.SideEffect {
-        controls.drawOverRoom = startPoint?.let { sp -> { scale -> drawStartPoint(sp, scale, startFlag) } }
+        controls.drawOverRoom = { scale ->
+            startPoint?.let { drawStartPoint(it, scale, startFlag) }
+            val hx = editorState.hoverBlockX; val hy = editorState.hoverBlockY
+            val block = 16f * scale
+            if (hx >= 0 && hy >= 0 && ghostPart != null) {
+                val color = if (ghostPart is MakerPart.StartPoint) MakerFixedColors.play else ghostPart.category.color
+                val tl = androidx.compose.ui.geometry.Offset(hx * block, hy * block)
+                val size = androidx.compose.ui.geometry.Size(block, block)
+                drawRect(color.copy(alpha = 0.28f), tl, size)
+                drawRect(color, tl, size, style = androidx.compose.ui.graphics.drawscope.Stroke(width = maxOf(1.5f, block * 0.1f)))
+            }
+            if (hx >= 0 && hy >= 0 && fillGhost) {
+                val key = Triple(hx, hy, editorState.editVersion)
+                val cells = fillCache[0]?.takeIf { it.first == key }?.second
+                    ?: editorState.fillRegion(hx, hy).also { fillCache[0] = key to it }
+                val c = MakerFixedColors.terrain.copy(alpha = 0.35f)
+                for ((x, y) in cells) drawRect(c, androidx.compose.ui.geometry.Offset(x * block, y * block), androidx.compose.ui.geometry.Size(block, block))
+            }
+        }
     }
     val areaOf = remember(rooms, romParser) {
         val areas = rooms.associate { it.id to (romParser?.readRoomHeader(it.getRoomIdAsInt())?.area ?: -1) }
@@ -326,28 +369,11 @@ private fun MakerScreenContent(
         }
     }
 
-    /**
-     * Select tool: move the blocks in [from] (minX, minY, maxX, maxY) by [dx], [dy] as one undo step.
-     * The area left behind becomes air; the move is clamped to the room. Returns the new bounds.
-     */
+    /** Select tool: move the selected blocks (and the items, enemies and Start point on them) as one undo step. */
     fun moveBlocks(from: IntArray, dx: Int, dy: Int): IntArray {
-        val (x0, y0, x1, y1) = from.toList()
-        val mx = dx.coerceIn(-x0, editorState.workingBlocksWide - 1 - x1)
-        val my = dy.coerceIn(-y0, editorState.workingBlocksTall - 1 - y1)
-        if (mx == 0 && my == 0) return from
-        val cells = (y0..y1).flatMap { y -> (x0..x1).map { x -> Triple(x, y, editorState.readBlockWord(x, y) to editorState.readBts(x, y)) } }
-        val target = LinkedHashMap<Pair<Int, Int>, Pair<Int, Int>>()
-        for ((x, y) in cells) target[x to y] = com.supermetroid.editor.rom.RomConstants.AIR_TILE_WORD to 0
-        for ((x, y, v) in cells) target[x + mx to y + my] = v
-        val edits = target.mapNotNull { (at, v) ->
-            val oldWord = editorState.readBlockWord(at.first, at.second)
-            val oldBts = editorState.readBts(at.first, at.second)
-            if (oldWord == v.first && oldBts == v.second) null
-            else com.supermetroid.editor.data.TileEdit(at.first, at.second, oldWord, v.first, oldBts, v.second)
-        }
-        editorState.applyBulkEdits("Maker move blocks", edits)
-        message = "Moved ${x1 - x0 + 1} × ${y1 - y0 + 1} blocks"
-        return intArrayOf(x0 + mx, y0 + my, x1 + mx, y1 + my)
+        val moved = editorState.moveBox(com.supermetroid.editor.ui.maker.MakerBox(from[0], from[1], from[2], from[3]), dx, dy)
+        message = "Moved ${moved.width} × ${moved.height} blocks"
+        return intArrayOf(moved.x0, moved.y0, moved.x1, moved.y1)
     }
 
     /** Box tool: fill (or clear) every block between two corners as one undo step. */
@@ -469,9 +495,39 @@ private fun MakerScreenContent(
             .fillMaxSize()
             .background(p.background)
             .onPreviewKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown || searchFocused) return@onPreviewKeyEvent false
+                if (searchFocused) return@onPreviewKeyEvent false
+                if (e.key == Key.Spacebar && !playing) { spaceHeld = e.type == KeyEventType.KeyDown; return@onPreviewKeyEvent true }
+                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val mod = e.isCtrlPressed || e.isMetaPressed
+                val box = editorState.makerSelection()
+                fun showBox(b: com.supermetroid.editor.ui.maker.MakerBox?) {
+                    editorState.selectBox(b)
+                    if (b != null) controls.openSelectionProperties?.invoke()
+                }
+                val nudge = when (e.key) { Key.DirectionLeft -> -1 to 0; Key.DirectionRight -> 1 to 0; Key.DirectionUp -> 0 to -1; Key.DirectionDown -> 0 to 1; else -> null }
                 when {
+                    !playing && mod && e.key == Key.C && box != null -> {
+                        clip = editorState.copyBox(box); message = "Copied ${box.width} × ${box.height} blocks"; true
+                    }
+                    !playing && mod && e.key == Key.V && clip != null -> {
+                        val c = clip!!
+                        val at = if (editorState.hoverBlockX >= 0) editorState.hoverBlockX to editorState.hoverBlockY
+                            else box?.let { it.x0 + 1 to it.y0 + 1 } ?: (0 to 0)
+                        editorState.pasteClip(c, at.first, at.second)?.let { showBox(it); message = "Pasted ${c.width} × ${c.height} blocks" }
+                            ?: run { message = "That copy is bigger than this room." }
+                        true
+                    }
+                    !playing && mod && e.key == Key.D && box != null -> {
+                        val (x, y) = editorState.duplicateSpot(box)
+                        editorState.pasteClip(editorState.copyBox(box), x, y, "Maker duplicate")?.let { showBox(it); message = "Duplicated ${box.width} × ${box.height} blocks" }
+                        true
+                    }
+                    !playing && !mod && (e.key == Key.Delete || e.key == Key.Backspace) && box != null -> {
+                        editorState.clearBox(box); message = "Cleared ${box.width} × ${box.height} blocks"; true
+                    }
+                    !playing && !mod && nudge != null && box != null -> {
+                        showBox(editorState.moveBox(box, nudge.first, nudge.second)); true
+                    }
                     e.key == Key.Escape && playing -> { onStopPlay(); message = "Stopped. Back to editing."; true }
                     e.key == Key.F5 -> { playHere(); true }
                     playing -> false
@@ -536,7 +592,14 @@ private fun MakerScreenContent(
                     val currentTool = tool
                     val boxTile = activePart is MakerPart.Tile
                     Box(
-                        Modifier.fillMaxSize().pointerInput(stamping, paintTiles, playing, currentTool, boxTile) {
+                        Modifier.fillMaxSize().onGloballyPositioned { canvasBoxCoords[0] = it }.pointerInput(stamping, paintTiles, playing, currentTool, boxTile) {
+                            // The block under this event's own position (the editor's hover block lags one event behind).
+                            fun blockAt(p: androidx.compose.ui.geometry.Offset): Pair<Int, Int> {
+                                val coords = canvasBoxCoords[0]?.takeIf { it.isAttached }
+                                val lookup = controls.blockAtWindow
+                                if (coords == null || lookup == null) return editorState.hoverBlockX to editorState.hoverBlockY
+                                return lookup(coords.localToWindow(p)) ?: (-1 to -1)
+                            }
                             awaitPointerEventScope {
                                 var erasing = false
                                 var panning = false
@@ -549,6 +612,7 @@ private fun MakerScreenContent(
                                 var selectPress: Pair<Int, Int>? = null
                                 var blockMove: IntArray? = null // selected box being dragged (minX, minY, maxX, maxY)
                                 var menuPress: Pair<Int, Int>? = null
+                                var lineStart: Pair<Int, Int>? = null
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     if (playing) {
@@ -557,19 +621,18 @@ private fun MakerScreenContent(
                                     }
                                     val pos = event.changes.firstOrNull()?.position ?: androidx.compose.ui.geometry.Offset.Zero
                                     // Move tool drag, or middle-drag with any tool: pan the room.
-                                    if (event.type == PointerEventType.Press &&
-                                        (event.buttons.isTertiaryPressed || (currentTool == MakerTool.MOVE && event.buttons.isPrimaryPressed))) {
-                                        panning = true; last = pos; event.changes.forEach { it.consume() }; continue
+                                    if (event.type == PointerEventType.Press && (event.buttons.isTertiaryPressed ||
+                                            ((currentTool == MakerTool.MOVE || spaceHeld) && event.buttons.isPrimaryPressed))) {
+                                        panning = true; panningNow = true; last = pos; event.changes.forEach { it.consume() }; continue
                                     }
                                     if (panning) {
                                         if (event.type == PointerEventType.Move) { controls.panBy(last.x - pos.x, last.y - pos.y); last = pos }
-                                        if (event.type == PointerEventType.Release) panning = false
+                                        if (event.type == PointerEventType.Release) { panning = false; panningNow = false }
                                         event.changes.forEach { it.consume() }
                                         continue
                                     }
                                     if (currentTool == MakerTool.BOX && boxTile) {
-                                        val bx = editorState.hoverBlockX
-                                        val by = editorState.hoverBlockY
+                                        val (bx, by) = blockAt(pos)
                                         when {
                                             event.type == PointerEventType.Press && bx >= 0 && by >= 0 -> {
                                                 boxClear = event.buttons.isSecondaryPressed
@@ -582,8 +645,6 @@ private fun MakerScreenContent(
                                             }
                                             event.type == PointerEventType.Release && boxStart != null -> {
                                                 val start = boxStart!!
-                                                // This handler runs before the canvas updates the hover block for the
-                                                // same event, so by release the hover is the last move's block.
                                                 val end = if (bx >= 0 && by >= 0) bx to by else editorState.mapSelEnd ?: start
                                                 editorState.mapSelStart = null; editorState.mapSelEnd = null
                                                 boxStart = null
@@ -593,8 +654,7 @@ private fun MakerScreenContent(
                                         }
                                         continue
                                     }
-                                    val bx = editorState.hoverBlockX
-                                    val by = editorState.hoverBlockY
+                                    val (bx, by) = blockAt(pos)
                                     val inRoom = bx >= 0 && by >= 0
                                     if (currentTool == MakerTool.SELECT) {
                                         when {
@@ -604,6 +664,13 @@ private fun MakerScreenContent(
                                             }
                                             menuPress != null && event.type == PointerEventType.Release -> {
                                                 blockMenu = menuPress!! to pos; menuPress = null
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                            event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom &&
+                                                event.keyboardModifiers.isShiftPressed && editorState.mapSelStart != null -> {
+                                                // Shift-click: grow the box to this block.
+                                                editorState.mapSelEnd = bx to by
+                                                controls.openSelectionProperties?.invoke()
                                                 event.changes.forEach { it.consume() }
                                             }
                                             event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
@@ -639,6 +706,7 @@ private fun MakerScreenContent(
                                                 } else {
                                                     val moved = moveBlocks(b, to.first - from.first, to.second - from.second)
                                                     editorState.mapSelStart = moved[0] to moved[1]; editorState.mapSelEnd = moved[2] to moved[3]
+                                                    controls.openSelectionProperties?.invoke()
                                                 }
                                                 blockMove = null; moveFrom = null
                                                 event.changes.forEach { it.consume() }
@@ -660,6 +728,26 @@ private fun MakerScreenContent(
                                             }
                                         }
                                         continue
+                                    }
+                                    // Paint with Shift held: a straight line, previewed while dragging and painted on release.
+                                    if (paintTiles && event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom &&
+                                        event.keyboardModifiers.isShiftPressed) {
+                                        lineStart = bx to by
+                                        editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
+                                        event.changes.forEach { it.consume() }; continue
+                                    }
+                                    if (lineStart != null) {
+                                        val line = com.supermetroid.editor.ui.maker.straightLine(lineStart!!, if (inRoom) bx to by else lineStart!!)
+                                        if (event.type == PointerEventType.Move && inRoom) { editorState.mapSelStart = line.x0 to line.y0; editorState.mapSelEnd = line.x1 to line.y1 }
+                                        if (event.type == PointerEventType.Release) {
+                                            val l = com.supermetroid.editor.ui.maker.MakerBox.of(editorState.mapSelStart ?: lineStart!!, editorState.mapSelEnd ?: lineStart!!)
+                                            editorState.mapSelStart = null; editorState.mapSelEnd = null; lineStart = null
+                                            editorState.beginStroke()
+                                            for (y in l.y0..l.y1) for (x in l.x0..l.x1) editorState.paintAt(x, y)
+                                            editorState.endStroke("Maker line")
+                                            message = "Painted a line of ${l.width * l.height} blocks"
+                                        }
+                                        event.changes.forEach { it.consume() }; continue
                                     }
                                     when {
                                         stamping && event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
@@ -957,6 +1045,7 @@ private fun Divider() {
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun ToolRail(current: MakerTool, onPick: (MakerTool) -> Unit) {
     val p = LocalMakerPalette.current
     Column(
@@ -968,6 +1057,19 @@ private fun ToolRail(current: MakerTool, onPick: (MakerTool) -> Unit) {
         MakerTool.entries.forEach { t ->
             if (t.group != lastGroup) { Box(Modifier.width(48.dp).height(1.dp).background(p.border)); lastGroup = t.group }
             val on = t == current
+            androidx.compose.foundation.TooltipArea(
+                tooltip = {
+                    Row(Modifier.background(p.raised, RoundedCornerShape(6.dp)).border(1.dp, p.border, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(t.label, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        KeyCap(t.key.toString(), p.text)
+                        Text(makerHint(t, null).substringBefore(". ").removeSuffix("."), color = p.muted, fontSize = 12.sp)
+                    }
+                },
+                delayMillis = 400,
+                tooltipPlacement = androidx.compose.foundation.TooltipPlacement.ComponentRect(anchor = Alignment.CenterEnd, alignment = Alignment.CenterEnd,
+                    offset = androidx.compose.ui.unit.DpOffset(8.dp, 0.dp)),
+            ) {
             Box(
                 Modifier.size(width = 70.dp, height = 64.dp)
                     .background(if (on) p.accent else p.raised, RoundedCornerShape(8.dp))
@@ -982,6 +1084,7 @@ private fun ToolRail(current: MakerTool, onPick: (MakerTool) -> Unit) {
                 }
                 Text(t.key.toString(), color = fg.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 6.dp))
+            }
             }
         }
     }
@@ -1170,7 +1273,11 @@ private fun HintBar(tool: MakerTool, part: MakerPart?) {
     ) {
         Box(Modifier.size(26.dp).background(p.accent, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) { MakerIcon(tool.icon, p.onAccent, 16.dp) }
         Text(tool.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Text(makerHint(tool, part), color = p.text, fontSize = 14.sp)
+        Text(makerHint(tool, part), color = p.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        com.supermetroid.editor.ui.maker.makerMouseLegend(tool, part).forEach { (button, action) ->
+            Text(button, color = p.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(action, color = p.text, fontSize = 12.sp)
+        }
     }
 }
 

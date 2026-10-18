@@ -1228,7 +1228,8 @@ fun MapCanvas(
                                     )
                                     .onPointerEvent(PointerEventType.Scroll) { event ->
                                         val ne = event.nativeEvent as? MouseEvent
-                                        val isZoom = isZoomModifierPressed(event.nativeEvent)
+                                        val isZoom = if (controls?.wheelZooms == true) !(ne?.isShiftDown == true || isZoomModifierPressed(event.nativeEvent))
+                                            else isZoomModifierPressed(event.nativeEvent)
                                         val sd = event.changes.first().scrollDelta
                                         if (isZoom) {
                                             val mousePos = event.changes.first().position
@@ -1917,6 +1918,7 @@ fun MapCanvas(
                                     }
                                 }
                                 controls?.openTilePropertiesAt = { bx, by -> openTileProperties(bx, by) }
+                                controls?.openSelectionProperties = { openSelectionProperties() }
                             }
                             // ─── Right-click tile properties panel (floating, non-modal) ──────
                             if (!(propsExpanded && editorState != null)) SideEffect {
@@ -2278,6 +2280,10 @@ class MapCanvasControls {
     var drawOverRoom by mutableStateOf<(androidx.compose.ui.graphics.drawscope.DrawScope.(scale: Float) -> Unit)?>(null)
     /** Maker: presses the screen above already consumed (moving a part, panning) skip the canvas's own tools. */
     var skipConsumedPresses: Boolean = false
+    /** Maker: the plain mouse wheel zooms toward the pointer; Shift+wheel pans sideways, Ctrl+wheel up and down. */
+    var wheelZooms: Boolean = false
+    /** Shows the selected box's properties in the panel again (after the box moved or changed). */
+    var openSelectionProperties: (() -> Boolean)? = null
     /** Mouse cursor over the room, overriding the editor tool's cursor (the Maker's per-tool cursors). */
     var cursor by mutableStateOf<androidx.compose.ui.input.pointer.PointerIcon?>(null)
     /** Opens the block-properties panel for a block (set by the canvas). */

@@ -10054,11 +10054,20 @@ class EditorState(
         dirty = true; editVersion++
     }
 
+    /** Runs [block] so that everything it records undoes and redoes as one step. */
+    fun <T> asOneUndoStep(block: () -> T): T {
+        val before = undoStack.size
+        val result = block()
+        for (i in (before + 1) until undoStack.size) joinedWithPrevious.add(undoStack[i])
+        return result
+    }
+
     fun undo(): Boolean {
-        val top = undoStack.lastOrNull()
-        val ok = undoOne()
-        if (ok && top != null && top in joinedWithPrevious) undoOne()
-        return ok
+        var top = undoStack.lastOrNull() ?: return false
+        if (!undoOne()) return false
+        // Joined operations undo together with the ones before them, however many there are.
+        while (top in joinedWithPrevious) { top = undoStack.lastOrNull() ?: break; if (!undoOne()) break }
+        return true
     }
 
     private fun undoOne(): Boolean {
@@ -10162,9 +10171,9 @@ class EditorState(
     }
 
     fun redo(): Boolean {
-        val ok = redoOne()
-        if (ok && redoStack.lastOrNull()?.let { it in joinedWithPrevious } == true) redoOne()
-        return ok
+        if (!redoOne()) return false
+        while (redoStack.lastOrNull()?.let { it in joinedWithPrevious } == true) { if (!redoOne()) break }
+        return true
     }
 
     private fun redoOne(): Boolean {

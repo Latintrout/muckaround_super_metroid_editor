@@ -172,6 +172,31 @@ fun dominantAirWord(editorState: EditorState): Int? {
     return counts.maxByOrNull { it.value }?.key
 }
 
+/** Cursor while panning (closed hand) or ready to pan with Space held (open hand). */
+fun makerPanCursor(grabbing: Boolean): androidx.compose.ui.input.pointer.PointerIcon =
+    if (grabbing) com.supermetroid.editor.ui.PixelEditorCursors.fromLineIcon(MakerIcons.HAND_CLOSED, java.awt.Point(12, 12), "maker-grab")
+    else com.supermetroid.editor.ui.PixelEditorCursors.fromLineIcon(MakerIcons.HAND_OPEN, java.awt.Point(12, 12), "maker-hand")
+
+/** What each mouse button does with [tool] and [part], for the hint bar: (button, action). */
+fun makerMouseLegend(tool: MakerTool, part: MakerPart?): List<Pair<String, String>> {
+    val left = when (tool) {
+        MakerTool.SELECT -> "select, drag to move"
+        MakerTool.MOVE -> "drag the view"
+        MakerTool.PAINT -> if (part?.stamps == true) "place" else "paint (Shift: line)"
+        MakerTool.BOX -> "fill a box"
+        MakerTool.FILL -> "flood fill"
+        MakerTool.ERASE -> "erase"
+        MakerTool.PICK -> "copy a block"
+    }
+    val right = when (tool) {
+        MakerTool.SELECT -> "menu"
+        MakerTool.PAINT -> if (part?.stamps == true) "remove" else "erase"
+        MakerTool.BOX -> "clear a box"
+        else -> null
+    }
+    return listOfNotNull("Left" to left, right?.let { "Right" to it }, "Middle / Space" to "pan", "Wheel" to "zoom")
+}
+
 /** What a click will do, for the hint bar under the room. */
 fun makerHint(tool: MakerTool, part: MakerPart?): String {
     val name = part?.name ?: "the chosen part"
