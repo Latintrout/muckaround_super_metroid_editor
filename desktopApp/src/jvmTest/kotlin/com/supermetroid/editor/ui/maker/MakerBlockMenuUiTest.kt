@@ -85,4 +85,41 @@ class MakerBlockMenuUiTest {
         editor.undo(); waitForIdle()
         assertEquals(MakerStartPoint(60, 60), editor.makerStartPoint())
     }
+
+    @Test
+    fun `clicking an item shows it in the inspector with its variants and remove`() = androidx.compose.ui.test.runDesktopComposeUiTest(width = 1600, height = 960) {
+        val rom = File(System.getenv("V1_ROM") ?: "")
+        assumeTrue(rom.isFile, "V1_ROM not set")
+        val shots = System.getenv("MAKER_UI_SHOTS")?.let { File(it).apply { mkdirs() } }
+        val open = ProjectLifecycle.create("Pick", Files.createTempDirectory("maker-pick").toFile(), rom)
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(open.file, open.project)
+        val parser = editor.prepareWorkspaceParser(RomParser.loadRom(open.project.romPath))
+        editor.loadRoom(0x91F8, parser, requireNotNull(parser.readRoomHeader(0x91F8)))
+        editor.addPlm(0xEED7, 60, 60, 0, com.supermetroid.editor.data.ItemStateScope.ALL_STATES) // Energy Tank
+        val rooms = parser.roomCatalog.rooms
+        val controls = MapCanvasControls()
+        setContent {
+            MakerModeScreen(editor, parser, rooms, rooms.first { it.getRoomIdAsInt() == 0x91F8 }, EmulatorWorkspaceState(), {}, {}, {}, {},
+                themeState = MakerThemeState(userThemesDir = Files.createTempDirectory("t").toFile(), appearanceFile = null),
+                canvasControls = controls, initialTool = MakerTool.SELECT)
+        }
+        waitUntil(15_000) { controls.openTilePropertiesAt != null && controls.fitZoom != null }
+        controls.fit(); waitForIdle()
+        var px = -1f
+        for (x in 395 until 1255 step 3) { onRoot().performMouseInput { moveTo(Offset(x.toFloat(), 400f)) }; if (editor.hoverBlockX == 60) { px = x + 1f; break } }
+        var p = Offset.Zero
+        for (y in 120 until 880 step 3) { p = Offset(px, y + 1f); onRoot().performMouseInput { moveTo(p) }; if (editor.hoverBlockY == 60) break }
+        onRoot().performMouseInput { click(p) }; waitForIdle()
+        onNodeWithText("Selected in the room", ignoreCase = true).assertExists()
+        shots?.let { ImageIO.write(onAllNodes(androidx.compose.ui.test.isRoot()).onFirst().captureToImage().toAwtImage(), "png", File(it, "picked-item.png")) }
+        onNodeWithText("Chozo ball").performClick(); waitForIdle()
+        assertEquals(true, editor.workingPlms.any { it.id == 0xEF2B && it.x == 60 && it.y == 60 }, "now in a Chozo ball")
+        editor.undo(); waitForIdle()
+        assertEquals(true, editor.workingPlms.any { it.id == 0xEED7 && it.x == 60 && it.y == 60 }, "one undo")
+        editor.redo(); waitForIdle()
+        onNodeWithText("Remove").performClick(); waitForIdle()
+        assertEquals(true, editor.workingPlms.none { it.x == 60 && it.y == 60 && editor.isEditorItemPlm(it.id) }, "removed")
+        onNodeWithText("Selected in the room", ignoreCase = true).assertDoesNotExist()
+    }
 }

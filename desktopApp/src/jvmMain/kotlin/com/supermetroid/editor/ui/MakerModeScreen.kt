@@ -410,6 +410,8 @@ private fun MakerScreenContent(
         com.supermetroid.editor.ui.maker.applyMakerNewRoomLook(editorState, look)
     }
     var newRoomOpen by remember { mutableStateOf(false) }
+    // Select: the item or enemy last clicked (shown in the Inspector), by kind, id and position.
+    var picked by remember { mutableStateOf<PickedThing?>(null) }
     var resizeOpen by remember { mutableStateOf(false) }
     // Select's right-click menu: the block and where the pointer was (canvas pixels).
     var blockMenu by remember { mutableStateOf<Pair<Pair<Int, Int>, androidx.compose.ui.geometry.Offset>?>(null) }
@@ -690,7 +692,7 @@ private fun MakerScreenContent(
                                                     // Press inside the selected box: drag moves its blocks in one gesture.
                                                     blockMove = sel; moveFrom = bx to by
                                                     event.changes.forEach { it.consume() }
-                                                } else selectPress = bx to by // the canvas draws the selection box; properties open on release
+                                                } else { selectPress = bx to by; picked = null } // the canvas draws the selection box; properties open on release
                                             }
                                             blockMove != null && event.type == PointerEventType.Move && inRoom -> {
                                                 val b = blockMove!!; val from = moveFrom!!
@@ -720,7 +722,17 @@ private fun MakerScreenContent(
                                                 val from = moveFrom!!
                                                 val to = if (inRoom) bx to by else from
                                                 editorState.mapSelStart = null; editorState.mapSelEnd = null
-                                                if (to != from) movePlaced(moving!!, to) else controls.openTilePropertiesAt?.invoke(from.first, from.second)
+                                                if (to != from) {
+                                                    movePlaced(moving!!, to)
+                                                    picked = picked?.let { pk -> if (pk.x == from.first && pk.y == from.second) pk.copy(x = to.first, y = to.second) else pk }
+                                                } else {
+                                                    picked = when (val m = moving) {
+                                                        is RomParser.PlmEntry -> PickedThing(PickedKind.ITEM, m.id, m.x, m.y)
+                                                        is RomParser.EnemyEntry -> PickedThing(PickedKind.ENEMY, m.id, m.x / 16, m.y / 16)
+                                                        else -> null
+                                                    }
+                                                    controls.openTilePropertiesAt?.invoke(from.first, from.second)
+                                                }
                                                 moving = null; moveFrom = null
                                                 event.changes.forEach { it.consume() }
                                             }
@@ -818,7 +830,8 @@ private fun MakerScreenContent(
             }
             Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, controls, onAdvanced = onExit,
                 onRoomLook = if (library != null && romParser != null) ({ roomLookOpen = true }) else null,
-                onResize = if (romParser != null) ({ resizeOpen = true }) else null)
+                onResize = if (romParser != null) ({ resizeOpen = true }) else null,
+                picked = picked?.takeIf { it.existsIn(editorState) }, onPickedChanged = { picked = it }, onMessage = { message = it })
         }
         StatusBar(editorState, message)
     }
@@ -1297,6 +1310,7 @@ private fun Inspector(
     editorState: EditorState, romParser: RomParser?, room: RoomInfo?, area: Int, part: MakerPart?,
     controls: MapCanvasControls, onAdvanced: () -> Unit, onRoomLook: (() -> Unit)? = null,
     onResize: (() -> Unit)? = null,
+    picked: PickedThing? = null, onPickedChanged: (PickedThing?) -> Unit = {}, onMessage: (String) -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     val docked = controls.dockedPanel
@@ -1319,6 +1333,7 @@ private fun Inspector(
                 Text("Choose a part from the library to start building.", color = p.muted, fontSize = 13.sp)
             }
         }
+        if (picked != null) PickedCard(editorState, picked, onPickedChanged, onMessage)
         SectionLabel(if (docked != null) "Block properties" else "Under the cursor", Modifier.padding(horizontal = 6.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (docked != null) {
@@ -1357,6 +1372,63 @@ private fun Inspector(
         }
         Text("Advanced room settings ›", color = p.accentDeep.takeIf { !p.isDark } ?: p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onAdvanced).padding(horizontal = 6.dp, vertical = 4.dp))
+    }
+}
+
+internal enum class PickedKind { ITEM, ENEMY }
+
+/** An item or enemy clicked with Select: [x], [y] in blocks. */
+internal data class PickedThing(val kind: PickedKind, val id: Int, val x: Int, val y: Int) {
+    fun item(e: EditorState) = e.workingPlms.firstOrNull { it.id == id && it.x == x && it.y == y }
+    fun enemy(e: EditorState) = e.workingEnemies.firstOrNull { it.id == id && it.x / 16 == x && it.y / 16 == y }
+    fun existsIn(e: EditorState) = if (kind == PickedKind.ITEM) item(e) != null else enemy(e) != null
+}
+
+/**
+ * The picked item or enemy: what it is, where, and the changes the library has checked in game: an item's
+ * variant (visible, in a Chozo ball, hidden in a block) and removing it. Enemy settings beyond the library's
+ * tested ones aren't offered.
+ */
+@Composable
+private fun PickedCard(editorState: EditorState, picked: PickedThing, onPicked: (PickedThing?) -> Unit, onMessage: (String) -> Unit) {
+    val p = LocalMakerPalette.current
+    val def = if (picked.kind == PickedKind.ITEM) RomParser.ITEM_DEFS.firstOrNull { picked.id in setOf(it.visibleId, it.chozoId, it.hiddenId) } else null
+    val name = if (picked.kind == PickedKind.ITEM) RomParser.plmDisplayName(picked.id) else RomParser.enemyName(picked.id)
+    SectionLabel("Selected in the room", Modifier.padding(horizontal = 6.dp))
+    Column(
+        Modifier.fillMaxWidth().background(p.raised, RoundedCornerShape(8.dp)).border(2.dp, p.accentDeep, RoundedCornerShape(8.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val part = if (picked.kind == PickedKind.ITEM) MakerPart.Item("picked", name, "", picked.id) else MakerPart.Enemy("picked", name, "", picked.id)
+            PartPreview(part, editorState, Modifier.size(40.dp))
+            Column(Modifier.weight(1f)) {
+                Text(name, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${if (picked.kind == PickedKind.ITEM) "Item" else "Enemy"} · block ${picked.x}, ${picked.y}", color = p.muted, fontSize = 12.sp)
+            }
+        }
+        if (def != null) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("Visible" to def.visibleId, "Chozo ball" to def.chozoId, "Hidden" to def.hiddenId).forEach { (label, id) ->
+                MakerButton(onClick = {
+                    val it = picked.item(editorState) ?: return@MakerButton
+                    if (it.id == id) return@MakerButton
+                    editorState.asOneUndoStep {
+                        editorState.removePlm(it.x, it.y, it.id, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
+                        editorState.addPlm(id, it.x, it.y, it.param, com.supermetroid.editor.data.ItemStateScope.ALL_STATES)
+                    }
+                    onPicked(picked.copy(id = id)); onMessage("${def.name}: $label")
+                }, selected = picked.id == id, height = 32.dp, modifier = Modifier.weight(1f)) { fg -> Text(label, color = fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+        MakerButton(onClick = {
+            when (picked.kind) {
+                PickedKind.ITEM -> picked.item(editorState)?.let { editorState.removePlm(it.x, it.y, it.id, com.supermetroid.editor.data.ItemStateScope.ALL_STATES) }
+                PickedKind.ENEMY -> picked.enemy(editorState)?.let { editorState.removeEnemy(it) }
+            }
+            onPicked(null); onMessage("Removed $name")
+        }, height = 32.dp, modifier = Modifier.fillMaxWidth()) { fg ->
+            MakerIcon(MakerIcons.TRASH, MakerFixedColors.danger, 16.dp); Text("Remove", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
