@@ -302,3 +302,20 @@ fun EditorState.setMakerBackground(roomId: Int, background: MakerBackground?): S
     markProjectChanged()
     return null
 }
+
+/** The loaded room's liquid: its fx type (lava, acid, water) and surface height in pixels, or null when it has none. */
+fun EditorState.makerLiquid(parser: RomParser): Pair<MakerFx, Int>? {
+    val fx = runCatching { effectiveFxEntries(currentRoomId, parser).firstOrNull { it.doorSelect == 0 } }.getOrNull() ?: return null
+    val kind = MakerFx.entries.firstOrNull { it.fxType == fx.fxType && it.isLiquid } ?: return null
+    val y = fx.liquidSurfaceStart.takeIf { it in 0 until workingBlocksTall * 16 } ?: return null
+    return kind to y
+}
+
+/** Sets the loaded room's liquid surface to [y] pixels (start and target the same), as one undo step. */
+fun EditorState.setMakerLiquidLevel(y: Int) {
+    val before = currentFxChange()
+    val after = (before ?: com.supermetroid.editor.data.FxChange()).copy(liquidSurfaceStart = y, liquidSurfaceNew = y)
+    if (before == after) return
+    putCurrentFxChange(after)
+    recordProjectChange("Maker liquid level", undo = { putCurrentFxChange(before) }, redo = { putCurrentFxChange(after) })
+}

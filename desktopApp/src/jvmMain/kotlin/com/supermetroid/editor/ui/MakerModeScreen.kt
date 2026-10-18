@@ -94,6 +94,8 @@ import com.supermetroid.editor.ui.maker.SectionLabel
 import com.supermetroid.editor.ui.maker.blockTypeName
 import com.supermetroid.editor.ui.maker.makerHint
 import com.supermetroid.editor.ui.maker.resizeMakerRoom
+import com.supermetroid.editor.ui.maker.makerLiquid
+import com.supermetroid.editor.ui.maker.setMakerLiquidLevel
 import com.supermetroid.editor.ui.maker.makerSelection
 import com.supermetroid.editor.ui.maker.selectBox
 import com.supermetroid.editor.ui.maker.copyBox
@@ -207,6 +209,8 @@ private fun MakerScreenContent(
     var roomLookOpen by remember { mutableStateOf(false) }
     // Item and enemy markers start on: at fit-to-room zoom a 16-pixel item is only a few pixels wide.
     var markers by remember { mutableStateOf(setOf(MakerMarker.ITEMS, MakerMarker.ENEMIES)) }
+    // Layer eyes: the room's background (layer 2) and liquid can be hidden while building.
+    var hiddenLayers by remember { mutableStateOf(emptySet<TileOverlay>()) }
     // Library drag-and-drop: the part being dragged and the pointer's window position.
     var dragPart by remember { mutableStateOf<MakerPart?>(null) }
     var dragPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
@@ -215,7 +219,7 @@ private fun MakerScreenContent(
     // Block properties live in the side panel, never floating over the room.
     androidx.compose.runtime.SideEffect { controls.dockTileProperties = true; controls.skipConsumedPresses = true }
     androidx.compose.runtime.SideEffect {
-        controls.overlays = MAKER_BASE_LAYERS + (if (solidView) SOLID_VIEW_OVERLAYS else emptySet()) + markers.map { it.overlay }
+        controls.overlays = (MAKER_BASE_LAYERS - hiddenLayers) + (if (solidView) SOLID_VIEW_OVERLAYS else emptySet()) + markers.map { it.overlay }
     }
     val backdropChoice = themeState.appearance.roomBackdrop
     val backdrop = remember(backdropChoice, editorState.tileGraphics) { roomBackdropBrush(backdropChoice, editorState) }
@@ -236,6 +240,9 @@ private fun MakerScreenContent(
     // The room's Start point, drawn as a flag badge on its block.
     val startPoint = editorState.editVersion.let { editorState.makerStartPoint() }
     val startFlag = remember { androidx.compose.ui.graphics.vector.PathParser().parsePathString(MakerIcons.START).toPath() }
+    // The room's liquid surface, with a grip on the left edge that Select can drag.
+    val liquid = editorState.editVersion.let { romParser?.let { p -> editorState.makerLiquid(p) } }
+    val liquidNow = androidx.compose.runtime.rememberUpdatedState(liquid) // read by the long-lived pointer handler
     // Ghosts at the pointer: where a stamped part lands, and the area a Fill click would flood.
     val ghostPart = activePart?.takeIf { tool == MakerTool.PAINT && it.stamps }
     val fillGhost = tool == MakerTool.FILL && activePart is MakerPart.Tile
@@ -243,6 +250,15 @@ private fun MakerScreenContent(
     androidx.compose.runtime.SideEffect {
         controls.drawOverRoom = { scale ->
             startPoint?.let { drawStartPoint(it, scale, startFlag) }
+            liquid?.let { (fx, y) ->
+                val yy = y * scale
+                drawLine(fx.color, androidx.compose.ui.geometry.Offset(0f, yy), androidx.compose.ui.geometry.Offset(size.width, yy), strokeWidth = maxOf(2f, scale * 1.5f),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 6f)))
+                val grip = maxOf(16f * scale * 2, 26f)
+                drawRoundRect(fx.color, androidx.compose.ui.geometry.Offset(0f, yy - grip / 4), androidx.compose.ui.geometry.Size(grip, grip / 2),
+                    androidx.compose.ui.geometry.CornerRadius(grip / 4))
+                drawLine(Color(0xFF18302A), androidx.compose.ui.geometry.Offset(grip * 0.3f, yy), androidx.compose.ui.geometry.Offset(grip * 0.7f, yy), strokeWidth = 2f)
+            }
             val hx = editorState.hoverBlockX; val hy = editorState.hoverBlockY
             val block = 16f * scale
             if (hx >= 0 && hy >= 0 && ghostPart != null) {
@@ -613,7 +629,7 @@ private fun MakerScreenContent(
                     }
                     readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }, if (loaded) blockType else null) { names[it] ?: "another room" }
                 }
-                ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks)
+                ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks, hiddenLayers, { hiddenLayers = it })
                 Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0C0C18))) {
                     val stamping = tool == MakerTool.PAINT && activePart?.stamps == true
                     val paintTiles = tool == MakerTool.PAINT && activePart is MakerPart.Tile
@@ -641,6 +657,7 @@ private fun MakerScreenContent(
                                 var blockMove: IntArray? = null // selected box being dragged (minX, minY, maxX, maxY)
                                 var menuPress: Pair<Int, Int>? = null
                                 var lineStart: Pair<Int, Int>? = null
+                                var liquidDrag = false
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     if (playing) {
@@ -684,6 +701,21 @@ private fun MakerScreenContent(
                                     }
                                     val (bx, by) = blockAt(pos)
                                     val inRoom = bx >= 0 && by >= 0
+                                    // Select: press the liquid's grip (left edge, at the surface) and drag to set the level.
+                                    val lq = liquidNow.value
+                                    if (currentTool == MakerTool.SELECT && lq != null && event.type == PointerEventType.Press && event.buttons.isPrimaryPressed &&
+                                        inRoom && bx <= 1 && kotlin.math.abs(by - lq.second / 16) <= 1) {
+                                        liquidDrag = true; event.changes.forEach { it.consume() }; continue
+                                    }
+                                    if (liquidDrag) {
+                                        if (event.type == PointerEventType.Release) {
+                                            liquidDrag = false
+                                            val y = (if (inRoom) by else lq?.second?.div(16) ?: 0).coerceIn(0, editorState.workingBlocksTall - 1) * 16
+                                            editorState.setMakerLiquidLevel(y)
+                                            message = "${lq?.first?.label ?: "Liquid"} surface at block row ${y / 16}"
+                                        } else if (event.type == PointerEventType.Move && inRoom) message = "Release to set the surface at block row $by"
+                                        event.changes.forEach { it.consume() }; continue
+                                    }
                                     if (currentTool == MakerTool.SELECT) {
                                         when {
                                             // Right-click: a small menu (Play from here, Start point here, properties).
@@ -1487,6 +1519,7 @@ private fun PickedCard(editorState: EditorState, picked: PickedThing, onPicked: 
 private fun ViewBar(
     controls: MapCanvasControls, solidView: Boolean, onSolidView: (Boolean) -> Unit,
     markers: Set<MakerMarker>, onMarkers: (Set<MakerMarker>) -> Unit, checks: List<ReadyCheck>,
+    hiddenLayers: Set<TileOverlay> = emptySet(), onHiddenLayers: (Set<TileOverlay>) -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     Row(
@@ -1506,6 +1539,17 @@ private fun ViewBar(
                     modifier = Modifier.semantics { contentDescription = "Show ${m.label.lowercase()}" }) { fg ->
                     MakerIcon(m.icon, fg, 16.dp)
                     Box(Modifier.size(8.dp).background(Color(m.overlay.color), RoundedCornerShape(2.dp)))
+                }
+            }
+        }
+        // Layer eyes: background and liquid.
+        listOf(TileOverlay.LAYER2 to "Background", TileOverlay.LIQUID to "Liquid").forEach { (layer, label) ->
+            val shown = layer !in hiddenLayers
+            androidx.compose.foundation.TooltipArea(tooltip = { TooltipText(if (shown) "Hide the $label" else "Show the $label") }) {
+                MakerButton(onClick = { onHiddenLayers(if (shown) hiddenLayers + layer else hiddenLayers - layer) }, selected = shown, height = 36.dp,
+                    modifier = Modifier.semantics { contentDescription = "${if (shown) "Hide" else "Show"} ${label.lowercase()}" }) { fg ->
+                    MakerIcon(if (shown) MakerIcons.EYE else MakerIcons.EYE_OFF, fg, 16.dp)
+                    Text(label, color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

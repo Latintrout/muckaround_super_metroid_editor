@@ -417,6 +417,16 @@ class EditorState(
         _roomEditOrder[currentRoomId] = ++_editCounter
     }
 
+    /** The current room state's effect change, where Room look themes keep it (the state's own, else the room's). */
+    fun currentFxChange(): FxChange? = currentStateEdits()?.fxChange ?: project.rooms[project.roomKey(currentRoomId)]?.fxChange
+
+    /** Stores [change] where [currentFxChange] reads it. */
+    fun putCurrentFxChange(change: FxChange?) {
+        val state = currentStateEdits()
+        if (state != null) state.fxChange = change else project.getOrCreateRoom(currentRoomId).fxChange = change
+        dirty = true; editVersion++
+    }
+
     /** A project-level change made outside EditorState (e.g. a Maker room's background): save it and redraw. */
     fun markProjectChanged() { dirty = true; editVersion++ }
 
@@ -10091,6 +10101,14 @@ class EditorState(
         val result = block()
         for (i in (before + 1) until undoStack.size) joinedWithPrevious.add(undoStack[i])
         return result
+    }
+
+    /** Records a project-level change made by [redo] (already applied) as one undo step reversed by [undo]. */
+    fun recordProjectChange(description: String, undo: () -> Unit, redo: () -> Unit) {
+        val op = EditOperation(description)
+        projectOnlyUndo[op] = undo to redo
+        undoStack.add(op); redoStack.clear(); undoVersion++
+        dirty = true; editVersion++
     }
 
     fun undo(): Boolean {
