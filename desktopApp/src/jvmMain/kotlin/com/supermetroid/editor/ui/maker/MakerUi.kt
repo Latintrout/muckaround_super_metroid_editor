@@ -56,6 +56,8 @@ object MakerIcons {
     /** Layer shown / hidden. */
     const val EYE = "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
     const val EYE_OFF = "M3 3l18 18M10.6 5.1A10 10 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 4.1M6.6 6.6C3.7 8.5 2 12 2 12s3.5 7 10 7a9.6 9.6 0 005.4-1.6"
+    /** Map: a folded map. */
+    const val MAP = "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14"
     /** New room: the room outline with a plus. */
     const val NEW_ROOM = "M3 5h18v14H3zM12 9v6M9 12h6"
     const val ROOM = "M3 5h18v14H3zM3 10h6v9M15 5v6h6"

@@ -457,6 +457,7 @@ private fun MakerScreenContent(
     // Select: the item or enemy last clicked (shown in the Inspector), by kind, id and position.
     var picked by remember { mutableStateOf<PickedThing?>(null) }
     var resizeOpen by remember { mutableStateOf(false) }
+    var mapOpen by remember { mutableStateOf(false) }
     // Select's right-click menu: the block and where the pointer was (canvas pixels).
     var blockMenu by remember { mutableStateOf<Pair<Pair<Int, Int>, androidx.compose.ui.geometry.Offset>?>(null) }
     var renameOpen by remember { mutableStateOf(false) }
@@ -640,6 +641,7 @@ private fun MakerScreenContent(
             loadout = loadout, onLoadout = { loadout = it },
             onPlay = { playHere() }, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
             onNewRoom = if (onCreateRoom != null && romParser != null) ({ newRoomOpen = true }) else null,
+            onMap = if (romParser != null) ({ mapOpen = true }) else null,
             onRename = if (selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ renameOpen = true }) else null,
             onDelete = if (onDeleteRoom != null && selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ deleteOpen = true }) else null,
         )
@@ -960,6 +962,13 @@ private fun MakerScreenContent(
             )
         }, onClose = { connectDoor = null })
     }
+    if (mapOpen && romParser != null) com.supermetroid.editor.ui.maker.MakerMapPanel(
+        editorState, romParser, startArea = areaOf(selectedRoom).coerceAtLeast(0), currentRoomId = selectedRoom?.getRoomIdAsInt() ?: -1,
+        names = rooms.associate { it.getRoomIdAsInt() to it.name },
+        onOpen = { id -> rooms.firstOrNull { it.getRoomIdAsInt() == id }?.let(onRoomSelected); mapOpen = false },
+        onMoved = { onWorkspaceChanged(); message = it },
+        onClose = { mapOpen = false },
+    )
     if (resizeOpen && romParser != null) com.supermetroid.editor.ui.maker.MakerResizeRoomPanel(
         size = (editorState.workingBlocksWide / 16).coerceAtLeast(1) to (editorState.workingBlocksTall / 16).coerceAtLeast(1),
         onResize = { side, grow ->
@@ -1085,6 +1094,7 @@ private fun CommandBar(
     onAdvanced: () -> Unit,
     onAppearance: () -> Unit,
     onNewRoom: (() -> Unit)? = null,
+    onMap: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
@@ -1131,6 +1141,9 @@ private fun CommandBar(
         }
         if (onNewRoom != null) MakerButton(onClick = onNewRoom) { fg ->
             MakerIcon(MakerIcons.NEW_ROOM, fg, 20.dp); Text("New room", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+        if (onMap != null) MakerButton(onClick = onMap) { fg ->
+            MakerIcon(MakerIcons.MAP, fg, 20.dp); Text("Map", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
         Divider()
         MakerButton(onClick = onUndo) { fg -> MakerIcon(MakerIcons.UNDO, fg, 20.dp); Text("Undo", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
