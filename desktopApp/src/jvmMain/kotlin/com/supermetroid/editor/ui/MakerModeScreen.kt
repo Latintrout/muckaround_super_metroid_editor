@@ -274,7 +274,29 @@ private fun MakerScreenContent(
         if (category == MakerCategory.DOORS || category == MakerCategory.STATIONS) editorState.seedBuiltInPatterns(romParser)
         makerPartsFor(category, editorState, library, romParser)
     }
-    val shownParts = if (search.isBlank()) parts else parts.filter { it.name.contains(search.trim(), ignoreCase = true) }
+    // Searching looks through every category; starred parts and the ones used recently sit on top.
+    val allParts = remember(search.isBlank(), editorState.editVersion, editorState.patternVersion, selectedRoom, library, editorState.currentTilesetId) {
+        if (search.isBlank()) emptyList() else {
+            editorState.seedBuiltInPatterns(romParser)
+            MakerCategory.entries.flatMap { makerPartsFor(it, editorState, library, romParser) }.distinctBy { it.id }
+        }
+    }
+    val shownParts = if (search.isBlank()) parts else allParts.filter { it.name.contains(search.trim(), ignoreCase = true) }
+    val recent = remember { androidx.compose.runtime.mutableStateListOf<MakerPart>() }
+    var favouritesVersion by remember { mutableStateOf(0) }
+    val favourites = favouritesVersion.let { editorState.project.makerFavourites.toSet() }
+    val starredParts = remember(favourites, editorState.editVersion, library, editorState.currentTilesetId) {
+        if (favourites.isEmpty()) emptyList() else {
+            editorState.seedBuiltInPatterns(romParser)
+            MakerCategory.entries.flatMap { makerPartsFor(it, editorState, library, romParser) }.filter { it.id in favourites }.distinctBy { it.id }
+        }
+    }
+    val quickParts = (starredParts + recent.filter { r -> starredParts.none { it.id == r.id } }).take(8)
+    fun toggleFavourite(part: MakerPart) {
+        val list = editorState.project.makerFavourites
+        if (!list.remove(part.id)) list.add(part.id)
+        editorState.markProjectChanged(); favouritesVersion++
+    }
 
     // Keep the shared editor tool in step with the Maker tool + part.
     fun applyTool(t: MakerTool, part: MakerPart? = activePart) {
@@ -293,6 +315,7 @@ private fun MakerScreenContent(
             return
         }
         activePart = part
+        recent.removeAll { it.id == part.id }; recent.add(0, part); while (recent.size > 8) recent.removeAt(recent.lastIndex)
         when (part) {
             is MakerPart.Tile -> if (part.blockType != null) {
                 // Paint the block exactly as the game uses it: type, BTS and flips.
@@ -576,6 +599,7 @@ private fun MakerScreenContent(
                     if (part != null && target != null) placePartAt(part, target.first, target.second)
                 },
                 search = search, onSearch = { search = it }, onSearchFocus = { searchFocused = it },
+                quick = quickParts, isFavourite = { it.id in favourites }, onToggleFavourite = ::toggleFavourite,
                 editorState = editorState,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -1128,6 +1152,9 @@ private fun PartsPanel(
     onDragStart: (MakerPart, androidx.compose.ui.geometry.Offset) -> Unit = { _, _ -> },
     onDragTo: (androidx.compose.ui.geometry.Offset) -> Unit = {},
     onDragEnd: () -> Unit = {},
+    quick: List<MakerPart> = emptyList(),
+    isFavourite: (MakerPart) -> Boolean = { false },
+    onToggleFavourite: (MakerPart) -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     Column(Modifier.width(304.dp).fillMaxHeight().background(p.background).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1164,12 +1191,24 @@ private fun PartsPanel(
         ) {
             MakerIcon(MakerIcons.SEARCH, p.muted, 16.dp)
             Box(Modifier.weight(1f)) {
-                if (search.isEmpty()) Text("Search ${category.label.lowercase()}…", color = p.muted, fontSize = 14.sp)
+                if (search.isEmpty()) Text("Search all parts…", color = p.muted, fontSize = 14.sp)
                 BasicTextField(search, onSearch, singleLine = true, textStyle = TextStyle(color = p.text, fontSize = 14.sp), cursorBrush = SolidColor(p.text),
                     modifier = Modifier.fillMaxWidth().onFocusChanged { onSearchFocus(it.isFocused) })
             }
         }
-        Text("Previews use the game's real tiles and colours", color = p.muted, fontSize = 11.sp)
+        if (quick.isNotEmpty() && search.isBlank()) {
+            Text("Starred and recent", color = p.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                quick.forEach { part ->
+                    Box(
+                        Modifier.size(32.dp).border(2.dp, if (active?.id == part.id) part.category.color.darker() else p.border, RoundedCornerShape(6.dp))
+                            .clickable(role = androidx.compose.ui.semantics.Role.Button) { onChoose(part) }
+                            .semantics { contentDescription = "Quick ${part.name}" },
+                    ) { PartPreview(part, editorState, Modifier.fillMaxSize()) }
+                }
+            }
+        }
+        Text(if (search.isBlank()) "Previews use the game's real tiles and colours" else "${parts.size} found in every category", color = p.muted, fontSize = 11.sp)
         if (parts.isEmpty()) Text(category.emptyHint.ifBlank { "Nothing matches." }, color = p.muted, fontSize = 13.sp)
         LazyVerticalGrid(GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(parts, key = { it.id }) { part ->
@@ -1195,9 +1234,19 @@ private fun PartsPanel(
                         .padding(6.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    PartPreview(part, editorState, Modifier.fillMaxWidth().height(58.dp))
+                    Box(Modifier.fillMaxWidth().height(58.dp)) {
+                        PartPreview(part, editorState, Modifier.fillMaxSize())
+                        val starred = isFavourite(part)
+                        Box(
+                            Modifier.align(Alignment.TopEnd).padding(2.dp).size(20.dp)
+                                .background(Color(0xCC252B30), RoundedCornerShape(5.dp))
+                                .clickable(role = androidx.compose.ui.semantics.Role.Checkbox) { onToggleFavourite(part) }
+                                .semantics { contentDescription = if (starred) "Unstar ${part.name}" else "Star ${part.name}" },
+                            contentAlignment = Alignment.Center,
+                        ) { MakerIcon(MakerIcons.ITEMS, if (starred) MakerFixedColors.hazards else Color(0x99F2EBDD), 14.dp, filled = starred, strokeWidth = 2.2f) }
+                    }
                     Text(part.name, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(part.hint, color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (search.isBlank()) part.hint else "${part.category.label} · ${part.hint}", color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

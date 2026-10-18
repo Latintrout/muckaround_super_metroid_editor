@@ -966,6 +966,8 @@ data class SmEditProject(
     val baseRom: ProjectBaseRom? = null,
     /** Maker Play start points, keyed by room destination ("rom:91F8" or "project:<id>"); one per room. */
     val makerStartPoints: MutableMap<String, MakerStartPoint> = mutableMapOf(),
+    /** Maker parts the user starred (part ids), shown first in the parts panel. */
+    val makerFavourites: MutableList<String> = mutableListOf(),
 ) {
     companion object {
         // Source ownership cannot be silently ignored by older editors.
