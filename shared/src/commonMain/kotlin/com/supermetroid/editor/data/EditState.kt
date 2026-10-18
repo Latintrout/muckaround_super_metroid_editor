@@ -935,6 +935,19 @@ data class ProjectBaseRom(
     val size: Int,
 )
 
+/** A named Maker Play loadout: item and beam bits (the game's masks), tanks and ammo. */
+@Serializable
+data class MakerLoadoutDef(
+    val name: String,
+    val items: Int = 0,
+    val beams: Int = 0,
+    val energyTanks: Int = 0,
+    val missiles: Int = 0,
+    val supers: Int = 0,
+    val powerBombs: Int = 0,
+    val reserveTanks: Int = 0,
+)
+
 /** Block where Samus stands when Maker Play starts in a room (her feet are in this block), and which way she faces. */
 @Serializable
 data class MakerStartPoint(val x: Int, val y: Int, val facingLeft: Boolean = false)
@@ -966,6 +979,8 @@ data class SmEditProject(
     val baseRom: ProjectBaseRom? = null,
     /** Maker Play start points, keyed by room destination ("rom:91F8" or "project:<id>"); one per room. */
     val makerStartPoints: MutableMap<String, MakerStartPoint> = mutableMapOf(),
+    /** Loadouts saved for Maker Play. */
+    val makerLoadouts: MutableList<MakerLoadoutDef> = mutableListOf(),
     /** Maker parts the user starred (part ids), shown first in the parts panel. */
     val makerFavourites: MutableList<String> = mutableListOf(),
 ) {

@@ -1919,6 +1919,13 @@ fun MapCanvas(
                                 }
                                 controls?.openTilePropertiesAt = { bx, by -> openTileProperties(bx, by) }
                                 controls?.openSelectionProperties = { openSelectionProperties() }
+                                controls?.centerOnBlock = { bx, by ->
+                                    val tilePx = 16f * zoomLevel * density
+                                    coroutineScope.launch {
+                                        hScrollState.scrollTo(((bx + 0.5f) * tilePx - canvasViewW / 2f).toInt().coerceIn(0, hScrollState.maxValue))
+                                        vScrollState.scrollTo(((by + 0.5f) * tilePx - canvasViewH / 2f).toInt().coerceIn(0, vScrollState.maxValue))
+                                    }
+                                }
                             }
                             // ─── Right-click tile properties panel (floating, non-modal) ──────
                             if (!(propsExpanded && editorState != null)) SideEffect {
@@ -2282,6 +2289,8 @@ class MapCanvasControls {
     var skipConsumedPresses: Boolean = false
     /** Maker: the plain mouse wheel zooms toward the pointer; Shift+wheel pans sideways, Ctrl+wheel up and down. */
     var wheelZooms: Boolean = false
+    /** Scrolls the view so block (x, y) is in the middle (set by the canvas). */
+    var centerOnBlock: ((Int, Int) -> Unit)? = null
     /** Shows the selected box's properties in the panel again (after the box moved or changed). */
     var openSelectionProperties: (() -> Boolean)? = null
     /** Mouse cursor over the room, overriding the editor tool's cursor (the Maker's per-tool cursors). */

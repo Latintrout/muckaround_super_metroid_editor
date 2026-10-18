@@ -351,12 +351,35 @@ fun main() = application {
             }
     }
 
+    /** Ctrl+S (and the Maker's Save): project, plus its ASM sources when the project has them. */
+    fun saveEverything() {
+        if (asmWorkspaceState.isProjectSourceEditable) {
+            scope.launch {
+                editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
+                if (asmWorkspaceState.saveSource()) {
+                    editorState.saveProjectAsync()
+                }
+            }
+        } else {
+            val parser = romParser
+            if (parser?.roomCatalog?.editable == true) {
+                scope.launch {
+                    if (asmWorkspaceState.saveAllSources()) {
+                        if (editorState.project.asmWorkspace.enabled) editorState.saveProjectAsync(parser, true)
+                        else editorState.saveProject(parser)
+                    }
+                }
+            }
+        }
+    }
+
     Window(
         onCloseRequest = {
             floatingWindowConfig(windowState)?.let { window ->
                 AppConfig.update { copy(window = window) }
             }
-            exitApplication()
+            // Closing with unsaved project edits asks first (the same question as New/Open).
+            requestProjectAction { exitApplication() }
         },
         state = windowState,
         title = "Super Metroid Editor",
@@ -364,24 +387,7 @@ fun main() = application {
         onPreviewKeyEvent = { keyEvent ->
             if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.S &&
                 (keyEvent.isCtrlPressed || keyEvent.isMetaPressed)) {
-                if (asmWorkspaceState.isProjectSourceEditable) {
-                    scope.launch {
-                        editorState.setProjectRomBuildMode(ProjectRomBuildMode.ASM_SOURCE)
-                        if (asmWorkspaceState.saveSource()) {
-                            editorState.saveProjectAsync()
-                        }
-                    }
-                } else {
-                    val parser = romParser
-                    if (parser?.roomCatalog?.editable == true) {
-                        scope.launch {
-                            if (asmWorkspaceState.saveAllSources()) {
-                                if (editorState.project.asmWorkspace.enabled) editorState.saveProjectAsync(parser, true)
-                                else editorState.saveProject(parser)
-                            }
-                        }
-                    }
-                }
+                saveEverything()
                 true
             } else false
         }
@@ -437,6 +443,17 @@ fun main() = application {
                     finally { romLoadInFlight = false }
                 } },
             ) }
+            // Autosave: every few minutes, unsaved project edits go to a separate copy beside the project
+            // (autosave/<name>.autosave.smedit); the project file itself only changes on Save.
+            LaunchedEffect(editorState.projectFilePath) {
+                while (true) {
+                    delay(ProjectFileService.AUTOSAVE_INTERVAL_MS)
+                    val path = editorState.projectFilePath
+                    if (path.isBlank() || !editorState.dirty) continue
+                    val text = runCatching { ProjectFileService.serializeProject(editorState.project) }.getOrNull() ?: continue
+                    withContext(Dispatchers.IO) { runCatching { ProjectFileService.writeAutosave(File(path), text) } }
+                }
+            }
             pendingProjectAction?.let { action ->
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = { pendingProjectAction = null },
@@ -1282,6 +1299,7 @@ fun main() = application {
                             onPlay = ::runProjectInEmulator,
                             onCreateRoom = ::createProjectRoom,
                             onDeleteRoom = ::deleteProjectRoom,
+                            onSave = ::saveEverything,
                             onExit = { makerMode = false },
                             playing = emulatorEnabled,
                             onStopPlay = {

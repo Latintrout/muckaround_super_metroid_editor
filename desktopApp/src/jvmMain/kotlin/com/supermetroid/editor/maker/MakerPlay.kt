@@ -3,7 +3,18 @@ package com.supermetroid.editor.maker
 import com.supermetroid.editor.rom.RomParser
 
 /** Equipment written to WRAM before Maker Play enters gameplay. Bit values from the game's item/beam masks. */
-data class MakerPlayLoadout(val items: Int, val beams: Int, val energyTanks: Int, val missiles: Int)
+data class MakerPlayLoadout(
+    val items: Int, val beams: Int, val energyTanks: Int, val missiles: Int,
+    val supers: Int = 0, val powerBombs: Int = 0, val reserveTanks: Int = 0,
+) {
+    /** Beams Samus has on: Spazer and Plasma can't be on together (the game glitches), so Plasma wins. */
+    val equippedBeams: Int get() = if (beams and BEAM_PLASMA != 0) beams and BEAM_SPAZER.inv() else beams
+
+    companion object {
+        const val BEAM_SPAZER = 0x0004
+        const val BEAM_PLASMA = 0x0008
+    }
+}
 
 /**
  * How Maker Play reaches a room on a freshly booted ROM with no save file:
@@ -172,9 +183,14 @@ class MakerPlayLauncher(
         DEFAULT_CONTROLS.forEach { (a, v) -> write16(a, v) }
         val maxHealth = 99 + 100 * loadout.energyTanks
         for (a in listOf(0x09A2, 0x09A4)) write16(a, loadout.items)
-        for (a in listOf(0x09A6, 0x09A8)) write16(a, loadout.beams)
+        write16(0x09A6, loadout.equippedBeams); write16(0x09A8, loadout.beams)
         for (a in listOf(0x09C2, 0x09C4)) write16(a, maxHealth)
         for (a in listOf(0x09C6, 0x09C8)) write16(a, loadout.missiles)
+        for (a in listOf(0x09CA, 0x09CC)) write16(a, loadout.supers)
+        for (a in listOf(0x09CE, 0x09D0)) write16(a, loadout.powerBombs)
+        // Reserve tanks: max and current reserve energy, auto mode (1) when there are any.
+        for (a in listOf(0x09D4, 0x09D6)) write16(a, 100 * loadout.reserveTanks)
+        write16(0x09C0, if (loadout.reserveTanks > 0) 1 else 0)
         write16(0x079F, plan.area)
         write16(0x078B, plan.stationIndex)
         write16(GAME_STATE, STATE_LOAD_GAME)

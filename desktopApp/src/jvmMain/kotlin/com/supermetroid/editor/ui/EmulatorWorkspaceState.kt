@@ -193,7 +193,7 @@ class EmulatorWorkspaceState(
     var session by mutableStateOf(SessionState())
         private set
     var snapshot by mutableStateOf<GameSnapshot?>(null)
-        private set
+        internal set // tests stand in for a running game
     var frameBitmap by mutableStateOf<ImageBitmap?>(null)
         private set
     var recordingPath by mutableStateOf<String?>(null)

@@ -124,7 +124,20 @@ internal data class MakerLoadout(
     val beams: Int,
     val energyTanks: Int,
     val missiles: Int,
-)
+    val supers: Int = 0,
+    val powerBombs: Int = 0,
+    val reserveTanks: Int = 0,
+) {
+    fun toPlay() = MakerPlayLoadout(items, beams, energyTanks, missiles, supers, powerBombs, reserveTanks)
+    fun toDef() = com.supermetroid.editor.data.MakerLoadoutDef(name, items, beams, energyTanks, missiles, supers, powerBombs, reserveTanks)
+
+    companion object {
+        fun of(d: com.supermetroid.editor.data.MakerLoadoutDef) = MakerLoadout(d.name, d.items, d.beams, d.energyTanks, d.missiles, d.supers, d.powerBombs, d.reserveTanks)
+    }
+}
+
+/** The emulator state saved when Play reaches the room, for R (instant restart). */
+private const val MAKER_RESTART_STATE = "maker-restart"
 
 internal val MAKER_LOADOUTS = listOf(
     MakerLoadout("Starter (nothing)", items = 0, beams = 0, energyTanks = 0, missiles = 0),
@@ -137,6 +150,8 @@ internal val MAKER_LOADOUTS = listOf(
         energyTanks = 4,
         missiles = 30,
     ),
+    // Everything the game has, for trying a room with no limits.
+    MakerLoadout("Everything", items = 0xF32F, beams = 0x100F, energyTanks = 14, missiles = 230, supers = 50, powerBombs = 50, reserveTanks = 4),
 )
 
 /**
@@ -169,11 +184,13 @@ internal fun MakerModeScreen(
     onDeleteRoom: ((Int) -> String?)? = null,
     /** Whether painting ground tidies its edges to start with (the Terrain switch). */
     initialAutoEdges: Boolean = true,
+    /** Saves the project (as Ctrl+S); null hides the Unsaved/Save chip. */
+    onSave: (() -> Unit)? = null,
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
             onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen,
-            initialTool, canvasControls, onCreateRoom, onDeleteRoom, initialAutoEdges)
+            initialTool, canvasControls, onCreateRoom, onDeleteRoom, initialAutoEdges, onSave)
     }
 }
 
@@ -199,6 +216,7 @@ private fun MakerScreenContent(
     onCreateRoom: ((NewRoomCreationRequest) -> String?)?,
     onDeleteRoom: ((Int) -> String?)?,
     initialAutoEdges: Boolean,
+    onSave: (() -> Unit)?,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
@@ -248,6 +266,7 @@ private fun MakerScreenContent(
     // The room's liquid surface, with a grip on the left edge that Select can drag.
     val liquid = editorState.editVersion.let { romParser?.let { p -> editorState.makerLiquid(p) } }
     val liquidNow = androidx.compose.runtime.rememberUpdatedState(liquid) // read by the long-lived pointer handler
+    val playingNow = androidx.compose.runtime.rememberUpdatedState(playing)
     // Ghosts at the pointer: where a stamped part lands, and the area a Fill click would flood.
     val ghostPart = activePart?.takeIf { tool == MakerTool.PAINT && it.stamps }
     val fillGhost = tool == MakerTool.FILL && activePart is MakerPart.Tile
@@ -255,6 +274,17 @@ private fun MakerScreenContent(
     androidx.compose.runtime.SideEffect {
         controls.drawOverRoom = { scale ->
             startPoint?.let { drawStartPoint(it, scale, startFlag) }
+            // While playing: where Samus is, if she's in this room.
+            if (playing) emulatorWorkspaceState.snapshot?.takeIf { it.roomId == editorState.currentRoomId }?.let { snap ->
+                val sx = snap.samusX; val sy = snap.samusY
+                if (sx != null && sy != null) {
+                    val tl = androidx.compose.ui.geometry.Offset((sx - 8) * scale, (sy - 21) * scale)
+                    val sz = androidx.compose.ui.geometry.Size(16 * scale, 42 * scale)
+                    drawRoundRect(MakerFixedColors.play.copy(alpha = 0.35f), tl, sz, androidx.compose.ui.geometry.CornerRadius(4 * scale))
+                    drawRoundRect(MakerFixedColors.play, tl, sz, androidx.compose.ui.geometry.CornerRadius(4 * scale),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = maxOf(2f, scale * 1.5f)))
+                }
+            }
             liquid?.let { (fx, y) ->
                 val yy = y * scale
                 drawLine(fx.color, androidx.compose.ui.geometry.Offset(0f, yy), androidx.compose.ui.geometry.Offset(size.width, yy), strokeWidth = maxOf(2f, scale * 1.5f),
@@ -458,6 +488,17 @@ private fun MakerScreenContent(
     var picked by remember { mutableStateOf<PickedThing?>(null) }
     var resizeOpen by remember { mutableStateOf(false) }
     var mapOpen by remember { mutableStateOf(false) }
+    // Instant restart: the emulator state saved right after Play reached the room, and what it was built from.
+    var restartKey by remember { mutableStateOf<Any?>(null) }
+    // Edit here: where Samus was when play stopped (room, block).
+    var stoppedAt by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    var loadoutsOpen by remember { mutableStateOf(false) }
+    var pickerOpen by remember { mutableStateOf(false) }
+    var helpOpen by remember { mutableStateOf(false) }
+    // Empty-room hint: dismissed per room for this session.
+    val hintDismissed = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
+    var loadoutsVersion by remember { mutableStateOf(0) }
+    val savedLoadouts = loadoutsVersion.let { editorState.project.makerLoadouts.map(MakerLoadout::of) }
     // Select's right-click menu: the block and where the pointer was (canvas pixels).
     var blockMenu by remember { mutableStateOf<Pair<Pair<Int, Int>, androidx.compose.ui.geometry.Offset>?>(null) }
     var renameOpen by remember { mutableStateOf(false) }
@@ -506,6 +547,8 @@ private fun MakerScreenContent(
                 val s = emulatorWorkspaceState.session
                 if (s.active && emulatorWorkspaceState.isMemoryAccessible &&
                     (!wasActive || s.frameCounter < previousFrame)) break
+                // Play was stopped (after the moment it takes to start): stop waiting for the emulator.
+                if (waited > 5_000 && !playingNow.value) return@launch
                 delay(100); waited += 100
             }
             if (!emulatorWorkspaceState.isMemoryAccessible) {
@@ -520,9 +563,14 @@ private fun MakerScreenContent(
                 writeBlock = { a, bytes -> emulatorWorkspaceState.writeMemory(a, bytes) },
             )
             val result = runCatching {
-                launcher.launch(plan!!, MakerPlayLoadout(l.items, l.beams, l.energyTanks, l.missiles))
+                launcher.launch(plan!!, l.toPlay())
             }.getOrElse { MakerPlayLauncher.Result(false, it.message ?: "Play failed") }
             message = if (result.ok) "Playing ${selectedRoom.name} with ${l.name}" else result.message
+            if (result.ok) runCatching {
+                emulatorWorkspaceState.saveQuickState(MAKER_RESTART_STATE)
+                restartKey = listOf(roomId, saved, l, editorState.editVersion)
+                message = "Playing ${selectedRoom.name} with ${l.name}. R restarts here instantly."
+            }
         }
     }
 
@@ -566,6 +614,31 @@ private fun MakerScreenContent(
         if (editorState.project.newRoomForPreviewId(editorState.currentRoomId) == null) return@LaunchedEffect
         val door = top.edits.firstOrNull { (it.newBlockWord shr 12) and 0xF == 0x9 } ?: return@LaunchedEffect
         connectDoor = (door.blockX to door.blockY) to pattern
+    }
+
+    /** R: back to the moment Play reached the room, without rebuilding, if nothing changed since; otherwise a full Play. */
+    fun restartPlay() {
+        val roomId = selectedRoom?.getRoomIdAsInt()
+        val key = listOf(roomId, editorState.makerStartPoint(roomId ?: 0), loadout, editorState.editVersion)
+        if (restartKey != null && restartKey == key && emulatorWorkspaceState.session.active) {
+            scope.launch { emulatorWorkspaceState.loadNamedState(MAKER_RESTART_STATE); message = "Restarted" }
+        } else playHere()
+    }
+
+    /** Stop & edit: back to editing, in the room Samus was in, with the view on her. */
+    fun stopAndEditHere() {
+        val snap = emulatorWorkspaceState.snapshot
+        onStopPlay()
+        val roomId = snap?.roomId; val x = snap?.samusX; val y = snap?.samusY
+        if (roomId == null || x == null || y == null) { message = "Stopped. Back to editing."; return }
+        val bx = x / 16; val by = (y + MakerPlayPlan.SAMUS_STAND_Y_RADIUS - 1) / 16 // the block her feet are in
+        stoppedAt = Triple(roomId, bx, by)
+        rooms.firstOrNull { it.getRoomIdAsInt() == roomId }?.takeIf { it.getRoomIdAsInt() != selectedRoom?.getRoomIdAsInt() }?.let(onRoomSelected)
+        message = "Stopped where Samus was: block $bx, $by."
+    }
+    androidx.compose.runtime.LaunchedEffect(stoppedAt, editorState.currentRoomId, editorState.workingLevelData != null) {
+        val (roomId, bx, by) = stoppedAt ?: return@LaunchedEffect
+        if (editorState.currentRoomId == roomId && editorState.workingLevelData != null) { delay(150); controls.centerOnBlock?.invoke(bx, by) }
     }
 
     // A Maker room is one layout: edits apply to every state that shares it (no per-state prompt).
@@ -619,7 +692,9 @@ private fun MakerScreenContent(
                     !playing && !mod && nudge != null && box != null -> {
                         showBox(editorState.moveBox(box, nudge.first, nudge.second)); true
                     }
-                    e.key == Key.Escape && playing -> { onStopPlay(); message = "Stopped. Back to editing."; true }
+                    e.key == Key.Escape && playing -> { stopAndEditHere(); true }
+                    e.key == Key.R && playing -> { restartPlay(); true }
+                    !playing && e.utf16CodePoint.toChar() == '?' -> { helpOpen = !helpOpen; true }
                     e.key == Key.F5 -> { playHere(); true }
                     playing -> false
                     mod && e.key == Key.Z -> { editorState.undo(); true }
@@ -632,8 +707,9 @@ private fun MakerScreenContent(
         if (playing) PlayBar(
             roomName = { id -> rooms.firstOrNull { it.getRoomIdAsInt() == id }?.name },
             emulatorWorkspaceState = emulatorWorkspaceState,
-            onStop = { onStopPlay(); message = "Stopped. Back to editing." },
-            onRestart = { playHere() },
+            onStop = ::stopAndEditHere,
+            onRestart = ::restartPlay,
+            loadoutName = loadout.name, onLoadouts = { loadoutsOpen = true },
         ) else CommandBar(
             rooms = rooms, selectedRoom = selectedRoom, onRoomSelected = onRoomSelected, areaOf = areaOf,
             onUndo = { editorState.undo() }, onRedo = { editorState.redo() },
@@ -642,6 +718,9 @@ private fun MakerScreenContent(
             onPlay = { playHere() }, onAdvanced = onExit, onAppearance = { appearanceOpen = true },
             onNewRoom = if (onCreateRoom != null && romParser != null) ({ newRoomOpen = true }) else null,
             onMap = if (romParser != null) ({ mapOpen = true }) else null,
+            savedLoadouts = savedLoadouts, onEditLoadouts = { loadoutsOpen = true },
+            unsaved = editorState.dirty, onSave = onSave,
+            onRoomPicker = if (romParser != null) ({ pickerOpen = true }) else null,
             onRename = if (selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ renameOpen = true }) else null,
             onDelete = if (onDeleteRoom != null && selectedRoom != null && editorState.project.newRoomForPreviewId(selectedRoom.getRoomIdAsInt()) != null) ({ deleteOpen = true }) else null,
         )
@@ -677,9 +756,25 @@ private fun MakerScreenContent(
                     val blockType = { x: Int, y: Int ->
                         if (x in 0 until editorState.workingBlocksWide && y in 0 until editorState.workingBlocksTall) (editorState.readBlockWord(x, y) shr 12) and 0xF else null
                     }
-                    readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }, if (loaded) blockType else null) { names[it] ?: "another room" }
+                    readyChecks(parser, room.getRoomIdAsInt(), startPoint?.let { it.x to it.y }, if (loaded) blockType else null) { names[it] ?: "another room" } +
+                        (if (loaded) com.supermetroid.editor.ui.maker.makerRoomChecks(editorState, startPoint?.let { it.x to it.y }) else emptyList())
                 }
                 ViewBar(controls, solidView, { solidView = it }, markers, { markers = it }, checks, hiddenLayers, { hiddenLayers = it })
+                stoppedAt?.takeIf { !playing && it.first == editorState.currentRoomId }?.let { (roomId, bx, by) ->
+                    Row(
+                        Modifier.fillMaxWidth().background(MakerFixedColors.play.copy(alpha = 0.25f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        MakerIcon(MakerIcons.START, p.text, 18.dp)
+                        Text("Samus stopped at block $bx, $by.", color = p.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        MakerButton(onClick = {
+                            editorState.setMakerStartPoint(MakerStartPoint(bx, by, editorState.makerStartPoint(roomId)?.facingLeft ?: false), "Maker place start point")
+                            message = "Samus starts at block $bx, $by"; stoppedAt = null
+                        }, height = 32.dp) { fg -> Text("Put the Start point here", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                        MakerButton(onClick = { controls.centerOnBlock?.invoke(bx, by) }, height = 32.dp) { fg -> Text("Show", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                        MakerButton(onClick = { stoppedAt = null }, height = 32.dp) { fg -> Text("Dismiss", color = fg, fontSize = 12.sp) }
+                    }
+                }
                 Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0C0C18))) {
                     val stamping = tool == MakerTool.PAINT && activePart?.stamps == true
                     val paintTiles = tool == MakerTool.PAINT && activePart is MakerPart.Tile
@@ -935,10 +1030,15 @@ private fun MakerScreenContent(
                         }
                         if (density.density < 0f) Unit
                     }
+                    val hereId = selectedRoom?.getRoomIdAsInt()
+                    if (!playing && hereId != null && hereId !in hintDismissed && startPoint == null &&
+                        editorState.project.newRoomForPreviewId(hereId) != null) {
+                        com.supermetroid.editor.ui.maker.MakerEmptyRoomHint(Modifier.align(Alignment.TopStart).padding(12.dp)) { hintDismissed += hereId }
+                    }
                     ZoomControls(controls, Modifier.align(Alignment.BottomEnd).padding(12.dp))
                     if (solidView) SolidLegend(Modifier.align(Alignment.BottomStart).padding(12.dp))
                 }
-                if (playing) PlayingHint() else if (themeState.appearance.showHintBar) HintBar(tool, activePart)
+                if (playing) PlayingHint() else if (themeState.appearance.showHintBar) HintBar(tool, activePart) { helpOpen = true }
             }
             Inspector(editorState, romParser, selectedRoom, areaOf(selectedRoom), activePart, controls, onAdvanced = onExit,
                 onRoomLook = if (library != null && romParser != null) ({ roomLookOpen = true }) else null,
@@ -962,6 +1062,37 @@ private fun MakerScreenContent(
             )
         }, onClose = { connectDoor = null })
     }
+    if (pickerOpen && romParser != null) {
+        val own = editorState.project.newRooms.map { it.previewRoomId }.toSet()
+        val isOwn = selectedRoom != null && selectedRoom.getRoomIdAsInt() in own
+        com.supermetroid.editor.ui.maker.MakerRoomPickerPanel(
+            rooms, romParser, areaOf = { areaOf(it) }, ownRoomIds = own, currentRoomId = selectedRoom?.getRoomIdAsInt(),
+            onPick = onRoomSelected,
+            onNewRoom = if (onCreateRoom != null) ({ newRoomOpen = true }) else null,
+            onRename = if (isOwn) ({ renameOpen = true }) else null,
+            onDelete = if (isOwn && onDeleteRoom != null) ({ deleteOpen = true }) else null,
+            onClose = { pickerOpen = false },
+        )
+    }
+    if (helpOpen) com.supermetroid.editor.ui.maker.MakerShortcutSheet { helpOpen = false }
+    if (loadoutsOpen) com.supermetroid.editor.ui.maker.MakerLoadoutPanel(
+        presets = MAKER_LOADOUTS.map { it.toDef() }, saved = savedLoadouts.map { it.toDef() }, current = loadout.toDef(),
+        onUse = { def ->
+            loadout = MakerLoadout.of(def); message = "Loadout: ${def.name}"
+            if (playing) playHere() // a new loadout starts the room again
+        },
+        onSave = { def ->
+            val list = editorState.project.makerLoadouts
+            val i = list.indexOfFirst { it.name == def.name }
+            if (i >= 0) list[i] = def else list += def
+            editorState.markProjectChanged(); loadoutsVersion++; message = "Saved loadout ${def.name}"
+        },
+        onDelete = { def ->
+            editorState.project.makerLoadouts.removeAll { it.name == def.name }
+            editorState.markProjectChanged(); loadoutsVersion++; message = "Deleted loadout ${def.name}"
+        },
+        onClose = { loadoutsOpen = false },
+    )
     if (mapOpen && romParser != null) com.supermetroid.editor.ui.maker.MakerMapPanel(
         editorState, romParser, startArea = areaOf(selectedRoom).coerceAtLeast(0), currentRoomId = selectedRoom?.getRoomIdAsInt() ?: -1,
         names = rooms.associate { it.getRoomIdAsInt() to it.name },
@@ -1019,6 +1150,8 @@ private fun PlayBar(
     emulatorWorkspaceState: EmulatorWorkspaceState,
     onStop: () -> Unit,
     onRestart: () -> Unit,
+    loadoutName: String = "",
+    onLoadouts: () -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     val snap = emulatorWorkspaceState.snapshot
@@ -1041,13 +1174,17 @@ private fun PlayBar(
         }
         MakerButton(onClick = onRestart) { fg ->
             MakerIcon("M20 12a8 8 0 11-2.3-5.6M20 4v4h-4", fg, 20.dp)
-            Text("Restart room", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            KeyCap("F5", fg)
+            Text("Restart", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            KeyCap("R", fg)
         }
         val running = emulatorWorkspaceState.isRunning
         MakerButton(onClick = { emulatorWorkspaceState.setLoopRunning(!running) }) { fg ->
             if (running) MakerIcon("M6 5h4v14H6zM14 5h4v14h-4z", fg, 20.dp, filled = true) else MakerIcon(MakerIcons.PLAY_FILLED, fg, 20.dp, filled = true)
             Text(if (running) "Pause" else "Resume", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+        MakerButton(onClick = onLoadouts) { fg ->
+            Text("LOADOUT", color = p.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            Text(loadoutName, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.weight(1f))
         LiveChip("Room", snap?.roomId?.let { roomName(it) } ?: "—")
@@ -1095,6 +1232,12 @@ private fun CommandBar(
     onAppearance: () -> Unit,
     onNewRoom: (() -> Unit)? = null,
     onMap: (() -> Unit)? = null,
+    savedLoadouts: List<MakerLoadout> = emptyList(),
+    onEditLoadouts: (() -> Unit)? = null,
+    unsaved: Boolean = false,
+    onSave: (() -> Unit)? = null,
+    /** Opens the room picker (search, your rooms first, silhouettes); null keeps the plain menu. */
+    onRoomPicker: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
@@ -1108,7 +1251,7 @@ private fun CommandBar(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box {
-            MakerButton(onClick = { roomMenu = true }, modifier = Modifier.width(260.dp), height = 52.dp) { fg ->
+            MakerButton(onClick = { if (onRoomPicker != null) onRoomPicker() else roomMenu = true }, modifier = Modifier.width(260.dp), height = 52.dp) { fg ->
                 Box(Modifier.size(28.dp).background(MakerFixedColors.terrain.copy(alpha = 0.35f), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
                     MakerIcon(MakerIcons.ROOM, fg, 18.dp)
                 }
@@ -1149,6 +1292,13 @@ private fun CommandBar(
         MakerButton(onClick = onUndo) { fg -> MakerIcon(MakerIcons.UNDO, fg, 20.dp); Text("Undo", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         MakerButton(onClick = onRedo) { fg -> MakerIcon(MakerIcons.REDO, fg, 20.dp); Text("Redo", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
         Divider()
+        // Unsaved changes: a dot and Save (Ctrl+S). Autosave keeps a copy every few minutes too.
+        if (onSave != null) MakerButton(onClick = onSave, height = 40.dp,
+            modifier = Modifier.semantics { contentDescription = if (unsaved) "Unsaved changes, save" else "Saved" }) { fg ->
+            Box(Modifier.size(9.dp).background(if (unsaved) MakerFixedColors.hazards else MakerFixedColors.ok, RoundedCornerShape(5.dp)))
+            Text(if (unsaved) "Unsaved · Save" else "Saved", color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            KeyCap("Ctrl S", fg)
+        }
         Spacer(Modifier.weight(1f))
         Box {
             MakerButton(onClick = { themeMenu = true }) { fg ->
@@ -1185,9 +1335,11 @@ private fun CommandBar(
                 KeyCap("M×${loadout.missiles}", fg)
             }
             DropdownMenu(expanded = loadoutMenu, onDismissRequest = { loadoutMenu = false }) {
-                MAKER_LOADOUTS.forEach { option ->
+                (MAKER_LOADOUTS + savedLoadouts).forEach { option ->
                     DropdownMenuItem(text = { Text(option.name, fontSize = 13.sp) }, onClick = { loadoutMenu = false; onLoadout(option) })
                 }
+                if (onEditLoadouts != null) DropdownMenuItem(text = { Text("Edit loadouts…", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                    onClick = { loadoutMenu = false; onEditLoadouts() })
             }
         }
         MakerButton(onClick = onPlay, fill = MakerFixedColors.play, onFill = MakerFixedColors.onPlay, height = 50.dp) { fg ->
@@ -1464,7 +1616,7 @@ private fun ZoomControls(controls: MapCanvasControls, modifier: Modifier) {
 }
 
 @Composable
-private fun HintBar(tool: MakerTool, part: MakerPart?) {
+private fun HintBar(tool: MakerTool, part: MakerPart?, onHelp: () -> Unit = {}) {
     val p = LocalMakerPalette.current
     Row(
         Modifier.fillMaxWidth().height(42.dp).background(p.raised).padding(horizontal = 14.dp),
@@ -1477,6 +1629,7 @@ private fun HintBar(tool: MakerTool, part: MakerPart?) {
             Text(button, color = p.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Text(action, color = p.text, fontSize = 12.sp)
         }
+        Box(Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onHelp).semantics { contentDescription = "Show shortcuts" }) { KeyCap("?", p.muted) }
     }
 }
 

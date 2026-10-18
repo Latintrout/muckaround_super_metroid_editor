@@ -292,3 +292,58 @@ fun MakerConnectDoorPanel(
         }
     }
 }
+
+/** Every Maker shortcut on one card (press ? to open or close it). */
+@Composable
+fun MakerShortcutSheet(onClose: () -> Unit) {
+    val p = LocalMakerPalette.current
+    val groups = listOf(
+        "Tools" to MakerTool.entries.map { it.key.toString() to it.label },
+        "Editing" to listOf("Ctrl Z / Ctrl Y" to "Undo / Redo", "Ctrl S" to "Save", "Shift-drag (Paint)" to "Straight line",
+            "Right-click (Paint)" to "Remove or erase"),
+        "Select" to listOf("Drag empty space" to "Select a box", "Drag a part or box" to "Move it", "Shift-click" to "Grow the box",
+            "Arrows" to "Nudge the box", "Delete" to "Clear the box", "Ctrl C / Ctrl V" to "Copy / paste at the pointer",
+            "Ctrl D" to "Duplicate beside", "Right-click" to "Play from here, Start point, door, properties"),
+        "View" to listOf("Space-drag / middle-drag" to "Pan", "Wheel" to "Zoom at the pointer", "Shift / Ctrl + wheel" to "Pan sideways / up and down"),
+        "Play" to listOf("F5" to "Play (builds first)", "R" to "Restart instantly", "Esc" to "Stop and edit where Samus is"),
+    )
+    MakerCard("Shortcuts", "Press ? any time to see these.", onClose) {
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            groups.chunked(3).forEach { col ->
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    col.forEach { (title, rows) ->
+                        SectionLabel(title)
+                        rows.forEach { (k, what) ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                KeyCap(k, p.text); Text(what, color = p.muted, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row { Spacer(Modifier.weight(1f)); MakerButton(onClick = onClose) { fg -> Text("Got it", color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) } }
+    }
+}
+
+/** First steps for a room you made that can't be played yet. */
+@Composable
+fun MakerEmptyRoomHint(modifier: Modifier = Modifier, onDismiss: () -> Unit) {
+    val p = LocalMakerPalette.current
+    Column(
+        modifier.width(300.dp).background(p.background.copy(alpha = 0.96f), RoundedCornerShape(10.dp)).border(1.dp, p.border, RoundedCornerShape(10.dp)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Get this room playing", color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        listOf(
+            "1" to "Paint floors and walls (Terrain, Paint B or Box R).",
+            "2" to "Place a Start point (Stations): where Samus appears.",
+            "3" to "Press PLAY or F5. Esc comes back here.",
+        ).forEach { (n, t) ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KeyCap(n, MakerFixedColors.playDeep); Text(t, color = p.text, fontSize = 12.sp)
+            }
+        }
+        Row { Spacer(Modifier.weight(1f)); MakerButton(onClick = onDismiss, height = 30.dp) { fg -> Text("Got it", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) } }
+    }
+}

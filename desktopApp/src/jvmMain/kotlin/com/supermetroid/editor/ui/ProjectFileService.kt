@@ -83,6 +83,29 @@ internal object ProjectFileService {
     fun snapshotProject(project: SmEditProject): SmEditProject =
         SmEditProjectFormat.decode(json, json.encodeToString(SmEditProject.serializer(), project))
 
+    /** How often unsaved edits are written to the autosave copy. */
+    const val AUTOSAVE_INTERVAL_MS = 3 * 60 * 1000L
+    /** Backups of the project file kept in its backups folder (oldest removed first). */
+    const val BACKUPS_KEPT = 5
+
+    /** Writes [text] (a serialized project) to autosave/<name>.autosave.smedit beside [projectFile]. */
+    fun writeAutosave(projectFile: File, text: String): File {
+        val dir = File(projectFile.parentFile, "autosave").apply { mkdirs() }
+        val target = File(dir, projectFile.nameWithoutExtension + ".autosave.smedit")
+        writeBytesAtomically(target, text.toByteArray())
+        return target
+    }
+
+    /** Copies [projectFile] into backups/ with a timestamp before it is overwritten, keeping the newest [BACKUPS_KEPT]. */
+    fun backupBeforeSave(projectFile: File) {
+        if (!projectFile.isFile) return
+        val dir = File(projectFile.parentFile, "backups").apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(java.util.Date())
+        projectFile.copyTo(File(dir, "${projectFile.nameWithoutExtension}-$stamp.smedit"), overwrite = true)
+        dir.listFiles { f -> f.name.startsWith(projectFile.nameWithoutExtension + "-") && f.name.endsWith(".smedit") }
+            ?.sortedByDescending { it.name }?.drop(BACKUPS_KEPT)?.forEach { it.delete() }
+    }
+
     /** Capture mutable editor data on its caller thread; decode/persist this detached snapshot on a worker. */
     fun serializeProject(project: SmEditProject): String = json.encodeToString(SmEditProject.serializer(), project)
 
@@ -125,6 +148,7 @@ internal object ProjectFileService {
                 romPath = paths.relativeBaseRom(base),
                 baseRom = project.baseRom ?: base.takeIf(File::isFile)?.let(ProjectLifecycle::identity),
             )
+            runCatching { backupBeforeSave(projectFile) }.onFailure { onLog("Backup before save failed: ${it.message}") }
             writeBytesAtomically(projectFile, json.encodeToString(SmEditProject.serializer(), portable).toByteArray())
             onLog("Project saved: $projectFilePath")
             romParser?.let { exportCustomGfxPngs(project, projectFilePath, it, onLog) }

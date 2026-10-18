@@ -91,3 +91,51 @@ enum class MakerMarker(val label: String, val short: String, val icon: String, v
     ENEMIES("Enemy markers", "Enemies", MakerIcons.ENEMIES, TileOverlay.ENEMIES),
     SCROLL("Camera scroll triggers", "Camera", "M3 7h12v10H3zM15 10l6-3v10l-6-3", TileOverlay.SCROLL_PLMS),
 }
+
+/** The game keeps at most this many enemies in a room. */
+const val MAKER_ENEMY_LIMIT = 32
+
+/**
+ * Pre-Play checks on the loaded room's own content: doorways that go nowhere, whether there's a way out,
+ * items Samus may not reach from the Start point (walking through open blocks), and the enemy limit.
+ */
+fun makerRoomChecks(editorState: com.supermetroid.editor.ui.EditorState, startPoint: Pair<Int, Int>?): List<ReadyCheck> {
+    val w = editorState.workingBlocksWide; val h = editorState.workingBlocksTall
+    if (w <= 0 || h <= 0) return emptyList()
+    fun type(x: Int, y: Int) = (editorState.readBlockWord(x, y) shr 12) and 0xF
+    val checks = mutableListOf<ReadyCheck>()
+
+    // Doors: every doorway's connection exists.
+    val doorBts = (0 until h).flatMap { y -> (0 until w).filter { x -> type(x, y) == 0x9 }.map { x -> editorState.readBts(x, y) } }.toSet()
+    val connections = editorState.doorEntries.size
+    val dangling = doorBts.count { it >= connections }
+    checks += when {
+        doorBts.isEmpty() -> ReadyCheck(true, "No doors", "Samus can't leave this room (fine for a test room)", "Exits")
+        dangling > 0 -> ReadyCheck(false, "A door goes nowhere", "Right-click it with Select › Connect this door", "Doors")
+        else -> ReadyCheck(true, "Doors connect", "${doorBts.size} doorway${if (doorBts.size == 1) "" else "s"} lead somewhere", "Doors")
+    }
+
+    // Items: reachable from the Start point through blocks that aren't solid.
+    if (startPoint != null) {
+        val solidTypes = setOf(0x1, 0x8, 0x9, 0xA, 0xB, 0xC, 0xE, 0xF)
+        val seen = BooleanArray(w * h)
+        val queue = ArrayDeque(listOf(startPoint))
+        while (queue.isNotEmpty()) {
+            val (x, y) = queue.removeFirst()
+            if (x !in 0 until w || y !in 0 until h || seen[y * w + x] || type(x, y) in solidTypes) continue
+            seen[y * w + x] = true
+            queue += listOf(x + 1 to y, x - 1 to y, x to y + 1, x to y - 1)
+        }
+        val items = editorState.workingPlms.filter { editorState.isEditorItemPlm(it.id) && it.x in 0 until w && it.y in 0 until h }
+        // Items hidden in a block count as reachable when a neighbouring open block is.
+        fun reach(x: Int, y: Int) = listOf(x to y, x + 1 to y, x - 1 to y, x to y + 1, x to y - 1).any { (ax, ay) -> ax in 0 until w && ay in 0 until h && seen[ay * w + ax] }
+        val out = items.count { !reach(it.x, it.y) }
+        if (items.isNotEmpty()) checks += if (out == 0) ReadyCheck(true, "Items in reach", "All ${items.size} can be reached from the Start point", "Items")
+            else ReadyCheck(false, "$out item${if (out == 1) "" else "s"} may be out of reach", "Walled off from the Start point (bombs and doors aside)", "Items")
+    }
+
+    // Enemies: within the game's limit.
+    val enemies = editorState.workingEnemies.size
+    if (enemies > MAKER_ENEMY_LIMIT) checks += ReadyCheck(false, "Too many enemies", "$enemies in this room; the game keeps at most $MAKER_ENEMY_LIMIT", "Enemies")
+    return checks
+}
