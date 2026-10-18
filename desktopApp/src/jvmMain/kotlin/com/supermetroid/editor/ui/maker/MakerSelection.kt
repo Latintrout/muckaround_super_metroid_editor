@@ -35,19 +35,19 @@ fun EditorState.selectBox(box: MakerBox?) {
 data class MakerClip(
     val width: Int, val height: Int,
     val words: List<Int>, val bts: List<Int>,
-    /** (plmId, dx, dy) */
-    val items: List<Triple<Int, Int, Int>>,
+    /** Items, door caps and station PLMs on the blocks, relative to the box. */
+    val items: List<RomParser.PlmEntry>,
     val enemies: List<RomParser.EnemyEntry>,
 )
 
-private fun EditorState.itemsIn(box: MakerBox) = workingPlms.filter { isEditorItemPlm(it.id) && (it.x to it.y) in box }
+private fun EditorState.itemsIn(box: MakerBox) = workingPlms.filter { isPartPlm(it.id) && (it.x to it.y) in box }
 private fun EditorState.enemiesIn(box: MakerBox) = workingEnemies.filter { (it.x / 16 to it.y / 16) in box }
 
 fun EditorState.copyBox(box: MakerBox): MakerClip = MakerClip(
     box.width, box.height,
     (box.y0..box.y1).flatMap { y -> (box.x0..box.x1).map { x -> readBlockWord(x, y) } },
     (box.y0..box.y1).flatMap { y -> (box.x0..box.x1).map { x -> readBts(x, y) } },
-    itemsIn(box).map { Triple(it.id, it.x - box.x0, it.y - box.y0) },
+    itemsIn(box).map { it.copy(x = it.x - box.x0, y = it.y - box.y0) },
     enemiesIn(box).map { it.copy(x = it.x - box.x0 * 16, y = it.y - box.y0 * 16) },
 )
 
@@ -70,10 +70,12 @@ fun EditorState.pasteClip(clip: MakerClip, x: Int, y: Int, description: String =
             if (oldWord == word && oldBts == bts) null else TileEdit(bx, by, oldWord, word, oldBts, bts)
         }
         applyBulkEdits(description, edits)
-        for ((id, dx, dy) in clip.items) {
-            if (workingPlms.none { it.x == box.x0 + dx && it.y == box.y0 + dy && isEditorItemPlm(it.id) }) {
-                // Param 0 as the Maker places items; the exporter assigns each its own collection bit.
-                addPlm(id, box.x0 + dx, box.y0 + dy, 0, ItemStateScope.ALL_STATES)
+        for (p in clip.items) {
+            val x = box.x0 + p.x; val y = box.y0 + p.y
+            if (workingPlms.none { it.x == x && it.y == y && isPartPlm(it.id) }) {
+                // Items get param 0 as the Maker places them (the exporter assigns each its own collection bit);
+                // door caps and stations keep theirs.
+                addPlm(p.id, x, y, if (isEditorItemPlm(p.id)) 0 else p.param, ItemStateScope.ALL_STATES)
             }
         }
         for (e in clip.enemies) addEnemy(e.id, e.x + box.x0 * 16, e.y + box.y0 * 16, e.initParam, e.properties)
@@ -160,3 +162,98 @@ fun straightLine(from: Pair<Int, Int>, to: Pair<Int, Int>): MakerBox =
     if (kotlin.math.abs(to.first - from.first) >= kotlin.math.abs(to.second - from.second)) MakerBox.of(from, to.first to from.second)
     else MakerBox.of(from, from.first to to.second)
 
+
+/** PLMs that belong to placed parts and travel with them: items, door caps, and the PLMs of built-in patterns (stations…). */
+fun EditorState.isPartPlm(id: Int): Boolean =
+    isEditorItemPlm(id) || RomParser.isDoorCapPlm(id) || project.patterns.any { p -> p.builtIn && p.cells.any { it?.plmId == id } }
+
+/** The door blocks (rows) beside or under a door cap at ([x], [y]): the doorway it closes, if any. */
+private fun EditorState.doorwayForCap(x: Int, y: Int): MakerDoorway? =
+    listOf(x, x - 1, x + 1).firstNotNullOfOrNull { cx -> makerDoorwayAt(cx, y)?.takeIf { it.top == y } }
+
+/** Door caps whose doorway is gone (the door blocks were erased or moved away). */
+fun EditorState.orphanDoorCaps(): List<RomParser.PlmEntry> =
+    workingPlms.filter { RomParser.isDoorCapPlm(it.id) && doorwayForCap(it.x, it.y) == null }
+
+/** Removes [orphanDoorCaps] as one undo step; returns how many. */
+fun EditorState.removeOrphanDoorCaps(): Int {
+    val orphans = orphanDoorCaps()
+    if (orphans.isEmpty()) return 0
+    asOneUndoStep { for (c in orphans) removePlm(c.x, c.y, c.id, ItemStateScope.ALL_STATES) }
+    return orphans.size
+}
+
+/** An enemy's hitbox in blocks, from its species header (bank $A0: x radius at +8, y radius at +10). */
+fun RomParser.enemyBlockBox(e: RomParser.EnemyEntry): MakerBox {
+    val (rx, ry) = runCatching {
+        val pc = snesToPc(0xA00000 or e.id)
+        readUInt16At(pc + 8).coerceIn(4, 128) to readUInt16At(pc + 10).coerceIn(4, 128)
+    }.getOrDefault(8 to 8)
+    return MakerBox((e.x - rx) / 16, (e.y - ry) / 16, (e.x + rx - 1) / 16, (e.y + ry - 1) / 16)
+}
+
+/**
+ * The whole placed object under block ([bx], [by]), for Select: a door (its blocks and cap), a part placed
+ * from a built-in pattern (a station: found by its PLM and the pattern's footprint), or a door cap / PLM left
+ * on its own. Null for plain blocks.
+ */
+fun EditorState.objectBoxAt(bx: Int, by: Int, parser: RomParser?): MakerBox? {
+    fun clamp(b: MakerBox) = MakerBox(b.x0.coerceAtLeast(0), b.y0.coerceAtLeast(0), b.x1.coerceAtMost(workingBlocksWide - 1), b.y1.coerceAtMost(workingBlocksTall - 1))
+    // A door: its blocks, plus its cap when the cap sits one column inside.
+    val doorway = makerDoorwayAt(bx, by)
+        ?: workingPlms.firstOrNull { RomParser.isDoorCapPlm(it.id) && it.x == bx && it.y == by }?.let { doorwayForCap(it.x, it.y) }
+    if (doorway != null) {
+        val cap = workingPlms.firstOrNull { RomParser.isDoorCapPlm(it.id) && it.y == doorway.top && kotlin.math.abs(it.x - doorway.x) <= 1 }
+        val x0 = minOf(doorway.x, cap?.x ?: doorway.x); val x1 = maxOf(doorway.x, cap?.x ?: doorway.x)
+        return clamp(MakerBox(x0, doorway.top, x1, doorway.top + doorway.height - 1))
+    }
+    // A part from a built-in pattern: any of its PLMs whose footprint covers this block.
+    for (plm in workingPlms) {
+        if (isEditorItemPlm(plm.id) || RomParser.isDoorCapPlm(plm.id)) continue
+        for (pattern in project.patterns.filter { it.builtIn }) {
+            val i = pattern.cells.indexOfFirst { it?.plmId == plm.id }
+            if (i < 0) continue
+            val r = i / pattern.cols; val c = i % pattern.cols
+            val box = clamp(MakerBox(plm.x - c, plm.y - r, plm.x - c + pattern.cols - 1, plm.y - r + pattern.rows - 1))
+            if ((bx to by) in box) return box
+        }
+    }
+    // A lone door cap or other part PLM.
+    workingPlms.firstOrNull { it.x == bx && it.y == by && !isEditorItemPlm(it.id) && isPartPlm(it.id) }?.let { return MakerBox(bx, by, bx, by) }
+    // Its name badge (drawn beside it on the room view) counts as the part too.
+    partLabelAt(bx, by)?.takeIf { it.x != bx || it.y != by }?.let { return objectBoxAt(it.x, it.y, parser) }
+    return null
+}
+
+/**
+ * The name badge the room view draws for a door cap, station or gate (same font and placement as the
+ * canvas: centred on the block, kept inside the room), in room pixels: x0, y0, x1, y1. Null when it has none.
+ */
+fun EditorState.partLabelRect(plm: RomParser.PlmEntry): IntArray? {
+    val name = when {
+        RomParser.isStationPlm(plm.id) -> RomParser.stationNameForPlm(plm.id)
+        RomParser.doorCapColor(plm.id) != null -> RomParser.doorCapDisplayName(plm.id)
+        RomParser.isGatePlm(plm.id) -> RomParser.gateNameForPlm(plm.id, plm.param)
+        else -> null
+    } ?: return null
+    val fm = labelMetrics
+    val badgeW = fm.stringWidth(name) + 6; val badgeH = fm.height + 2
+    val roomW = workingBlocksWide * 16; val roomH = workingBlocksTall * 16
+    val cx = plm.x * 16 + 8; val cy = plm.y * 16 + 8
+    val x = (cx - badgeW / 2).coerceIn(0, maxOf(0, roomW - badgeW))
+    val y = (cy - badgeH / 2).coerceIn(0, maxOf(0, roomH - badgeH))
+    return intArrayOf(x, y, x + badgeW, y + badgeH)
+}
+
+private val labelMetrics: java.awt.FontMetrics by lazy {
+    java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB).createGraphics().let { g ->
+        g.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
+        g.fontMetrics.also { g.dispose() }
+    }
+}
+
+/** The door cap, station or gate whose name badge covers block ([bx], [by]), if any. */
+fun EditorState.partLabelAt(bx: Int, by: Int): RomParser.PlmEntry? = workingPlms.firstOrNull { plm ->
+    val r = partLabelRect(plm) ?: return@firstOrNull false
+    bx * 16 + 16 > r[0] && bx * 16 < r[2] && by * 16 + 16 > r[1] && by * 16 < r[3]
+}

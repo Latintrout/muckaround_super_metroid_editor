@@ -94,6 +94,10 @@ import com.supermetroid.editor.ui.maker.SectionLabel
 import com.supermetroid.editor.ui.maker.blockTypeName
 import com.supermetroid.editor.ui.maker.makerHint
 import com.supermetroid.editor.ui.maker.resizeMakerRoom
+import com.supermetroid.editor.ui.maker.objectBoxAt
+import com.supermetroid.editor.ui.maker.enemyBlockBox
+import com.supermetroid.editor.ui.maker.isPartPlm
+import com.supermetroid.editor.ui.maker.removeOrphanDoorCaps
 import com.supermetroid.editor.ui.maker.connectMakerDoor
 import com.supermetroid.editor.ui.maker.autoEdgeEdits
 import com.supermetroid.editor.ui.maker.makerLiquid
@@ -466,7 +470,7 @@ private fun MakerScreenContent(
         if (editorState.makerStartPoint() == MakerStartPoint(bx, by)) {
             editorState.setMakerStartPoint(null, "Maker remove start point"); message = "Removed the Start point"; return
         }
-        editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }?.let {
+        editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isPartPlm(it.id) }?.let {
             editorState.removePlm(it.x, it.y, it.id); message = "Removed ${RomParser.plmDisplayName(it.id)}"; return
         }
         editorState.workingEnemies.firstOrNull { it.x / 16 == bx && it.y / 16 == by }?.let {
@@ -601,6 +605,27 @@ private fun MakerScreenContent(
             editorState.undoStack.lastOrNull()?.let { autoEdged += it }
             editorState.joinLastUndoStepWithPrevious()
         }
+    }
+
+    // Door caps whose door blocks are gone (erased, cleared, painted over) go too, in the same undo step.
+    val capSeen = remember { java.util.Collections.newSetFromMap(java.util.IdentityHashMap<com.supermetroid.editor.data.EditOperation, Boolean>()) }
+    androidx.compose.runtime.LaunchedEffect(editorState.undoVersion) {
+        val top = editorState.undoStack.lastOrNull() ?: return@LaunchedEffect
+        if (editorState.redoStack.isNotEmpty() || top in capSeen || top.edits.isEmpty()) return@LaunchedEffect
+        capSeen += top
+        val before = editorState.undoStack.size
+        val removed = editorState.removeOrphanDoorCaps()
+        if (removed > 0) {
+            editorState.undoStack.drop(before).forEach { capSeen += it }
+            editorState.joinLastUndoStepWithPrevious()
+            message = "Removed the door's cap too"
+        }
+    }
+    // Leftover caps from earlier sessions are cleaned up when the room opens.
+    androidx.compose.runtime.LaunchedEffect(selectedRoom?.id, editorState.workingLevelData != null) {
+        if (editorState.workingLevelData == null) return@LaunchedEffect
+        val removed = editorState.removeOrphanDoorCaps()
+        if (removed > 0) message = "Removed $removed leftover door cap${if (removed == 1) "" else "s"} (their doors were gone)"
     }
 
     // Doors: painting a door in a room you made asks where it goes (also: right-click a door with Select).
@@ -881,13 +906,22 @@ private fun MakerScreenContent(
                                             event.type == PointerEventType.Press && event.buttons.isPrimaryPressed && inRoom -> {
                                                 val obj: Any? = editorState.makerStartPoint()?.takeIf { it.x == bx && it.y == by }
                                                     ?: editorState.workingPlms.firstOrNull { it.x == bx && it.y == by && editorState.isEditorItemPlm(it.id) }
-                                                    ?: editorState.workingEnemies.firstOrNull { it.x / 16 == bx && it.y / 16 == by }
+                                                // A door (blocks and cap), a station or a stray door cap: the whole object, as a box.
+                                                val whole = if (obj == null) editorState.objectBoxAt(bx, by, romParser) else null
+                                                val enemy = if (obj == null && whole == null) editorState.workingEnemies.firstOrNull { e ->
+                                                    (e.x / 16 == bx && e.y / 16 == by) || (romParser != null && (bx to by) in romParser.enemyBlockBox(e))
+                                                } else null
                                                 val ss = editorState.mapSelStart; val se = editorState.mapSelEnd
                                                 val sel = if (ss != null && se != null) intArrayOf(minOf(ss.first, se.first), minOf(ss.second, se.second),
                                                     maxOf(ss.first, se.first), maxOf(ss.second, se.second)) else null
-                                                if (obj != null) {
-                                                    moving = obj; moveFrom = bx to by
+                                                if (obj != null || enemy != null) {
+                                                    moving = obj ?: enemy; moveFrom = bx to by
                                                     editorState.mapSelStart = bx to by; editorState.mapSelEnd = bx to by
+                                                    event.changes.forEach { it.consume() }
+                                                } else if (whole != null) {
+                                                    // Select it whole; dragging moves it as one thing, Delete removes it.
+                                                    editorState.selectBox(whole)
+                                                    blockMove = intArrayOf(whole.x0, whole.y0, whole.x1, whole.y1); moveFrom = bx to by
                                                     event.changes.forEach { it.consume() }
                                                 } else if (sel != null && bx in sel[0]..sel[2] && by in sel[1]..sel[3]) {
                                                     // Press inside the selected box: drag moves its blocks in one gesture.
