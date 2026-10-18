@@ -94,6 +94,8 @@ import com.supermetroid.editor.ui.maker.SectionLabel
 import com.supermetroid.editor.ui.maker.blockTypeName
 import com.supermetroid.editor.ui.maker.makerHint
 import com.supermetroid.editor.ui.maker.resizeMakerRoom
+import com.supermetroid.editor.ui.maker.connectMakerDoor
+import com.supermetroid.editor.ui.maker.autoEdgeEdits
 import com.supermetroid.editor.ui.maker.makerLiquid
 import com.supermetroid.editor.ui.maker.setMakerLiquidLevel
 import com.supermetroid.editor.ui.maker.makerSelection
@@ -165,11 +167,13 @@ internal fun MakerModeScreen(
     onCreateRoom: ((NewRoomCreationRequest) -> String?)? = null,
     /** Deletes a project room and selects a neighbour; returns an error, or null on success. */
     onDeleteRoom: ((Int) -> String?)? = null,
+    /** Whether painting ground tidies its edges to start with (the Terrain switch). */
+    initialAutoEdges: Boolean = true,
 ) {
     MakerThemeProvider(themeState) {
         MakerScreenContent(editorState, romParser, rooms, selectedRoom, emulatorWorkspaceState, onRoomSelected,
             onWorkspaceChanged, onPlay, onExit, themeState, modifier, initialSolidView, playing, onStopPlay, initialAppearanceOpen,
-            initialTool, canvasControls, onCreateRoom, onDeleteRoom)
+            initialTool, canvasControls, onCreateRoom, onDeleteRoom, initialAutoEdges)
     }
 }
 
@@ -194,6 +198,7 @@ private fun MakerScreenContent(
     controls: MapCanvasControls,
     onCreateRoom: ((NewRoomCreationRequest) -> String?)?,
     onDeleteRoom: ((Int) -> String?)?,
+    initialAutoEdges: Boolean,
 ) {
     val p = LocalMakerPalette.current
     val scope = rememberCoroutineScope()
@@ -520,6 +525,48 @@ private fun MakerScreenContent(
         }
     }
 
+    // Auto edges: after each new tile edit touching ground, re-tile it and its neighbours as the game's rooms do
+    // (learned per tileset), as part of the same undo step.
+    var autoEdges by remember { mutableStateOf(initialAutoEdges) }
+    val autoEdged = remember { java.util.Collections.newSetFromMap(java.util.IdentityHashMap<com.supermetroid.editor.data.EditOperation, Boolean>()) }
+    androidx.compose.runtime.LaunchedEffect(editorState.undoVersion, autoEdges) {
+        val parser = romParser ?: return@LaunchedEffect
+        val top = editorState.undoStack.lastOrNull() ?: return@LaunchedEffect
+        if (!autoEdges || editorState.redoStack.isNotEmpty() || top in autoEdged || top.description == "Maker auto edges") return@LaunchedEffect
+        autoEdged += top
+        // Only after painting (Paint, Box, Fill, Erase, lines): moving, pasting or clearing blocks keeps their tiles.
+        if (tool !in setOf(MakerTool.PAINT, MakerTool.BOX, MakerTool.FILL, MakerTool.ERASE)) return@LaunchedEffect
+        if (top.description.startsWith("Maker ") && top.description !in setOf("Maker box", "Maker box clear", "Maker line", "Maker erase")) return@LaunchedEffect
+        // The ground being painted (or, for erasing, this room's own ground) decides which edges to learn.
+        val ground = (activePart as? MakerPart.Tile)?.takeIf { it.blockType == null || it.blockType == 0x8 }?.metatile
+            ?: com.supermetroid.editor.ui.maker.dominantGroundMetatile(editorState) ?: return@LaunchedEffect
+        val table = com.supermetroid.editor.ui.maker.MakerEdgeTable.forGround(parser, editorState.currentTilesetId, ground) ?: return@LaunchedEffect
+        val family = table.family
+        val touched = top.edits.filter { it.layer == com.supermetroid.editor.data.TILE_EDIT_LAYER_1 &&
+            ((it.newBlockWord and 0x3FF) in family || (it.oldBlockWord and 0x3FF) in family) }
+        if (touched.isEmpty()) return@LaunchedEffect
+        val area = com.supermetroid.editor.ui.maker.MakerBox(touched.minOf { it.blockX }, touched.minOf { it.blockY }, touched.maxOf { it.blockX }, touched.maxOf { it.blockY })
+        val edits = editorState.autoEdgeEdits(area, table)
+        if (edits.isNotEmpty()) {
+            editorState.applyBulkEdits("Maker auto edges", edits)
+            editorState.undoStack.lastOrNull()?.let { autoEdged += it }
+            editorState.joinLastUndoStepWithPrevious()
+        }
+    }
+
+    // Doors: painting a door in a room you made asks where it goes (also: right-click a door with Select).
+    var connectDoor by remember { mutableStateOf<Pair<Pair<Int, Int>, String?>?>(null) }
+    val doorSeen = remember { java.util.Collections.newSetFromMap(java.util.IdentityHashMap<com.supermetroid.editor.data.EditOperation, Boolean>()) }
+    androidx.compose.runtime.LaunchedEffect(editorState.undoVersion) {
+        val top = editorState.undoStack.lastOrNull() ?: return@LaunchedEffect
+        if (editorState.redoStack.isNotEmpty() || top in doorSeen) return@LaunchedEffect
+        doorSeen += top
+        val pattern = (activePart as? MakerPart.Pattern)?.patternId?.takeIf { com.supermetroid.editor.ui.maker.isDoorPattern(it) } ?: return@LaunchedEffect
+        if (editorState.project.newRoomForPreviewId(editorState.currentRoomId) == null) return@LaunchedEffect
+        val door = top.edits.firstOrNull { (it.newBlockWord shr 12) and 0xF == 0x9 } ?: return@LaunchedEffect
+        connectDoor = (door.blockX to door.blockY) to pattern
+    }
+
     // A Maker room is one layout: edits apply to every state that shares it (no per-state prompt).
     androidx.compose.runtime.LaunchedEffect(selectedRoom?.id, editorState.editVersion) {
         if (editorState.currentLayoutEditingContext()?.requiresScopeChoice == true) {
@@ -616,6 +663,7 @@ private fun MakerScreenContent(
                 },
                 search = search, onSearch = { search = it }, onSearchFocus = { searchFocused = it },
                 quick = quickParts, isFavourite = { it.id in favourites }, onToggleFavourite = ::toggleFavourite,
+                autoEdges = autoEdges.takeIf { category == MakerCategory.TERRAIN }, onAutoEdges = { autoEdges = it },
                 editorState = editorState,
             )
             Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -872,6 +920,12 @@ private fun MakerScreenContent(
                                     editorState.setMakerStartPoint(MakerStartPoint(block.first, block.second, editorState.makerStartPoint()?.facingLeft ?: false), "Maker place start point")
                                     message = "Samus starts at block ${block.first}, ${block.second}"
                                 })
+                                if ((editorState.readBlockWord(block.first, block.second) shr 12) and 0xF == 0x9 &&
+                                    editorState.project.newRoomForPreviewId(editorState.currentRoomId) != null) {
+                                    DropdownMenuItem(text = { Text("Connect this door…", fontSize = 13.sp) }, onClick = {
+                                        blockMenu = null; connectDoor = block to null
+                                    })
+                                }
                                 DropdownMenuItem(text = { Text("Block properties", fontSize = 13.sp) }, onClick = {
                                     blockMenu = null; controls.openTilePropertiesAt?.invoke(block.first, block.second)
                                 })
@@ -892,6 +946,20 @@ private fun MakerScreenContent(
         StatusBar(editorState, message)
     }
     if (appearanceOpen) com.supermetroid.editor.ui.maker.MakerAppearancePanel(themeState) { appearanceOpen = false }
+    connectDoor?.let { (at, pattern) ->
+        val parser = romParser ?: return@let
+        val here = editorState.currentRoomId
+        val own = editorState.project.newRooms.filter { it.previewRoomId != here }.map { it.previewRoomId to it.name }
+        val ownIds = own.map { it.first }.toSet()
+        val game = rooms.filter { it.getRoomIdAsInt() != here && it.getRoomIdAsInt() !in ownIds }
+            .map { it.getRoomIdAsInt() to "${AREA_NAMES.getOrElse(areaOf(it)) { "?" }} · ${it.name}" }
+        com.supermetroid.editor.ui.maker.MakerConnectDoorPanel(own, game, onPick = { dest ->
+            editorState.connectMakerDoor(parser, at.first, at.second, dest, pattern).fold(
+                onSuccess = { onWorkspaceChanged(); message = it.message; null },
+                onFailure = { it.message ?: "The door couldn't be connected." },
+            )
+        }, onClose = { connectDoor = null })
+    }
     if (resizeOpen && romParser != null) com.supermetroid.editor.ui.maker.MakerResizeRoomPanel(
         size = (editorState.workingBlocksWide / 16).coerceAtLeast(1) to (editorState.workingBlocksTall / 16).coerceAtLeast(1),
         onResize = { side, grow ->
@@ -1187,6 +1255,9 @@ private fun PartsPanel(
     quick: List<MakerPart> = emptyList(),
     isFavourite: (MakerPart) -> Boolean = { false },
     onToggleFavourite: (MakerPart) -> Unit = {},
+    /** Terrain only: whether painting ground tidies its edges (null hides the switch). */
+    autoEdges: Boolean? = null,
+    onAutoEdges: (Boolean) -> Unit = {},
 ) {
     val p = LocalMakerPalette.current
     Column(Modifier.width(304.dp).fillMaxHeight().background(p.background).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1228,21 +1299,9 @@ private fun PartsPanel(
                     modifier = Modifier.fillMaxWidth().onFocusChanged { onSearchFocus(it.isFocused) })
             }
         }
-        if (quick.isNotEmpty() && search.isBlank()) {
-            Text("Starred and recent", color = p.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                quick.forEach { part ->
-                    Box(
-                        Modifier.size(32.dp).border(2.dp, if (active?.id == part.id) part.category.color.darker() else p.border, RoundedCornerShape(6.dp))
-                            .clickable(role = androidx.compose.ui.semantics.Role.Button) { onChoose(part) }
-                            .semantics { contentDescription = "Quick ${part.name}" },
-                    ) { PartPreview(part, editorState, Modifier.fillMaxSize()) }
-                }
-            }
-        }
         Text(if (search.isBlank()) "Previews use the game's real tiles and colours" else "${parts.size} found in every category", color = p.muted, fontSize = 11.sp)
         if (parts.isEmpty()) Text(category.emptyHint.ifBlank { "Nothing matches." }, color = p.muted, fontSize = 13.sp)
-        LazyVerticalGrid(GridCells.Fixed(2), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyVerticalGrid(GridCells.Fixed(2), modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(parts, key = { it.id }) { part ->
                 val on = active?.id == part.id
                 val cardCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
@@ -1279,6 +1338,28 @@ private fun PartsPanel(
                     }
                     Text(part.name, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(if (search.isBlank()) part.hint else "${part.category.label} · ${part.hint}", color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        // Below the cards, so the cards never move: the Auto edges switch (Terrain) and starred / recent parts.
+        if (autoEdges != null && search.isBlank()) {
+            MakerButton(onClick = { onAutoEdges(!autoEdges) }, selected = autoEdges, height = 32.dp, modifier = Modifier.fillMaxWidth()
+                .semantics { contentDescription = if (autoEdges) "Auto edges on" else "Auto edges off" }) { fg ->
+                MakerIcon(MakerIcons.TERRAIN, fg, 16.dp)
+                Text(if (autoEdges) "Auto edges: on" else "Auto edges: off", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("tidy ground corners", color = fg.copy(alpha = 0.7f), fontSize = 11.sp)
+            }
+        }
+        if (quick.isNotEmpty() && search.isBlank()) {
+            Text("Starred and recent", color = p.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                quick.forEach { part ->
+                    Box(
+                        Modifier.size(32.dp).border(2.dp, if (active?.id == part.id) part.category.color.darker() else p.border, RoundedCornerShape(6.dp))
+                            .clickable(role = androidx.compose.ui.semantics.Role.Button) { onChoose(part) }
+                            .semantics { contentDescription = "Quick ${part.name}" },
+                    ) { PartPreview(part, editorState, Modifier.fillMaxSize()) }
                 }
             }
         }

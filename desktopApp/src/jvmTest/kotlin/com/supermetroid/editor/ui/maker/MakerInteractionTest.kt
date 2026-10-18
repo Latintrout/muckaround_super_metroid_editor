@@ -60,6 +60,7 @@ class MakerInteractionTest {
                     editorState = editor, romParser = parser, rooms = rooms, selectedRoom = room,
                     emulatorWorkspaceState = EmulatorWorkspaceState(), onRoomSelected = {}, onWorkspaceChanged = {},
                     onPlay = {}, onExit = {}, themeState = themes, initialTool = tool, canvasControls = controls,
+                    initialAutoEdges = false, // this test checks plain box fill tiles
                 )
             }
         }

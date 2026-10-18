@@ -248,3 +248,47 @@ fun MakerResizeRoomPanel(size: Pair<Int, Int>, onResize: (MakerSide, Boolean) ->
         }
     }
 }
+
+/**
+ * Where does this door go? Your rooms connect both ways (a return door is added there); the game's rooms
+ * get a one-way door. [onPick] returns an error to show, or null when connected.
+ */
+@Composable
+fun MakerConnectDoorPanel(
+    ownRooms: List<Pair<Int, String>>, gameRooms: List<Pair<Int, String>>,
+    onPick: (Int) -> String?, onClose: () -> Unit,
+) {
+    val p = LocalMakerPalette.current
+    var query by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    MakerCard("Where does this door go?", "Your rooms connect both ways: a matching door is added on their facing wall. The game's rooms get a one-way door.", onClose) {
+        NameField(query, { query = it }, {})
+        val q = query.trim()
+        fun List<Pair<Int, String>>.matching() = filter { q.isEmpty() || it.second.contains(q, ignoreCase = true) }
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().height(320.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val own = ownRooms.matching(); val game = gameRooms.matching()
+            if (own.isNotEmpty()) item { SectionLabel("Your rooms · both ways") }
+            items(own.size) { i ->
+                val (id, name) = own[i]
+                MakerButton(onClick = { if (!busy) { busy = true; error = onPick(id); busy = false; if (error == null) onClose() } },
+                    modifier = Modifier.fillMaxWidth(), height = 38.dp) { fg ->
+                    MakerIcon(MakerIcons.DOORS, MakerFixedColors.doors, 16.dp); Text(name, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            if (game.isNotEmpty()) item { SectionLabel("Game rooms · one way") }
+            items(game.size) { i ->
+                val (id, name) = game[i]
+                MakerButton(onClick = { if (!busy) { busy = true; error = onPick(id); busy = false; if (error == null) onClose() } },
+                    modifier = Modifier.fillMaxWidth(), height = 34.dp) { fg ->
+                    Text(name, color = fg, fontSize = 12.sp)
+                }
+            }
+        }
+        error?.let { Text(it, color = MakerFixedColors.danger, fontSize = 13.sp) }
+        Row {
+            Spacer(Modifier.weight(1f))
+            MakerButton(onClick = onClose) { fg -> Text("Not now", color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}

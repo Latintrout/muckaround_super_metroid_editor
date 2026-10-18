@@ -143,7 +143,7 @@ class MakerRoomsUiTest {
 
         // Room look › Background (rooms you made): pick the first game background, then back to Plain.
         onNodeWithText("Room look: tileset & effects").performClick(); waitForIdle()
-        onNodeWithText("Background", ignoreCase = true).assertExists()
+        onNodeWithText("BACKGROUND").assertExists() // the section label
         val firstBg = makerBackgroundChoices(parser, editor.currentTilesetId, editor.project.newRooms.map { it.previewRoomId }.toSet()).first()
         val label = rooms.first { it.getRoomIdAsInt() == firstBg.exampleRoomId }.name
         onAllNodesWithText(label).onFirst().performClick(); waitForIdle()
@@ -152,5 +152,52 @@ class MakerRoomsUiTest {
         onNodeWithText("Plain").performClick(); waitForIdle()
         assertEquals(null, editor.makerBackground(shaft.previewRoomId))
         onAllNodesWithText("Done").onFirst().performClick(); waitForIdle()
+    }
+
+    @Test
+    fun `placing a door asks where it goes and connects both ways`() = androidx.compose.ui.test.runDesktopComposeUiTest(width = 1600, height = 960) {
+        val rom = File(System.getenv("V1_ROM") ?: "")
+        assumeTrue(rom.isFile, "V1_ROM not set")
+        val shots = System.getenv("MAKER_UI_SHOTS")?.let { File(it).apply { mkdirs() } }
+        val open = ProjectLifecycle.create("DoorUi", Files.createTempDirectory("maker-doorui").toFile(), rom)
+        val editor = EditorState().apply { testMode = true }
+        editor.initForProject(open.file, open.project)
+        var parser by mutableStateOf(editor.prepareWorkspaceParser(RomParser.loadRom(open.project.romPath)))
+        editor.loadRoom(0x91F8, parser, requireNotNull(parser.readRoomHeader(0x91F8)))
+        // Two rooms you made: "Far room" and "Hall" (open).
+        fun make(name: String): Int {
+            editor.loadRoom(0x91F8, parser, requireNotNull(parser.readRoomHeader(0x91F8)))
+            val plan = requireNotNull(planMakerNewRoom(editor, parser, 0x91F8, 1, 1, MakerNewRoomStart.EMPTY, name, seed = 1))
+            val (created, ws) = editor.createNewRoomWorkspace(plan.request, parser); parser = ws
+            editor.loadRoom(created.previewRoomId, parser, requireNotNull(parser.readRoomHeader(created.previewRoomId)))
+            editor.setCurrentLayoutEditScope(com.supermetroid.editor.ui.LayoutEditScope.ALL_SHARING_STATES)
+            applyMakerNewRoomLook(editor, requireNotNull(plan.look))
+            return created.previewRoomId
+        }
+        val far = make("Far room"); val hall = make("Hall")
+        var rooms by mutableStateOf(parser.roomCatalog.rooms)
+        var room by mutableStateOf(rooms.first { it.getRoomIdAsInt() == hall })
+        val controls = MapCanvasControls()
+        setContent {
+            MakerModeScreen(editor, parser, rooms, room, EmulatorWorkspaceState(), { room = it },
+                onWorkspaceChanged = { parser = editor.prepareWorkspaceParser(); rooms = parser.roomCatalog.rooms; room = rooms.first { it.getRoomIdAsInt() == hall } },
+                onPlay = {}, onExit = {},
+                themeState = MakerThemeState(userThemesDir = Files.createTempDirectory("t").toFile(), appearanceFile = null), canvasControls = controls)
+        }
+        waitUntil(15_000) { controls.openTilePropertiesAt != null }
+        fun shot(name: String) { shots?.let { ImageIO.write(onAllNodes(androidx.compose.ui.test.isRoot()).onFirst().captureToImage().toAwtImage(), "png", File(it, "$name.png")) } }
+
+        onNode(androidx.compose.ui.test.hasText("Doors") and androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab)).performClick(); waitForIdle()
+        onNodeWithText("Door: Blue (Right)").performClick(); waitForIdle()
+        // Paint it on the right wall as the canvas does for a click.
+        runOnIdle { editor.beginStroke(); editor.paintAt(editor.workingBlocksWide - 1, 9); editor.endStroke("Maker door") }
+        waitForIdle()
+        onNodeWithText("Where does this door go?").assertExists()
+        shot("connect-door-panel")
+        onNodeWithText("Far room").performClick(); waitForIdle()
+        val hallRoom = editor.project.newRoomForPreviewId(hall)!!; val farRoom = editor.project.newRoomForPreviewId(far)!!
+        assertEquals(editor.project.newRoomDestination(farRoom.id), hallRoom.doors.single().destination)
+        assertEquals(editor.project.newRoomDestination(hallRoom.id), farRoom.doors.single().destination)
+        onNodeWithText("Where does this door go?").assertDoesNotExist()
     }
 }
