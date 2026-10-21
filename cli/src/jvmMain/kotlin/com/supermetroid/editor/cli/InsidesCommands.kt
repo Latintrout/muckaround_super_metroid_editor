@@ -36,6 +36,8 @@ data class InsideTry(
     val height: Int,
     val words: List<Int>,
     val bts: List<Int>,
+    /** Cells copied from the original room (door frames), row-major. */
+    val preserved: List<Boolean> = emptyList(),
 )
 
 @Serializable
@@ -96,7 +98,7 @@ internal fun cmdGenInsides(parser: RomParser, args: List<String>) {
                 destructibleDensity = 0.0,
             )
             val level = BiomeGenerator(rules, profile, seed, options).generate(w, h, words, bts)
-            tries.add(InsideTry(roomId, style.name, seed, w, h, level.words.toList(), level.bts.toList()))
+            tries.add(InsideTry(roomId, style.name, seed, w, h, level.words.toList(), level.bts.toList(), level.preserved.toList()))
         }
     }
     val out = InsideTries(roomId, room.tileset, w, h, tries)
