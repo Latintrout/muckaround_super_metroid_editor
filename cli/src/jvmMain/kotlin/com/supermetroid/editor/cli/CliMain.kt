@@ -56,13 +56,14 @@ fun main(args: Array<String>) {
     val json = if (compact) jsonCompact else jsonPretty
     try {
         when (command) {
-            "rooms", "room", "graph", "export", "training-data", "render-rooms", "rooms-metadata", "gen-insides", "render-insides" -> {
+            "rooms", "room", "graph", "export", "training-data", "render-rooms", "rooms-metadata", "gen-insides", "render-insides", "gen-room" -> {
                 val requiredRomPath = romPath ?: error("ROM path was already validated")
                 val parser = RomParser.loadRom(requiredRomPath)
                 when (command) {
                     "render-rooms" -> cmdRenderRooms(parser, commandArgs)
                     "gen-insides" -> cmdGenInsides(parser, commandArgs)
                     "render-insides" -> cmdRenderInsides(parser, commandArgs)
+                    "gen-room" -> cmdGenRoom(parser, commandArgs)
                     "rooms-metadata" -> cmdRoomsMetadata(parser, json)
                     "training-data" -> cmdTrainingData(parser, json, commandArgs)
                     else -> {
@@ -77,6 +78,7 @@ fun main(args: Array<String>) {
                 }
             }
             "build" -> cmdBuild(json, romPath, commandArgs)
+            "add-room" -> cmdAddRoom(romPath ?: error("ROM path was already validated"), commandArgs)
             "patches" -> cmdPatches(json)
             "schemas" -> cmdSchemas(json)
             "schema" -> cmdSchema(json, commandArgs)
