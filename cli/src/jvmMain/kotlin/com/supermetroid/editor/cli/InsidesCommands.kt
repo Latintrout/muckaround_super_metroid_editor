@@ -26,6 +26,10 @@ import javax.imageio.ImageIO
  * render-insides --in tries.json -o DIR
  *   Render the original room and the chosen tries (PNG, no enemies on the
  *   new insides).
+ *
+ * render-level --in levels.json -o DIR
+ *   Render layer 1 of rooms of any size (brand-new rooms) with the tileset of
+ *   a vanilla template room: one PNG per entry, named after it.
  */
 @Serializable
 data class InsideTry(
@@ -145,4 +149,53 @@ internal fun cmdRenderInsides(parser: RomParser, args: List<String>) {
         save(renderer.renderRoomFromLevelData(room, copy, enemyOverrides = emptyList()), "$id-${t.style.lowercase()}-${t.seed}.png")
     }
     System.err.println("render-insides: ${tries.size} rooms -> ${dir.absolutePath}")
+}
+
+@Serializable
+data class LevelToRender(
+    val name: String,
+    /** Vanilla room whose header (tileset, area) is used for drawing. */
+    val templateRoomId: Int,
+    /** Size in screens. */
+    val width: Int,
+    val height: Int,
+    val words: List<Int>,
+    val bts: List<Int>,
+)
+
+internal fun cmdRenderLevel(parser: RomParser, args: List<String>) {
+    var inPath: String? = null
+    var outDir: String? = null
+    val iter = args.iterator()
+    while (iter.hasNext()) {
+        val arg = iter.next()
+        when {
+            arg == "--in" && iter.hasNext() -> inPath = iter.next()
+            (arg == "-o" || arg == "--output") && iter.hasNext() -> outDir = iter.next()
+            else -> throw IllegalArgumentException("Unknown render-level option: $arg")
+        }
+    }
+    if (inPath == null || outDir == null) throw IllegalArgumentException("Usage: render-level --in FILE -o DIR")
+    val dir = File(outDir)
+    dir.mkdirs()
+    val levels = insidesJson.decodeFromString<List<LevelToRender>>(File(inPath).readText())
+    val renderer = MapRenderer(parser)
+    for (lv in levels) {
+        val template = parser.readRoomHeader(lv.templateRoomId) ?: throw IllegalArgumentException("Room not found: ${lv.templateRoomId}")
+        val room = template.copy(width = lv.width, height = lv.height)
+        val n = lv.words.size
+        val data = ByteArray(2 + 3 * n)
+        data[0] = ((2 * n) and 0xFF).toByte()
+        data[1] = (((2 * n) shr 8) and 0xFF).toByte()
+        for (i in 0 until n) {
+            data[2 + 2 * i] = (lv.words[i] and 0xFF).toByte()
+            data[3 + 2 * i] = ((lv.words[i] shr 8) and 0xFF).toByte()
+            data[2 + 2 * n + i] = (lv.bts[i] and 0xFF).toByte()
+        }
+        val pixels = renderer.renderRoomFromLevelData(room, data, plmOverrides = emptyList(), enemyOverrides = emptyList()) ?: continue
+        val img = BufferedImage(pixels.width, pixels.height, BufferedImage.TYPE_INT_ARGB)
+        img.setRGB(0, 0, pixels.width, pixels.height, pixels.pixels, 0, pixels.width)
+        ImageIO.write(img, "PNG", File(dir, "${lv.name}.png"))
+    }
+    System.err.println("render-level: ${levels.size} rooms -> ${dir.absolutePath}")
 }
